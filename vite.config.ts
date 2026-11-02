@@ -16,7 +16,7 @@ function devApiPlugin(): Plugin {
             JSON.stringify({
               status: 'ok',
               service: 'an-erp-platform',
-              phase: 'P01',
+              phase: 'P02a',
               time: new Date().toISOString(),
             })
           );
@@ -28,7 +28,21 @@ function devApiPlugin(): Plugin {
           res.end(
             JSON.stringify({
               ready: true,
-              database: 'not_configured_p01',
+              database: process.env.DATABASE_URL ? 'configured' : 'not_configured',
+              engine: process.env.DATABASE_URL ? 'postgresql' : null,
+              phase: 'P02a',
+            })
+          );
+          return;
+        }
+        if (req.url === '/api/db/status') {
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify({
+              configured: Boolean(process.env.DATABASE_URL),
+              engine: process.env.DATABASE_URL ? 'postgresql' : null,
+              phase: 'P02a',
             })
           );
           return;
