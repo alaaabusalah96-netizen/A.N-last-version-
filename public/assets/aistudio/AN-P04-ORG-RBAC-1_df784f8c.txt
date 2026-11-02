@@ -1,0 +1,136 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: P04-ORG-RBAC-1
+Depends: P00 + P01 + P02a + P03 DONE
+Executor: Google AI Studio
+CONSTRAINT: ملفات صغيرة — مسؤولية واحدة لكل ملف؛ لا تضخم server.ts
+══════════════════════════════════════════════════════════════════
+
+## الهدف
+- شركات (Company) في مخزن ذاكرة V1 مع واجهة جاهزة لاحقًا لـ DB
+- عضوية مستخدم↔شركة
+- أدوار أساسية + صلاحيات دقيقة (Permission codes)
+- middleware: requirePermission
+- مسارات API محمية
+- واجهة بسيطة: قائمة شركات + إنشاء شركة (للـ platform_admin)
+
+## خارج النطاق
+- مجموعات شركات كاملة معقدة | فروع متعددة المستويات العميقة
+- Firebase | محاسبة | مخازن
+- لا P05 تلقائيًا
+
+## هيكل ملفات إلزامي
+```
+src/server/org/companyTypes.ts
+src/server/org/companyStore.ts
+src/server/org/membershipStore.ts
+src/server/rbac/permissions.ts          # قائمة أكواد الصلاحيات فقط
+src/server/rbac/roles.ts                # دور → صلاحيات
+src/server/rbac/rbacService.ts          # can(user, permission, companyId?)
+src/server/rbac/requirePermission.ts    # middleware factory
+src/server/routes/companyRoutes.ts
+src/server/routes/index.ts              # أضف company routes
+src/components/CompaniesPanel.tsx       # قائمة + إنشاء
+scripts/verifyP04OrgRbac.ts
+docs/foundation/P04_RESULTS.md
+```
+
+──────────────────────────────────────────────────────────────────
+الخطوة 0 — PRECHECK
+──────────────────────────────────────────────────────────────────
+```bash
+test -f docs/foundation/P03_RESULTS.md
+test -d src/server/auth
+test -f src/server/routes/authRoutes.ts
+! grep -qi firebase package.json
+```
+
+──────────────────────────────────────────────────────────────────
+الخطوة 1 — الصلاحيات والأدوار (ملفات صغيرة)
+──────────────────────────────────────────────────────────────────
+
+### permissions.ts
+صدّر ثابتًا مثل:
+- company:read, company:write
+- user:read, user:write
+- audit:read
+(لاحقا تُوسَّع في موديولات أخرى دون تعديل هذا الملف عشوائيًا — أضف تعليقاً)
+
+### roles.ts
+- platform_admin: كل صلاحيات المنصة المعرّفة
+- company_admin: company:read/write ضمن شركته + user:read/write
+- company_user: company:read فقط ضمن شركته
+
+### rbacService.ts
+- hasPermission(user, permission, companyId?: string): boolean
+- platform_admin يتجاوز حدود الشركة بحذر (مذكور في التعليق)
+- غير المنصة: يجب أن تكون membership فعالة لنفس companyId عند فحص صلاحية مرتبطة بشركة
+
+### requirePermission.ts
+- requirePermission('company:write') → middleware يرفض 403
+
+──────────────────────────────────────────────────────────────────
+الخطوة 2 — الشركات والعضوية
+──────────────────────────────────────────────────────────────────
+
+### companyTypes.ts
+interface Company { id, code, nameAr, nameEn?, isActive, createdAt, createdBy }
+
+### companyStore.ts
+create, getById, list, findByCode
+
+### membershipStore.ts
+- addMember(userId, companyId, roleInCompany)
+- listByUser, listByCompany, hasMembership
+
+عند إنشاء شركة بواسطة platform_admin: اختياريًا عضوية تلقائية للمنشئ كـ company_admin
+
+──────────────────────────────────────────────────────────────────
+الخطوة 3 — المسارات
+──────────────────────────────────────────────────────────────────
+
+### companyRoutes.ts
+- GET /api/companies — requireAuth + company:read (platform يرى الكل؛ غيره شركاته)
+- POST /api/companies — requireAuth + (platform_admin أو company:write على مستوى منصة حسب تصميمك — V1: platform_admin فقط)
+  body: { code, nameAr, nameEn? }
+- GET /api/companies/:id — requireAuth + عضوية أو platform
+
+اربط في routes/index.ts و server لا يتضخم.
+
+──────────────────────────────────────────────────────────────────
+الخطوة 4 — واجهة
+──────────────────────────────────────────────────────────────────
+- CompaniesPanel: يظهر بعد تسجيل الدخول
+- يعرض القائمة من GET /api/companies
+- نموذج إنشاء (code + nameAr) لـ platform_admin
+- credentials: 'include'
+
+──────────────────────────────────────────────────────────────────
+الخطوة 5 — verify + docs + git
+──────────────────────────────────────────────────────────────────
+verifyP04OrgRbac.ts: وجود الملفات، permissions، company routes، لا firebase، لا login logic في server.ts
+حدّث AI_PROJECT_STATE: P04 DONE، Next=P05 بعد بشري
+P04_RESULTS.md
+
+npm install (إن لزم)
+npx tsx scripts/verifyP04OrgRbac.ts
+npx tsc --noEmit
+# مرة واحدة إن طال
+
+git commit -m "feat(p04): companies, memberships, RBAC permissions, small modules"
+git push || true
+
+STOP — لا P05 تلقائيًا.
+
+===== RESULTS REPORT =====
+PHASE: P04-ORG-RBAC-1
+PRECHECK: OK|FAIL
+FILES_SMALL_LAYOUT: OK|FAIL
+COMPANY_ROUTES: OK|MISSING
+RBAC_MIDDLEWARE: OK|MISSING
+FIREBASE: NO
+VERIFY: Passed: <n> | Failed: <n>
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A
+P05_STARTED: NO
+NOTES: <سطر واحد>
+===========================

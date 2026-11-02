@@ -3,8 +3,27 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, Plugin } from 'vite';
 
-// In-memory dev sessions for Vite dev server middleware
+// In-memory dev sessions and companies for Vite dev server middleware
 const devSessions = new Map<string, { username: string; role: string }>();
+const devCompanies: Array<{
+  id: string;
+  code: string;
+  nameAr: string;
+  nameEn?: string;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+}> = [
+  {
+    id: 'comp-main-001',
+    code: 'HQ01',
+    nameAr: 'شركة المنصة المركزية',
+    nameEn: 'Central Platform Co',
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    createdBy: 'admin',
+  },
+];
 
 function devApiPlugin(): Plugin {
   return {
@@ -19,7 +38,7 @@ function devApiPlugin(): Plugin {
             JSON.stringify({
               status: 'ok',
               service: 'an-erp-platform',
-              phase: 'P03',
+              phase: 'P04',
               time: new Date().toISOString(),
             })
           );
@@ -35,7 +54,7 @@ function devApiPlugin(): Plugin {
               ready: true,
               database: process.env.DATABASE_URL ? 'configured' : 'not_configured',
               engine: process.env.DATABASE_URL ? 'postgresql' : null,
-              phase: 'P03',
+              phase: 'P04',
             })
           );
           return;
@@ -123,6 +142,80 @@ function devApiPlugin(): Plugin {
               user: { id: 'dev-admin-id', username: session.username, role: session.role },
             })
           );
+          return;
+        }
+
+        // Companies GET in Vite dev server
+        if (req.url === '/api/companies' && req.method === 'GET') {
+          const cookieHeader = req.headers.cookie || '';
+          const match = cookieHeader.match(/an_session=([^;]+)/);
+          if (!match || !devSessions.has(match[1])) {
+            res.setHeader('Content-Type', 'application/json');
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = 200;
+          res.end(JSON.stringify({ status: 'ok', companies: devCompanies }));
+          return;
+        }
+
+        // Companies POST in Vite dev server
+        if (req.url === '/api/companies' && req.method === 'POST') {
+          const cookieHeader = req.headers.cookie || '';
+          const match = cookieHeader.match(/an_session=([^;]+)/);
+          const session = match ? devSessions.get(match[1]) : null;
+
+          if (!session) {
+            res.setHeader('Content-Type', 'application/json');
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+          }
+
+          if (session.role !== 'platform_admin') {
+            res.setHeader('Content-Type', 'application/json');
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: 'Forbidden', message: 'Missing required permission' }));
+            return;
+          }
+
+          let body = '';
+          req.on('data', (chunk) => {
+            body += chunk;
+          });
+          req.on('end', () => {
+            try {
+              const { code, nameAr, nameEn } = JSON.parse(body || '{}');
+              if (!code || !nameAr) {
+                res.setHeader('Content-Type', 'application/json');
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Bad Request', message: 'code and nameAr are required' }));
+                return;
+              }
+
+              const newComp = {
+                id: 'comp-' + Date.now(),
+                code: String(code).toUpperCase(),
+                nameAr: String(nameAr),
+                nameEn: nameEn ? String(nameEn) : undefined,
+                isActive: true,
+                createdAt: new Date().toISOString(),
+                createdBy: session.username,
+              };
+
+              devCompanies.push(newComp);
+              res.setHeader('Content-Type', 'application/json');
+              res.statusCode = 201;
+              res.end(JSON.stringify({ status: 'ok', company: newComp }));
+            } catch {
+              res.setHeader('Content-Type', 'application/json');
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'Invalid JSON' }));
+            }
+          });
           return;
         }
 
