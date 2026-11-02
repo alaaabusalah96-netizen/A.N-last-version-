@@ -1,0 +1,172 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: P01-PLATFORM-SCAFFOLD-1
+Depends: P00 DONE (docs/foundation/* موجودة)
+Executor: Google AI Studio
+Repo: المشروع الحالي المربوط بـ GitHub
+══════════════════════════════════════════════════════════════════
+
+## الهدف
+تأسيس سقالة منتج مستقلة: اسم حزمة صحيح، خادم Express بسيط، واجهة React+Vite،
+/health، إعدادات بيئة بلا أسرار، .gitignore، وتحديث حالة المشروع.
+لا هوية كاملة (P03) — لا طبقة DB كاملة (P02a) — لا Firebase إطلاقًا.
+
+## قواعد صارمة
+1) ممنوع أي ذكر أو اعتماد لـ firebase / firestore / @firebase
+2) ممنوع نسخ شجرة مشروع قديم كاملًا
+3) ممنوع migrations أو اتصال PostgreSQL حقيقي في هذه الحزمة
+4) ممنوع بدء P02 أو P03 تلقائيًا
+5) إن وُجد package.json باسم react-example: صحّحه لاسم المنتج الجديد
+6) آخر شيء في الرد: كتلة RESULTS فقط
+
+## اسم المنتج التقني (استخدمه)
+- package.json name: "an-erp-platform"
+- عنوان الواجهة: "A.N ERP Platform"
+
+──────────────────────────────────────────────────────────────────
+الخطوة 0 — PRECHECK
+──────────────────────────────────────────────────────────────────
+```bash
+test -f docs/foundation/PRODUCT_CONSTITUTION.md
+test -f docs/foundation/P00_RESULTS.md
+test -f docs/foundation/AI_PROJECT_STATE.md
+# إن فشل أي test: توقف NOTES=P00_MISSING
+```
+
+──────────────────────────────────────────────────────────────────
+الخطوة 1 — ملفات الجذر الأساسية
+──────────────────────────────────────────────────────────────────
+
+### package.json
+- name: "an-erp-platform"
+- private: true, type: module
+- scripts:
+  - "dev": "vite --port=3000 --host=0.0.0.0"
+  - "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist/server.cjs --packages=external"
+  - "start": "node dist/server.cjs"
+  - "server": "tsx server.ts"
+  - "lint": "tsc --noEmit"
+  - "typecheck": "tsc --noEmit"
+- dependencies مناسبة فقط: react, react-dom, express, dotenv, cors, helmet (إن لزم)
+- devDependencies: vite, typescript, tsx, esbuild, @types/*, tailwind إن كان موجودًا
+- احذف @google/genai إن لم تُستخدم فعليًا في السقالة
+- تأكد: لا firebase في dependencies
+
+### tsconfig.json
+strict مناسب لـ React + Node (يمكنك الإبقاء على الموجود إن صالح)
+
+### vite.config.ts
+react plugin؛ لا proxy لـ firebase
+
+### index.html
+title: A.N ERP Platform
+
+### .env.example
+```
+NODE_ENV=development
+PORT=3000
+# لا تضع أسرارًا حقيقية
+# DATABASE_URL يُضاف لاحقًا في P02a — لا تفعّل اتصالًا الآن
+```
+
+### .gitignore
+node_modules, dist, .env, .env.local, *.log, .DS_Store
+
+──────────────────────────────────────────────────────────────────
+الخطوة 2 — الخادم server.ts (جديد أو استبدال كامل لمحتوى بسيط)
+──────────────────────────────────────────────────────────────────
+متطلبات إلزامية:
+- Express
+- dotenv/config
+- JSON middleware
+- GET /api/health → 200 JSON:
+  { "status": "ok", "service": "an-erp-platform", "phase": "P01", "time": ISO }
+- GET /api/ready → 200 JSON:
+  { "ready": true, "database": "not_configured_p01" }
+- في development: إن وُجد dist/ أو استخدم Vite middleware فقط إن كان النمط الحالي يعتمد عليه؛
+  وإلا اكتفِ بـ API + ملاحظة أن الواجهة عبر vite dev
+- listen على PORT من env أو 3000
+- لا اتصال DB
+- لا مسارات auth بعد
+
+──────────────────────────────────────────────────────────────────
+الخطوة 3 — واجهة أولية src/
+──────────────────────────────────────────────────────────────────
+- src/main.tsx + src/App.tsx + src/index.css (Tailwind إن كان مضبوطًا)
+- App بسيطة تعرض:
+  - عنوان المنتج
+  - شارة "P01 Scaffold"
+  - نص: النظام قيد التأسيس — لا Firebase
+  - زر أو fetch يعرض نتيجة /api/health (اختياري)
+- لا شاشات دخول كاملة (P03)
+- لا استيراد firebase
+
+──────────────────────────────────────────────────────────────────
+الخطوة 4 — توثيق الحالة
+──────────────────────────────────────────────────────────────────
+حدّث docs/foundation/AI_PROJECT_STATE.md:
+- P00: DONE
+- P01: DONE (بعد النجاح)
+- Next: انتظار بشري قبل P02a
+- Firebase: FORBIDDEN
+
+أنشئ docs/foundation/P01_RESULTS.md:
+- قائمة ما نُفّذ
+- تأكيد لا Firebase
+- تأكيد لا DB connection
+
+أنشئ scripts/verifyP01Scaffold.ts (أو .mjs) يفحص:
+- وجود server.ts
+- وجود "an-erp-platform" في package.json
+- عدم وجود firebase في package.json
+- وجود /api/health في server.ts
+- وجود docs/foundation/P01_RESULTS.md
+يطبع: Passed: N | Failed: 0
+
+──────────────────────────────────────────────────────────────────
+الخطوة 5 — BUILD خفيف
+──────────────────────────────────────────────────────────────────
+```bash
+npm install
+npx tsc --noEmit || true
+# لا تفشل الحزمة على تحذيرات طفيفة إن كان health والملفات موجودة؛
+# لكن حاول إصلاح أخطاء tsc الواضحة في ملفات P01 فقط
+npm run build || npm run lint || true
+```
+إذا بقيت على tsc أكثر من دقيقتين: لا تعد الحلقة — نفّذ مرة واحدة ثم أكمل RESULTS.
+
+──────────────────────────────────────────────────────────────────
+الخطوة 6 — Verify
+──────────────────────────────────────────────────────────────────
+```bash
+npx tsx scripts/verifyP01Scaffold.ts
+# أو node إن .mjs
+```
+
+──────────────────────────────────────────────────────────────────
+الخطوة 7 — Git
+──────────────────────────────────────────────────────────────────
+```bash
+git add -A
+git status --short | head -50
+git commit -m "feat(p01): platform scaffold — express health, vite app, no firebase" || true
+git push 2>/dev/null || echo PUSH_SKIPPED
+```
+
+──────────────────────────────────────────────────────────────────
+STOP — لا تبدأ P02a
+──────────────────────────────────────────────────────────────────
+
+===== RESULTS REPORT =====
+PHASE: P01-PLATFORM-SCAFFOLD-1
+PRECHECK_P00: OK|FAIL
+PACKAGE_NAME: an-erp-platform|OTHER
+FIREBASE_DEP: NO|YES
+HEALTH_ROUTE: OK|MISSING
+VERIFY: Passed: <n> | Failed: <n>
+BUILD: OK|FAIL|SKIP
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A
+P02_STARTED: NO
+NOTES: <سطر واحد>
+===========================
+(آخر شيء في الرد — لا نص خارج الكتلة)
