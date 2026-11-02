@@ -1,0 +1,9 @@
+P03-AUTH-CORE-1 Verification Log
+Phase: P03-AUTH-CORE-1
+Password Hashing: Argon2id (argon2)
+Session Store: Memory SessionStore with HttpOnly Cookie (an_session)
+Auth Routes: /login, /logout, /me
+Server.ts: Slim router mount (no bloat)
+UI: LoginForm + Authenticated Dashboard View
+Firebase: FORBIDDEN_CONFIRMED
+P04_STARTED: NO

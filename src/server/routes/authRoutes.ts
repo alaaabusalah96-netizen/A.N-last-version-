@@ -1,0 +1,71 @@
+import { Router, Request, Response } from 'express';
+import { defaultAuthService } from '../auth/authService.js';
+import { AuthenticatedRequest, getSessionCookieName, requireAuth } from '../auth/authMiddleware.js';
+
+export const authRoutes = Router();
+
+// POST /api/auth/login
+authRoutes.post('/login', async (req: Request, res: Response) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'Username and password are required',
+      });
+    }
+
+    const { session, user } = await defaultAuthService.login(username, password);
+    const cookieName = getSessionCookieName();
+
+    res.cookie(cookieName, session.id, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      expires: session.expiresAt,
+    });
+
+    return res.status(200).json({
+      status: 'ok',
+      user,
+      expiresAt: session.expiresAt,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Login failed';
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message,
+    });
+  }
+});
+
+// POST /api/auth/logout
+authRoutes.post('/logout', (req: Request, res: Response) => {
+  const cookieName = getSessionCookieName();
+  const token = req.cookies?.[cookieName];
+
+  if (token) {
+    defaultAuthService.logout(token);
+  }
+
+  res.clearCookie(cookieName, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+
+  return res.status(200).json({
+    status: 'ok',
+    message: 'Logged out successfully',
+  });
+});
+
+// GET /api/auth/me
+authRoutes.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  return res.status(200).json({
+    status: 'ok',
+    user: req.user,
+  });
+});

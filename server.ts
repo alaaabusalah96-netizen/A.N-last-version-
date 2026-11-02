@@ -1,27 +1,39 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
 import { getDefaultExecutor } from './src/server/db/index.js';
+import { authRoutes } from './src/server/routes/authRoutes.js';
+import { defaultAuthService } from './src/server/auth/authService.js';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
 app.use(express.json());
 
-// Mandatory GET /api/health endpoint
+// Initialize platform admin from environment variables (silent if not configured)
+defaultAuthService.bootstrapPlatformAdminFromEnv().catch((err) => {
+  console.error('[auth] Bootstrap error:', err);
+});
+
+// Auth Routes Router (Modular, no business logic in server.ts)
+app.use('/api/auth', authRoutes);
+
+// Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
     service: 'an-erp-platform',
-    phase: 'P02a',
+    phase: 'P03',
     time: new Date().toISOString(),
   });
 });
 
-// Mandatory GET /api/ready endpoint with database status reflection
+// Database & readiness reflection endpoint
 app.get('/api/ready', async (_req: Request, res: Response) => {
   try {
     const executor = await getDefaultExecutor();
@@ -30,68 +42,26 @@ app.get('/api/ready', async (_req: Request, res: Response) => {
         ready: true,
         database: 'not_configured',
         engine: null,
-        phase: 'P02a',
+        phase: 'P03',
       });
     }
 
     const healthCheck = await executor.health();
-    if (healthCheck.ok) {
-      return res.status(200).json({
-        ready: true,
-        database: 'ok',
-        engine: 'postgresql',
-        phase: 'P02a',
-      });
-    } else {
-      return res.status(200).json({
-        ready: true,
-        database: 'error',
-        engine: 'postgresql',
-        phase: 'P02a',
-        detail: healthCheck.detail,
-      });
-    }
+    return res.status(200).json({
+      ready: true,
+      database: healthCheck.ok ? 'ok' : 'error',
+      engine: 'postgresql',
+      phase: 'P03',
+      detail: healthCheck.detail,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return res.status(200).json({
       ready: true,
       database: 'error',
       engine: 'postgresql',
-      phase: 'P02a',
+      phase: 'P03',
       detail: message,
-    });
-  }
-});
-
-// Optional GET /api/db/status endpoint (safe metadata without secrets)
-app.get('/api/db/status', async (_req: Request, res: Response) => {
-  try {
-    const executor = await getDefaultExecutor();
-    if (!executor) {
-      return res.status(200).json({
-        configured: false,
-        engine: null,
-        phase: 'P02a',
-        message: 'No DATABASE_URL configured. Running in non-persistent / scaffold mode.',
-      });
-    }
-
-    const healthCheck = await executor.health();
-    return res.status(200).json({
-      configured: true,
-      engine: 'postgresql',
-      healthy: healthCheck.ok,
-      phase: 'P02a',
-      detail: healthCheck.detail,
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return res.status(200).json({
-      configured: true,
-      engine: 'postgresql',
-      healthy: false,
-      phase: 'P02a',
-      error: message,
     });
   }
 });
