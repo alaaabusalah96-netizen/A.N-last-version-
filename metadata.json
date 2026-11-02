@@ -1,0 +1,6 @@
+{
+  "name": "ERP Platform Foundation",
+  "description": "Modular enterprise resource planning platform architecture, foundation documents, and core constitution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

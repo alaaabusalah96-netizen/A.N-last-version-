@@ -1,0 +1,146 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: P00-CONSTITUTION-1
+TYPE: DOCUMENTATION ONLY — لا كود تطبيقي، لا server، لا migrations، لا DB
+Executor: Google AI Studio
+══════════════════════════════════════════════════════════════════
+
+## الهدف
+تثبيت دستور المنتج والقرارات المعمارية ونطاق MVP v1 ومعايير الحزم،
+وإنتاج ملفات توثيق فقط تحت docs/foundation/، ثم التوقف التام.
+ممنوع بدء P01 أو إنشاء تطبيق تشغيلي.
+
+## قرارات معتمدة (إلزامية — لا تخالفها)
+| الموضوع | القرار |
+|--------|--------|
+| المحرك المرجعي V1 | PostgreSQL |
+| محركات أخرى | Adapters لاحقًا؛ كل محرك يُختبر منفردًا قبل إعلان الدعم |
+| قاعدة محلية للشركة | مدعومة كنمط On-Premises (اتصال قاعدة الشركة) |
+| تشغيل كامل دون إنترنت | مسار نشر مستقل — غير موعود في V1 |
+| نقل شركة بين قواعد | ترحيل مضبوط (تحقق + تدقيق + رجوع) وليس زر إعداد |
+| من يختار محرك DB؟ | مسؤول المنصة/النشر فقط |
+| البنية | Modular Monolith |
+| Firebase / Firestore / Firebase Auth | ممنوع نهائيًا (لا مؤقت ولا fallback) |
+| المشاريع السابقة | مراجع فنية فقط — لا تشغيل عليها ولا نسخ شجرتها |
+| فصل المفهومين | دعم محرك DB ≠ تشغيل النظام بالكامل offline |
+
+## MVP v1 (توثيق فقط)
+داخل النطاق: Platform Core | Finance أساسي | Cash/عهد | Inventory | Purchasing | Sales | Reporting أساسي
+خارج V1: HR، أسطول، مطاعم، صيانة، مشروعات، AI متقدم
+
+## تقسيم طبقة البيانات (للتوثيق — التنفيذ لاحقًا)
+P02a: Interfaces + PostgreSQL + Registry + Resolver + عزل
+P02b: محرك ثانٍ + اختبارات توافق
+P02c: Backup/Restore + ترحيل بين قواعد/محركات
+P02d: إثبات حدود المحلي/الهجين حسب V1
+
+## قواعد صارمة
+1) أنشئ ملفات Markdown المطلوبة فقط.
+2) ممنوع: تطبيق تشغيلي، server.ts، src/ منتج، npm لتشغيل ERP، اتصال DB، migrations.
+3) ممنوع بدء P01 أو كتابة أمر بتنفيذ P01.
+4) أي تعارض: سجّله في P00_RESULTS.md وتوقف.
+5) آخر شيء في الرد: كتلة RESULTS فقط.
+
+──────────────────────────────────────────────────────────────────
+الخطوة 1 — مجلدات
+──────────────────────────────────────────────────────────────────
+mkdir -p docs/foundation evidence/p00
+
+──────────────────────────────────────────────────────────────────
+الخطوة 2 — اكتب الملفات التالية (عربي، عناوين واضحة، محتوى كامل غير فارغ)
+──────────────────────────────────────────────────────────────────
+
+1) docs/foundation/PRODUCT_CONSTITUTION.md
+- منتج جديد مستقل؛ المراجع القديمة للاستلهام فقط
+- مبادئ: أمان، عزل شركات، DB مصدر الحقيقة، لا Firebase
+- الوثيقة أعلى مرجع؛ التعارض يوقف التنفيذ
+
+2) docs/foundation/ARCHITECTURE_OVERVIEW.md
+- Modular Monolith؛ طبقات Presentation/Application/Domain/Infrastructure
+- React+TS | Node+TS | REST+OpenAPI
+- لا Microservices في V1
+
+3) docs/foundation/ARCHITECTURE_DECISIONS.md
+ADR-001 منتج جديد لا دمج تشغيلي
+ADR-002 لا Firebase نهائيًا
+ADR-003 PostgreSQL مرجعي + Database Provider
+ADR-004 أنماط الربط: مركزي / لكل شركة / on-prem قاعدة / هجين
+ADR-005 Offline كامل خارج وعد V1
+ADR-006 RBAC + تحقق Backend
+ADR-007 Modular Monolith
+
+4) docs/foundation/DATABASE_STRATEGY.md
+- Engine-agnostic عبر Adapters
+- Connection Registry + Tenant-to-Database Resolver
+- الأنماط الأربعة؛ من يختار المحرك؛ ترحيل مضبوط
+- فصل: دعم محرك ≠ offline كامل
+
+5) docs/foundation/DATABASE_COMPATIBILITY_MATRIX.md
+جدول: PostgreSQL (مستهدف V1) | MySQL | SQL Server | Oracle | SQLite
+أعمدة: معاملات، JSON، قفل، RLS/بديل، ترحيل، backup
+لا إعلان دعم قبل اختبارات لاحقة
+
+6) docs/foundation/MVP_SCOPE.md
+داخل/خارج MVP v1 كما فوق
+
+7) docs/foundation/MODULE_BOUNDARIES.md
+حدود: Platform, Finance, Cash, Inventory, Purchasing, Sales, Reporting
+لكل وحدة: مسؤولية، بيانات، ما لا تلمسه
+
+8) docs/foundation/SECURITY_BASELINE.md
+هوية مستقلة، Argon2id أو ما يعادله، جلسات، rate limit، لا حسابات افتراضية، أسرار خارج الكود، عزل tenant، audit
+
+9) docs/foundation/TESTING_STRATEGY.md
+Unit/Integration/API/Security/E2E؛ لا يكفي build/tsc؛ evidence/
+
+10) docs/foundation/LEAN_PACKAGE_STANDARD.md
+نطاق الحزمة، بوابات، verify، RESULTS كتلة واحدة، لا انتقال لمرحلة تالية دون اعتماد بشري
+
+11) docs/foundation/AI_PROJECT_STATE.md
+P00 DONE بعد الإكمال؛ Next = انتظار اعتماد بشري قبل P01؛ Firebase ممنوع
+
+12) docs/foundation/P00_RESULTS.md
+قائمة الملفات؛ DOCUMENTATION_ONLY؛ P01_STARTED: NO
+
+──────────────────────────────────────────────────────────────────
+الخطوة 3 — تحقق
+──────────────────────────────────────────────────────────────────
+test -f docs/foundation/PRODUCT_CONSTITUTION.md
+test -f docs/foundation/ARCHITECTURE_OVERVIEW.md
+test -f docs/foundation/ARCHITECTURE_DECISIONS.md
+test -f docs/foundation/DATABASE_STRATEGY.md
+test -f docs/foundation/DATABASE_COMPATIBILITY_MATRIX.md
+test -f docs/foundation/MVP_SCOPE.md
+test -f docs/foundation/MODULE_BOUNDARIES.md
+test -f docs/foundation/SECURITY_BASELINE.md
+test -f docs/foundation/TESTING_STRATEGY.md
+test -f docs/foundation/LEAN_PACKAGE_STANDARD.md
+test -f docs/foundation/AI_PROJECT_STATE.md
+test -f docs/foundation/P00_RESULTS.md
+find docs/foundation -type f | wc -l
+# يجب أن يكون العدد >= 12
+
+──────────────────────────────────────────────────────────────────
+الخطوة 4 — Git إن وُجد
+──────────────────────────────────────────────────────────────────
+git add docs/foundation evidence/p00 2>/dev/null || true
+git commit -m "docs(p00): constitution, architecture, MVP, DB strategy" || true
+git push 2>/dev/null || echo PUSH_SKIPPED
+
+──────────────────────────────────────────────────────────────────
+STOP — بعد GATE الوثائق: توقف. لا P01.
+──────────────────────────────────────────────────────────────────
+
+===== RESULTS REPORT =====
+PHASE: P00-CONSTITUTION-1
+TYPE: DOCUMENTATION_ONLY
+FILES_EXPECTED: 12
+FILES_WRITTEN: <n>
+GATE_DOCS: OK|FAIL
+LIST: <أسماء مفصولة بفاصلة>
+P01_STARTED: NO
+FIREBASE: FORBIDDEN_CONFIRMED
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A
+NOTES: <سطر واحد>
+===========================
+(يجب أن تكون الكتلة أعلاه آخر شيء في الرد ولا نص خارجها)
