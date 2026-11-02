@@ -8,13 +8,14 @@ export * from './types.js';
 export * from './DatabaseEngine.js';
 export * from './ConnectionRegistry.js';
 export * from './TenantDatabaseResolver.js';
+export * from './tenantContext.js';
 export { PostgresqlAdapter } from './adapters/PostgresqlAdapter.js';
 
-let cachedDefaultExecutor: DbExecutor | null = null;
+const executorCache: Map<string, DbExecutor> = new Map();
 
 /**
  * Returns the default DbExecutor using PostgreSQL adapter and ConnectionRegistry.
- * Returns null if DATABASE_URL is not configured (graceful degradation in P02a).
+ * Returns null if DATABASE_URL is not configured (graceful degradation in development).
  */
 export async function getDefaultExecutor(): Promise<DbExecutor | null> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -22,8 +23,8 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
     return null;
   }
 
-  if (cachedDefaultExecutor) {
-    return cachedDefaultExecutor;
+  if (executorCache.has('default')) {
+    return executorCache.get('default')!;
   }
 
   // Register default connection configuration if not already present
@@ -35,10 +36,54 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
   const adapter = new PostgresqlAdapter();
 
   try {
-    cachedDefaultExecutor = await adapter.connect(config);
-    return cachedDefaultExecutor;
-  } catch (err) {
-    console.error('[db] Failed to initialize default PostgreSQL executor:', err);
+    const executor = await adapter.connect(config);
+    executorCache.set('default', executor);
+    return executor;
+  } catch (err: unknown) {
+    console.error('[db] Failed to initialize default PostgreSQL executor');
+    return null;
+  }
+}
+
+/**
+ * Resolves and provides a DbExecutor for a specific company/tenant.
+ * Routes through TenantDatabaseResolver and ConnectionRegistry.
+ */
+export async function getExecutorForCompany(companyId: string): Promise<DbExecutor | null> {
+  if (!companyId) {
+    return getDefaultExecutor();
+  }
+
+  // 1) Resolve tenant reference
+  const ref = defaultResolver.resolve(companyId);
+
+  // 2) Check cache
+  if (executorCache.has(ref.connectionKey)) {
+    return executorCache.get(ref.connectionKey)!;
+  }
+
+  // 3) Resolve config from registry or fallback to central DATABASE_URL
+  let config = defaultRegistry.get(ref.connectionKey);
+  if (!config && ref.connectionKey === 'default') {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (databaseUrl && databaseUrl.trim() !== '') {
+      config = { connectionString: databaseUrl };
+      defaultRegistry.register('default', config);
+    }
+  }
+
+  if (!config) {
+    return null;
+  }
+
+  // 4) Connect via adapter and cache
+  const adapter = new PostgresqlAdapter();
+  try {
+    const executor = await adapter.connect(config);
+    executorCache.set(ref.connectionKey, executor);
+    return executor;
+  } catch (err: unknown) {
+    console.error(`[db] Failed to initialize executor for connection key: '${ref.connectionKey}'`);
     return null;
   }
 }

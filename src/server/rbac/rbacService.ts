@@ -13,8 +13,10 @@ export class RbacService {
    * - A platform_admin possesses all platform permissions across all companies by design.
    *
    * Non-Platform Users:
-   * - Must hold an active company membership for companyId, and their role within that company
-   *   must grant the requested permission.
+   * - If companyId IS provided: user must hold an active membership in that company,
+   *   and their role within that company must grant the permission.
+   * - If companyId is NOT provided (e.g. listing allowed companies): user is granted access
+   *   if ANY of their active company memberships grants the permission.
    */
   async hasPermission(
     user: Omit<User, 'passwordHash'>,
@@ -29,13 +31,22 @@ export class RbacService {
       return allowed.includes(permission);
     }
 
-    // Company-specific permission check
+    // Explicit companyId provided
     if (companyId) {
       const membership = await this.membershipStore.getMembership(user.id, companyId);
       if (!membership) return false;
 
       const rolePerms = ROLE_PERMISSIONS[membership.role as RoleName] || [];
       return rolePerms.includes(permission);
+    }
+
+    // No companyId provided: check if any of the user's active memberships grants the permission
+    const memberships = await this.membershipStore.listByUser(user.id);
+    for (const membership of memberships) {
+      const rolePerms = ROLE_PERMISSIONS[membership.role as RoleName] || [];
+      if (rolePerms.includes(permission)) {
+        return true;
+      }
     }
 
     return false;

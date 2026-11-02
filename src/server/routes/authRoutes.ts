@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { defaultAuthService } from '../auth/authService.js';
 import { AuthenticatedRequest, getSessionCookieName, requireAuth } from '../auth/authMiddleware.js';
+import { loginRateLimiter } from '../http/securityMiddleware.js';
 
 export const authRoutes = Router();
 
-// POST /api/auth/login
-authRoutes.post('/login', async (req: Request, res: Response) => {
+// POST /api/auth/login — protected with loginRateLimiter
+authRoutes.post('/login', loginRateLimiter, async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {

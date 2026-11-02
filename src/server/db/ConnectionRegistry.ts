@@ -17,10 +17,38 @@ export class ConnectionRegistry {
   }
 
   /**
-   * Retrieve the connection configuration for a given key.
+   * Internal only: Retrieve the raw connection configuration for a given key.
+   * DO NOT USE IN PUBLIC API ROUTES OR EXPOSE DIRECTLY.
    */
   get(key: string): Record<string, string> | undefined {
     return this.configs.get(key);
+  }
+
+  /**
+   * Retrieve a sanitized, public-safe metadata representation of the config.
+   * Masks connection strings, passwords, and sensitive tokens.
+   */
+  getPublic(key: string): Record<string, string> | undefined {
+    const raw = this.configs.get(key);
+    if (!raw) return undefined;
+
+    const sanitized: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (/password|secret|token|key/i.test(k)) {
+        sanitized[k] = '********';
+      } else if (k === 'connectionString' || k === 'url') {
+        try {
+          const parsed = new URL(v);
+          parsed.password = '********';
+          sanitized[k] = parsed.toString();
+        } catch {
+          sanitized[k] = 'postgresql://[REDACTED]';
+        }
+      } else {
+        sanitized[k] = v;
+      }
+    }
+    return sanitized;
   }
 
   /**

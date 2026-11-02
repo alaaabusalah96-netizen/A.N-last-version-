@@ -1,0 +1,163 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: FIX-FOUNDATION-HARDENING-1
+Depends: P00–P04 present on repo
+Type: HARDENING (لا P05 وظيفي)
+CONSTRAINT: ملفات صغيرة؛ لا تضخم server.ts
+Executor: Google AI Studio
+══════════════════════════════════════════════════════════════════
+
+## الحكم على المراجعتين (ملخص للتنفيذ)
+المشكلات التالية **صحيحة ويجب إصلاحها**:
+A) Tenant resolver غير مربوط بمسار getExecutor الفعلي
+B) Registry لا يخفي الأسرار عند العرض / إدارة pools متعددة ضعيفة
+C) SSL rejectUnauthorized:false في production
+D) /api/ready يعيد ready:true حتى مع فشل DB
+E) اختبارات وجود ملفات فقط
+F) GET /api/companies: requirePermission(company:read) بدون companyId → hasPermission يرفض غير platform_admin دائمًا (403)
+G) CORS origin:true + credentials
+H) لا rate limit على login / لا helmet / لا trust proxy
+I) المخازن في الذاكرة — يبقى V1 لكن يُوثَّق صراحة كـ NOT_PRODUCTION
+J) حالة P02a/P04 تُسجَّل DONE دون قبول سلوكي — تُصحَّح إلى HARDENED بعد هذه الحزمة
+
+ملاحظة MVP_SCOPE: نطاق V1 المؤجل (HR/أسطول…) **متعمد حسب الدستور المعتمد** — ليس خللًا. أضف جملة توضيح في MVP_SCOPE.md أن الخارطة الكاملة في PRODUCT_CONSTITUTION والمؤجل = ما بعد V1.
+
+## ممنوع
+- Firebase
+- بدء P05 محاسبة/مخازن
+- ادعاء دعم multi-engine كامل
+
+──────────────────────────────────────────────────────────────────
+الخطوة 0 — PRECHECK
+──────────────────────────────────────────────────────────────────
+test -f src/server/db/index.ts
+test -f src/server/rbac/rbacService.ts
+test -f src/server/routes/companyRoutes.ts
+test -f server.ts
+
+──────────────────────────────────────────────────────────────────
+الإصلاح 1 — RBAC + قائمة الشركات (حرج)
+──────────────────────────────────────────────────────────────────
+### src/server/rbac/rbacService.ts
+عدّل hasPermission:
+- platform_admin: كما هو (صلاحيات الدور)
+- إذا لم يُمرَّر companyId:
+  - اسمح إذا كان لدى المستخدم **أي** عضوية نشطة دورها يمنح permission
+    (اجمع memberships عبر listByUser)
+  - وإلا false
+- إذا مُرِّر companyId: عضوية تلك الشركة + صلاحية الدور
+
+### src/server/routes/companyRoutes.ts
+- GET `/`: بعد requireAuth فقط (أو requirePermission بعد إصلاح rbac)
+  المنطق يبقى: platform → list الكل؛ غير ذلك → عضوياته
+- تأكد أن company_user بعد الإصلاح لا يحصل 403 قبل الوصول للمنطق
+
+### scripts/verifyFixRbacCompanies.ts (سلوكي على المخازن الذاكرة)
+- أنشئ مستخدمين وعضويات في الذاكرة عبر الاستدعاءات المباشرة لـ stores (بدون HTTP إن صعب)
+- أو استورد rbacService واثبت:
+  - platform_admin + company:read → true
+  - user بعضوية company_admin + company:read بدون companyId → true
+  - user بلا عضوية → false
+  - user عضوية شركة A + فحص companyId=B → false
+
+──────────────────────────────────────────────────────────────────
+الإصلاح 2 — DB executor + resolver + registry + SSL
+──────────────────────────────────────────────────────────────────
+### src/server/db/ConnectionRegistry.ts
+- أضف getPublic(key) يعيد config بدون password/connectionString الكامل (اخفِ أسرارًا)
+- احتفظ get(key) داخلي للاستخدام من طبقة db فقط — وثّق «لا تستخدم في routes»
+- map من key → { config, executor? } اختياري لتعدد الاتصالات
+
+### src/server/db/index.ts
+- أضف getExecutorForCompany(companyId: string): Promise<DbExecutor | null>
+  1) ref = defaultResolver.resolve(companyId)
+  2) config = registry.get(ref.connectionKey) أو default من DATABASE_URL
+  3) cache executors per connectionKey
+- getDefaultExecutor يبقى للـ central default
+- لا تسجّل connectionString في console
+
+### src/server/db/adapters/PostgresqlAdapter.ts
+SSL:
+```
+ssl: (() => {
+  if (process.env.DATABASE_SSL === 'disable') return undefined;
+  if (process.env.NODE_ENV === 'production' || process.env.DATABASE_SSL === 'require') {
+    return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
+  }
+  return undefined;
+})(),
+```
+الافتراضي في production: rejectUnauthorized **true** (عكس السلوك الخطر السابق)
+
+### src/server/db/tenantContext.ts (ملف جديد صغير)
+- AsyncLocalStorage أو كائن بسيط set/get currentCompanyId لعمليات لاحقة (تجهيز للعزل المركزي)
+
+──────────────────────────────────────────────────────────────────
+الإصلاح 3 — Liveness vs Readiness + أمان HTTP
+──────────────────────────────────────────────────────────────────
+### src/server/http/securityMiddleware.ts (جديد صغير)
+- helmet إن أضيفت الحزمة
+- rate limit بسيط في الذاكرة لمسار login: مثلاً 20 / 15 دقيقة لكل IP
+- TRUST_PROXY: إذا env TRUST_PROXY=1 → app.set('trust proxy', 1)
+
+### src/server/http/corsConfig.ts
+- اقرأ CORS_ORIGINS مفصولة بفواصل؛ إن فارغة في development اسمح localhost
+- في production: قائمة إلزامية وإلا ارفض credentials عبر origins غير معروفة
+
+### server.ts (خفيف)
+- استخدم corsConfig + securityMiddleware
+- GET /api/health = liveness دائمًا 200 إن العملية حية
+- GET /api/ready:
+  - إن REQUIRE_DB=1 أو DATABASE_URL مضبوطة: ready=false و status 503 إذا DB غير ok
+  - إن لا DATABASE_URL: ready=true و database=not_configured (وضع تطوير بدون DB)
+- أبقِ المنطق خارج server قدر الإمكان (استدع دوال من src/server/http/readiness.ts)
+
+──────────────────────────────────────────────────────────────────
+الإصلاح 4 — اختبارات أوامر npm + evidence
+──────────────────────────────────────────────────────────────────
+package.json scripts:
+"test:foundation": "tsx scripts/verifyFixRbacCompanies.ts && tsx scripts/verifyFixDbWiring.ts"
+
+### scripts/verifyFixDbWiring.ts
+- يقرأ المصدر ويتأكد أن getExecutorForCompany موجودة
+- index يستورد TenantDatabaseResolver
+- PostgresqlAdapter لا يحتوي rejectUnauthorized: false كثابت وحيد بدون شرط env
+- (اختبار حي لـ Postgres اختياري: إذا DATABASE_URL اعمل SELECT 1 وإلا SKIP)
+
+اكتب evidence/fix-foundation-hardening/SUMMARY.md
+
+──────────────────────────────────────────────────────────────────
+الإصلاح 5 — توثيق الحالة
+──────────────────────────────────────────────────────────────────
+docs/foundation/FIX_FOUNDATION_HARDENING_RESULTS.md
+حدّث AI_PROJECT_STATE.md:
+- P02a: HARDENED (بعد النجاح) — كان IMPLEMENTATION_GAPS
+- P04: HARDENED gaps closed for companies list RBAC
+- Memory stores: V1_ONLY not for production accounting
+- Next: P05 only after human approval
+- Firebase FORBIDDEN
+
+وضّح في MVP_SCOPE.md فقرة: المؤجل بعد V1 متعمد؛ الدستور هو المرجع للخارطة الكاملة.
+
+──────────────────────────────────────────────────────────────────
+الخطوة الأخيرة
+──────────────────────────────────────────────────────────────────
+npm install (helmet إن استُخدم)
+npm run test:foundation
+npx tsc --noEmit
+git commit -m "fix: foundation hardening — RBAC companies list, DB resolver wiring, SSL, ready/CORS/rate-limit"
+لا تبدأ P05.
+
+===== RESULTS REPORT =====
+PHASE: FIX-FOUNDATION-HARDENING-1
+RBAC_COMPANIES: OK|FAIL
+DB_RESOLVER_WIRED: OK|FAIL
+SSL_DEFAULT_SAFE: OK|FAIL
+READY_SEMANTICS: OK|FAIL
+CORS: OK|FAIL
+LOGIN_RATE_LIMIT: OK|FAIL
+TEST_FOUNDATION: Passed: <n> | Failed: <n>
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A
+P05_STARTED: NO
+NOTES: <سطر واحد>
+===========================

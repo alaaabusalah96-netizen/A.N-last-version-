@@ -32,7 +32,6 @@ class PostgresExecutor implements DbExecutor {
           };
         },
         withTransaction: async <R>(nestedFn: (nestedEx: DbExecutor) => Promise<R>): Promise<R> => {
-          // Flatten nested transactions onto current transaction context
           return nestedFn(txExecutor);
         },
         health: async () => {
@@ -83,9 +82,17 @@ export class PostgresqlAdapter implements DatabaseEngine {
       throw new Error('DATABASE_URL or config.connectionString is required to connect to PostgreSQL');
     }
 
+    const sslConfig = (() => {
+      if (process.env.DATABASE_SSL === 'disable') return undefined;
+      if (process.env.NODE_ENV === 'production' || process.env.DATABASE_SSL === 'require') {
+        return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
+      }
+      return undefined;
+    })();
+
     const pool = new Pool({
       connectionString,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+      ssl: sslConfig,
       max: config.max ? parseInt(config.max, 10) : 10,
     });
 
