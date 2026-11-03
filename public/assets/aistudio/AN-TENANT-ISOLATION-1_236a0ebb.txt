@@ -1,0 +1,161 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: AN-TENANT-ISOLATION-1
+Depends: AN-PERSISTENCE-CORE-1 (migrations + PG repos present)
+Type: FOUNDATION — real tenant isolation
+FORBIDDEN: P05 · Firebase · silent default pool · PASS without DB when REQUIRE_DB=1
+CONSTRAINT: small files · reuse PostgresqlAdapter / Registry / Resolver / tenantContext
+══════════════════════════════════════════════════════════════════
+
+## Goal
+1) withTenantTransaction: BEGIN + set_config('app.current_tenant_id', id, true) + same client + COMMIT/ROLLBACK
+2) RLS on company-owned tables (memberships + demo table for proof)
+3) Fail-closed getExecutorForCompany / no empty companyId → default pool
+4) HTTP paths never trust client companyId without active membership
+5) Integration tests with two companies when DATABASE_URL present; else BLOCKED not PASS
+
+## Classification (document in TENANT_ISOLATION_STATUS.md)
+| Table | Class |
+|-------|--------|
+| platform_users | global |
+| user_sessions | global (user-scoped app checks) |
+| companies | global platform catalog (app-level filter; optional RLS later) |
+| company_memberships | company-owned (company_id) |
+| tenant_demo_items | company-owned (for RLS proof until business modules) |
+
+Do NOT FORCE RLS on platform_users in a way that breaks login.
+
+──────────────────────────────────────────────────────────────────
+STEP 0 — PRECHECK
+──────────────────────────────────────────────────────────────────
+test -f database/migrations/001_platform_users.sql
+test -f src/server/auth/userRepository.ts
+test -d src/server/db
+! grep -qi firebase package.json
+
+──────────────────────────────────────────────────────────────────
+STEP 1 — transaction helper (new small file)
+──────────────────────────────────────────────────────────────────
+src/server/db/transactionManager.ts
+
+export async function withTenantTransaction<T>(
+  executorOrPool: /* use existing access to pg Pool if exposed, or extend adapter */,
+  companyId: string,
+  fn: (clientQuery: { query: (sql: string, params?: unknown[]) => Promise<...> }) => Promise<T>
+): Promise<T>
+
+Rules:
+- if !companyId.trim() → throw TENANT_CONTEXT_REQUIRED
+- checkout one client from pool
+- BEGIN
+- SELECT set_config('app.current_tenant_id', $1, true)
+- run fn with client-bound query only
+- COMMIT / ROLLBACK
+- release in finally
+- never session-level SET without transaction local (third arg true)
+
+If current DbExecutor hides Pool: extend PostgresqlAdapter with
+getPool() for internal use OR add withTenantTransaction on adapter.
+Do not invent a second parallel DB framework.
+
+Wire tenantContext.run(companyId, ...) inside the transaction if useful.
+
+──────────────────────────────────────────────────────────────────
+STEP 2 — migrations RLS
+──────────────────────────────────────────────────────────────────
+database/migrations/006_tenant_demo_and_rls.sql
+
+-- Demo table for isolation proof
+CREATE TABLE IF NOT EXISTS tenant_demo_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_demo_company ON tenant_demo_items(company_id);
+
+ALTER TABLE tenant_demo_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_demo_items FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_demo_isolation ON tenant_demo_items;
+CREATE POLICY tenant_demo_isolation ON tenant_demo_items
+  FOR ALL
+  USING (company_id::text = NULLIF(current_setting('app.current_tenant_id', true), ''))
+  WITH CHECK (company_id::text = NULLIF(current_setting('app.current_tenant_id', true), ''));
+
+-- company_memberships: enable RLS so reads/writes respect tenant when context set
+ALTER TABLE company_memberships ENABLE ROW LEVEL SECURITY;
+-- Prefer FORCE only if app role is not table owner; document role strategy
+CREATE POLICY memberships_tenant_select ON company_memberships
+  FOR SELECT
+  USING (
+    company_id::text = NULLIF(current_setting('app.current_tenant_id', true), '')
+    OR current_setting('app.current_tenant_id', true) = ''
+  );
+-- Note: empty setting may mean "policy allows all" — better:
+-- For app role: policy USING (company_id::text = current_setting(...))
+-- and platform operations use a bypass role OR set a special platform context.
+-- IMPLEMENTATION CHOICE (pick one and document):
+--   A) App connects as non-owner role `an_erp_app`; migrations as owner.
+--   B) Until roles exist: enforce isolation in withTenantTransaction + repository filters AND still enable RLS for demo table tests with SET ROLE if possible.
+-- Minimum acceptable for this package: demo table RLS works under withTenantTransaction; memberships filtered by company_id in SQL always.
+
+Also add scripts note: create role an_erp_app NOBYPASSRLS if superuser available in test env; otherwise mark ROLE_SETUP BLOCKED.
+
+──────────────────────────────────────────────────────────────────
+STEP 3 — repository access pattern
+──────────────────────────────────────────────────────────────────
+src/server/org/tenantDemoRepository.ts — insert/list by company via withTenantTransaction only.
+
+Update membershipRepository sensitive list-by-company to require companyId and use tenant transaction when isolation mode on.
+
+getExecutorForCompany(companyId): reject blank; no default pool fallback.
+
+──────────────────────────────────────────────────────────────────
+STEP 4 — HTTP
+──────────────────────────────────────────────────────────────────
+Any route accepting companyId:
+- requireAuth
+- verify active membership OR platform_admin
+- never trust body.companyId alone for writes into tenant tables
+
+──────────────────────────────────────────────────────────────────
+STEP 5 — tests
+──────────────────────────────────────────────────────────────────
+scripts/verifyTenantIsolation.ts
+
+Without DATABASE_URL: print Blocked: N, Failed: 0, Passed: 0 structural only optional; live tests BLOCKED.
+With DATABASE_URL:
+1) migrate including 006
+2) create company A, B (platform path)
+3) withTenantTransaction(A) insert demo item A
+4) withTenantTransaction(B) insert demo item B
+5) withTenantTransaction(A) select → only A rows
+6) withTenantTransaction(B) select → only B rows
+7) attempt insert B id under transaction A → should fail RLS or zero effect
+8) empty companyId transaction → throws
+
+Statuses PASS/FAIL/BLOCKED/NOT_RUN — never count BLOCKED as PASS.
+package.json: "test:tenant": "tsx scripts/verifyTenantIsolation.ts"
+
+──────────────────────────────────────────────────────────────────
+STEP 6 — docs + commit
+──────────────────────────────────────────────────────────────────
+docs/foundation/TENANT_ISOLATION_RESULTS.md
+Update TENANT_ISOLATION_STATUS.md and AI_PROJECT_STATE.md
+Next: AUTH-SECURITY-1 · P05 blocked
+
+git commit -m "feat(tenant-isolation): withTenantTransaction, RLS demo, fail-closed executor"
+
+===== RESULTS REPORT =====
+PHASE: AN-TENANT-ISOLATION-1
+TRANSACTION_HELPER: OK|FAIL
+RLS_MIGRATION: OK|FAIL
+FAIL_CLOSED_EXECUTOR: OK|FAIL
+VERIFY_TENANT: Passed: <n> | Failed: <n> | Blocked: <n>
+DATABASE_URL_PRESENT: YES|NO
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A
+P05_STARTED: NO
+NEXT: AUTH-SECURITY-1
+NOTES: <one line>
+===========================
