@@ -1,0 +1,42 @@
+[
+  {
+    "table": "schema_migrations",
+    "scope": "global",
+    "reason": "System schema version tracking"
+  },
+  {
+    "table": "platform_users",
+    "scope": "global",
+    "reason": "Global user identity catalog"
+  },
+  {
+    "table": "companies",
+    "scope": "global",
+    "reason": "Platform tenant catalog"
+  },
+  {
+    "table": "company_memberships",
+    "scope": "shared",
+    "reason": "Cross-company RBAC membership mapping"
+  },
+  {
+    "table": "user_sessions",
+    "scope": "global",
+    "reason": "Global session catalog"
+  },
+  {
+    "table": "audit_logs",
+    "scope": "shared",
+    "reason": "Platform-wide append-only audit trail"
+  },
+  {
+    "table": "login_rate_events",
+    "scope": "global",
+    "reason": "Global login rate limit tracking"
+  },
+  {
+    "table": "tenant_demo_items",
+    "scope": "tenant",
+    "reason": "Company-owned tenant demo items"
+  }
+]

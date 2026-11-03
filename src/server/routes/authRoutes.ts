@@ -6,6 +6,7 @@ import { defaultRateLimitStore } from '../security/rateLimitStore.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import { generateCsrfToken, setCsrfCookie } from '../security/csrfProtection.js';
 import { InvalidCredentialsError, ValidationError } from '../http/errors.js';
+import { ExtendedRequest } from '../http/errorHandler.js';
 
 export const authRoutes = Router();
 
@@ -24,8 +25,12 @@ authRoutes.get(
 // POST /api/auth/login — Login with DB-backed rate limiting & audit logging
 authRoutes.post(
   '/login',
-  wrap(async (req: Request, res: Response) => {
+  wrap(async (req: ExtendedRequest, res: Response) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const requestId = req.requestId || 'unknown';
+    const rawUserAgent = req.headers['user-agent'] || '';
+    const userAgent = typeof rawUserAgent === 'string' ? rawUserAgent.substring(0, 200) : '';
+
     const { username, password } = req.body || {};
 
     if (!username || typeof username !== 'string' || !password || typeof password !== 'string') {
@@ -36,14 +41,14 @@ authRoutes.post(
     const ipKey = `ip:${ip}`;
     const userKey = `user:${normalizedUsername}`;
 
-    // 1. Rate Limit Check
+    // 1. Rate Limit Check (Throws DB_UNAVAILABLE if DB is down)
     const rateCheck = await defaultRateLimitStore.isBlocked({ ipKey, userKey });
     if (rateCheck.blocked) {
       await defaultAuditService.record(
         {
           action: 'auth.login.blocked',
           ipAddress: ip,
-          metadata: { username: normalizedUsername, reason: rateCheck.reason },
+          metadata: { username: normalizedUsername, reason: rateCheck.reason, requestId, userAgent },
         },
         { mode: 'best_effort' }
       );
@@ -61,25 +66,26 @@ authRoutes.post(
     try {
       loginResult = await defaultAuthService.login(normalizedUsername, password);
     } catch (loginErr) {
-      // Record failed login attempt
-      await defaultRateLimitStore.recordFailure(ipKey);
-      await defaultRateLimitStore.recordFailure(userKey);
+      if (loginErr instanceof InvalidCredentialsError) {
+        // Record failed attempt ONLY on invalid credentials
+        await defaultRateLimitStore.recordFailure(ipKey);
+        await defaultRateLimitStore.recordFailure(userKey);
 
-      await defaultAuditService.record(
-        {
-          action: 'auth.login.failure',
-          ipAddress: ip,
-          metadata: { username: normalizedUsername },
-        },
-        { mode: 'best_effort' }
-      );
-
+        await defaultAuditService.record(
+          {
+            action: 'auth.login.failure',
+            ipAddress: ip,
+            metadata: { username: normalizedUsername, requestId, userAgent },
+          },
+          { mode: 'best_effort' }
+        );
+      }
       throw loginErr;
     }
 
     const { session, user } = loginResult;
 
-    // 3. Clear User Rate Limit Failures
+    // 3. Clear User Rate Limit Failures (Do NOT clear IP failures)
     await defaultRateLimitStore.clearUser(userKey);
 
     // 4. Audit Log Successful Login (Required Mode)
@@ -89,7 +95,7 @@ authRoutes.post(
           actorUserId: user.id,
           action: 'auth.login.success',
           ipAddress: ip,
-          metadata: { username: user.username, role: user.role },
+          metadata: { username: user.username, role: user.role, requestId, userAgent },
         },
         { mode: 'required' }
       );
@@ -125,9 +131,11 @@ authRoutes.post(
 // POST /api/auth/logout
 authRoutes.post(
   '/logout',
-  wrap(async (req: Request, res: Response) => {
+  wrap(async (req: ExtendedRequest, res: Response) => {
     const cookieName = getSessionCookieName();
     const token = req.cookies?.[cookieName];
+    const requestId = req.requestId || 'unknown';
+    const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].substring(0, 200) : '';
 
     if (token) {
       const user = await defaultAuthService.getSessionUser(token);
@@ -138,6 +146,7 @@ authRoutes.post(
           actorUserId: user?.id || null,
           action: 'auth.logout',
           ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+          metadata: { requestId, userAgent },
         },
         { mode: 'best_effort' }
       );

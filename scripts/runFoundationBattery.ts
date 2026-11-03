@@ -6,6 +6,9 @@ console.log('=== RUNNING FOUNDATION TEST BATTERY ===');
 console.log('========================================');
 
 const scripts = [
+  'scripts/verifyPublicAssets.ts',
+  'scripts/verifyExecutorImports.ts',
+  'scripts/verifyNoMemoryFallback.ts',
   'scripts/verifyFixRbacCompanies.ts',
   'scripts/verifyFixDbWiring.ts',
   'scripts/verifyRepair2.ts',
@@ -16,6 +19,9 @@ const scripts = [
   'scripts/verifyHttpSecurity.ts',
   'scripts/verifyRbacHttp.ts',
   'scripts/verifyMigrations.ts',
+  'scripts/verifyCompanyAtomicity.ts',
+  'scripts/verifyTenantHttp.ts',
+  'scripts/verifyDbPrivileges.ts',
 ];
 
 interface ScriptRunResult {

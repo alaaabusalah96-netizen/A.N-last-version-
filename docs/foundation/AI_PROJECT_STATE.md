@@ -3,44 +3,41 @@
 ## 1. مفردات الحالة المعيارية المعتمدة
 - `IMPLEMENTED`: تم بناء الهيكل والكود المكتوب وفق المواصفات.
 - `UNIT_TESTED`: تم إجراء اختبارات سلوكية للأجزاء المنفذة.
-- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات و RLS سلوكيًا عبر بيئة اختبارات محلية.
-- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والعزل واختبارها عبر بطارية الاختبارات الموحدة.
-- `PRODUCTION_READY`: تُمنح فقط بعد نجاح تشغيل GitHub Actions بعلامة خضراء مع `REQUIRE_DB=1` واستخدام دور تطبيق غير متجاوز لـ RLS.
+- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات و RLS سلوكيًا في بيئة اختبار حية متكاملة بوجود run أخضر في GitHub Actions.
+- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والعزل بوجود run أخضر في GitHub Actions (تحديد رقم الـ Run والـ Commit SHA إلزاميان).
+- `PRODUCTION_READY`: تُمنح فقط بعد نجاح تشغيل GitHub Actions بعلامة خضراء مع `REQUIRE_DB=1` واستخدام دور تطبيق مخصص (`an_app`) غير متجاوز لـ RLS.
 
 ---
 
 ## 2. سجل الحزم وحالتها الحالية الدقيقة
-- **P00-CONSTITUTION-1**: `IMPLEMENTED` + `SECURITY_VERIFIED`
+- **P00-CONSTITUTION-1**: `IMPLEMENTED`
 - **P01-PLATFORM-SCAFFOLD-1**: `IMPLEMENTED` + `UNIT_TESTED`
-- **P02a-DB-FOUNDATION-1**: `IMPLEMENTED` + `INTEGRATION_TESTED`
-- **P03-AUTH-CORE-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **P04-ORG-RBAC-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **AN-FOUNDATION-REPAIR-2**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **AN-PERSISTENCE-CORE-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **AN-TENANT-ISOLATION-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **AN-AUTH-SECURITY-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **AN-FOUNDATION-CI-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-- **AN-FOUNDATION-REPAIR-3**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-  - CI_STATUS: `PENDING` (انتظار تشغيل GitHub Actions الخارجي).
-  - إطلاق حارس أدوار قاعدة البيانات (`assertSafeDbRole`) ودور التطبيق المخصص (`an_app`).
-  - معالجة أخطاء مركزية (`errorHandler`) وإسناد معرف الطلب (`requestIdMiddleware`).
-  - حماية CSRF المزدوجة المربوطة بالجلسة (`csrfProtection`) وواجهة العميل للفرونت إند (`apiFetch`).
-  - تحديد معدل الطلبات الدائم بجدول قاعدة البيانات (`RateLimitStore`) والفشل المغلق عند انقطاع الاتصال.
-  - حوكمة عزل المستأجرين عبر `tenantScope` وسياسات RLS المحصنة (الترحيل `008_hardening.sql`).
+- **P02a-DB-FOUNDATION-1**: `IMPLEMENTED`
+- **P03-AUTH-CORE-1**: `IMPLEMENTED`
+- **P04-ORG-RBAC-1**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-2**: `IMPLEMENTED`
+- **AN-PERSISTENCE-CORE-1**: `IMPLEMENTED`
+- **AN-TENANT-ISOLATION-1**: `IMPLEMENTED`
+- **AN-AUTH-SECURITY-1**: `IMPLEMENTED`
+- **AN-FOUNDATION-CI-1**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-3**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-4**: `IMPLEMENTED`
+  - CI_STATUS: `PENDING` (في انتظار تشغيل GitHub Actions الخارجي واستحصال العلامة الخضراء).
+  - إغلاق العيوب الخمسة المسببة لفشل CI وحوكمة إنشاء الشركات عبر معاملة حقيقية ذرية (`CompanyService`).
+  - تطبيق سجل ملكية الجداول الشامل (`table_ownership.json`) والمصنع القابل للاختبار لحماية CSRF (`createCsrfProtection`).
+  - تزويد دور التطبيق `an_app` بصلاحية `GRANT SELECT ON schema_migrations` لمعالجة انقطاع Readiness probe.
+  - إزالة كافة أصول التعليمات والملفات النصية المسربة من `public/` وتحصين `.gitignore` وحارس الأصول العلوية (`verifyPublicAssets.ts`).
+  - تطبيق حارس الاستيرادات المعماري (`verifyExecutorImports.ts`) ومصفوفة صلاحيات قاعدة البيانات (`verifyDbPrivileges.ts`).
 
 ---
 
 ## 3. الأنماط المعمارية والقواعد الحاكمة
-1. **نمط النطاق للمستأجرين (`tenantScope`)**:
-   - استخدام برمجية `requireCompanyAccess` لحصر قراءة `companyId` من `req.params.companyId` وتمرير السياق عبر `tenantContextStorage`.
-2. **حارس RLS والجداول**:
-   - كافة الجداول التي تحتوي على عمود `company_id` مفعل عليها RLS ومفروضة قطعيًا (`FORCE ROW LEVEL SECURITY`) ما لم تكن مسجلة في `rls_allowlist.json`.
-3. **سياسة التدقيق (`Audit Policy`)**:
-   - `required`: حاسمة وتفشل المعاملة/الطلب عند تعذر كتابة السجل (مثل الدخول الناجح، إنشاء شركة، تغيير عضوية).
-   - `best_effort`: تسجل الخطأ دون إيقاف الطلب (مثل الدخول الفاشل، الخروج).
-4. **فصل أدوار قاعدة البيانات**:
-   - `MIGRATION_DATABASE_URL`: للترحيلات وتزويد الأدوار بحساب سوبر (مثل `an_test`).
-   - `DATABASE_URL`: للتطبيق التجاري عبر دور مقيد (`an_app`) يمنع تجاوز RLS.
+1. **ذرية الخدمات المعاملاتية (`Transactional Service Atomicity`)**:
+   - كافة العمليات المترابطة (مثل إنشاء شركة + إضافة العضوية + كتابة سجل التدقيق) تتم داخل معاملة واحدة متكاملة عبر `CompanyService`.
+2. **سجل ملكية الجداول (`Table Ownership Registry`)**:
+   - تصنيف صريح لكل جدول في قاعدة البيانات (`global` / `shared` / `tenant`). الجداول ذات النطاق `tenant` يلزمها RLS صارم بـ `relforcerowsecurity = true` وسياسات فحص المالك.
+3. **حارس الأدوار والامتيارات (`Role & Privilege Guards`)**:
+   - منع استخدام حسابات `SUPERUSER` أو `BYPASSRLS` في الإنتاج، وحصر دور التطبيق التجاري `an_app` في الصلاحيات التشغيلية فقط دون TRUNCATE أو تعديل سجل المخطط.
 
 ---
 

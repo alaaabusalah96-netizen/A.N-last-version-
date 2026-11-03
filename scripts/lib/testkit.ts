@@ -134,3 +134,36 @@ export class CookieJarFetch {
     this.cookies.clear();
   }
 }
+
+/**
+ * Helper to log in a user and rotate/store the new session & CSRF token
+ */
+export async function loginAs(
+  jar: CookieJarFetch,
+  baseUrl: string,
+  username: string,
+  password: string
+): Promise<{ csrfToken: string; user: any }> {
+  const csrfRes = await jar.fetch(`${baseUrl}/api/auth/csrf`);
+  const csrfData = await csrfRes.json();
+  const preLoginToken = csrfData.csrfToken;
+
+  const loginRes = await jar.fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-csrf-token': preLoginToken,
+    },
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (!loginRes.ok) {
+    const errData = await loginRes.json().catch(() => ({}));
+    throw new Error(`loginAs failed for '${username}': HTTP ${loginRes.status} ${JSON.stringify(errData)}`);
+  }
+
+  const loginData = await loginRes.json();
+  const postLoginToken = loginData.csrfToken;
+
+  return { csrfToken: postLoginToken, user: loginData.user };
+}

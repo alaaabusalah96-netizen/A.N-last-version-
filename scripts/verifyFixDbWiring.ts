@@ -37,14 +37,14 @@ async function runTests() {
     }
   );
 
-  // Check 4: Safe SSL enforcement
-  const adapterPath = path.join(rootDir, 'src/server/db/adapters/PostgresqlAdapter.ts');
-  const adapterContent = fs.readFileSync(adapterPath, 'utf8');
-
+  // Check 4: Safe SSL enforcement (behavioral test of resolveSslConfig)
   await check(
     'PostgresqlAdapter enforces safe production SSL (rejectUnauthorized true by default)',
-    adapterContent.includes('DATABASE_SSL_REJECT_UNAUTHORIZED') &&
-      adapterContent.includes("rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false'")
+    async () => {
+      const { resolveSslConfig } = await import('../src/server/db/adapters/PostgresqlAdapter.js');
+      const ssl = resolveSslConfig({ NODE_ENV: 'production' });
+      return typeof ssl === 'object' && ssl !== null && (ssl as any).rejectUnauthorized === true;
+    }
   );
 
   // Check 5: Live DB probe

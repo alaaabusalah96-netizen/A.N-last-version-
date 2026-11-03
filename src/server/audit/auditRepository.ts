@@ -45,7 +45,8 @@ export class AuditRepository {
         JSON.stringify(cleanMetadata),
       ]);
     } catch (err) {
-      throw new AuditUnavailableError(`Failed to write audit record: ${err instanceof Error ? err.message : String(err)}`);
+      const rawDetail = err instanceof Error ? err.message : String(err);
+      throw new AuditUnavailableError(rawDetail);
     }
   }
 }

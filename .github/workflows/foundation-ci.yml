@@ -68,6 +68,7 @@ jobs:
           APP_DB_USER: an_app
 
       - name: Run Foundation Test Battery
+        id: battery
         run: npm run test:foundation
         env:
           DATABASE_URL: postgresql://an_app:AppRoleSecurePass123!@localhost:5432/an_foundation
@@ -75,8 +76,19 @@ jobs:
           NODE_ENV: test
           REQUIRE_DB: "1"
           CI: "true"
+          ENABLE_TENANT_DEMO: "1"
           CSRF_SECRET: test_csrf_secret_minimum_32_chars_long_key_for_ci
+          CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
           PLATFORM_ADMIN_USERNAME: ci_admin
           PLATFORM_ADMIN_PASSWORD: CiAdminSecurePass123!
           SESSION_TTL_HOURS: "12"
           SESSION_COOKIE_NAME: an_session
+
+      - name: Upload Test Battery Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-test-results
+          path: |
+            *.log
+          retention-days: 7

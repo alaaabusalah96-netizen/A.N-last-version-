@@ -1,9 +1,11 @@
 import { getDefaultExecutor } from '../db/index.js';
+import { DbExecutor } from '../db/types.js';
 import { Company, CreateCompanyInput } from './companyTypes.js';
 import { isUuid } from '../http/validators.js';
 
 export class CompanyRepository {
-  private async getExecutor() {
+  private async getExecutor(customExecutor?: DbExecutor) {
+    if (customExecutor) return customExecutor;
     const executor = await getDefaultExecutor();
     if (!executor) {
       throw new Error('DB_UNAVAILABLE: Database executor not available for CompanyRepository');
@@ -11,8 +13,8 @@ export class CompanyRepository {
     return executor;
   }
 
-  async create(input: CreateCompanyInput): Promise<Company> {
-    const executor = await this.getExecutor();
+  async create(input: CreateCompanyInput, customExecutor?: DbExecutor): Promise<Company> {
+    const executor = await this.getExecutor(customExecutor);
     const normalizedCode = input.code.trim().toUpperCase();
 
     const createdByUuid = input.createdBy && isUuid(input.createdBy) ? input.createdBy : null;
@@ -33,8 +35,8 @@ export class CompanyRepository {
     return res.rows[0];
   }
 
-  async getById(id: string): Promise<Company | null> {
-    const executor = await this.getExecutor();
+  async getById(id: string, customExecutor?: DbExecutor): Promise<Company | null> {
+    const executor = await this.getExecutor(customExecutor);
     const sql = `
       SELECT id, code, name_ar as "nameAr", name_en as "nameEn", is_active as "isActive", created_at as "createdAt", created_by as "createdBy"
       FROM companies
@@ -45,8 +47,8 @@ export class CompanyRepository {
     return res.rows[0] || null;
   }
 
-  async findByCode(code: string): Promise<Company | null> {
-    const executor = await this.getExecutor();
+  async findByCode(code: string, customExecutor?: DbExecutor): Promise<Company | null> {
+    const executor = await this.getExecutor(customExecutor);
     const normalized = code.trim().toUpperCase();
     const sql = `
       SELECT id, code, name_ar as "nameAr", name_en as "nameEn", is_active as "isActive", created_at as "createdAt", created_by as "createdBy"
@@ -58,8 +60,8 @@ export class CompanyRepository {
     return res.rows[0] || null;
   }
 
-  async list(): Promise<Company[]> {
-    const executor = await this.getExecutor();
+  async list(customExecutor?: DbExecutor): Promise<Company[]> {
+    const executor = await this.getExecutor(customExecutor);
     const sql = `
       SELECT id, code, name_ar as "nameAr", name_en as "nameEn", is_active as "isActive", created_at as "createdAt", created_by as "createdBy"
       FROM companies

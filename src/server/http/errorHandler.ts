@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
-import { AppError } from './errors.js';
+import { AppError, CorsOriginError } from './errors.js';
 
 export interface ExtendedRequest extends Request {
   requestId?: string;
@@ -8,9 +8,13 @@ export interface ExtendedRequest extends Request {
   companyId?: string;
 }
 
+const REQUEST_ID_REGEX = /^[A-Za-z0-9._-]{8,64}$/;
+
 export function requestIdMiddleware(req: ExtendedRequest, res: Response, next: NextFunction): void {
   const incomingId = req.headers['x-request-id'];
-  const requestId = typeof incomingId === 'string' && incomingId.trim() ? incomingId.trim() : crypto.randomUUID();
+  const isValid = typeof incomingId === 'string' && REQUEST_ID_REGEX.test(incomingId.trim());
+  const requestId = isValid ? (incomingId as string).trim() : crypto.randomUUID();
+
   req.requestId = requestId;
   res.setHeader('X-Request-Id', requestId);
   next();
@@ -23,7 +27,8 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   const requestId = req.requestId || 'unknown-request';
-  console.error(`[ErrorHandler] RequestId: ${requestId} | Method: ${req.method} | Path: ${req.path}`, err);
+  const internalDetail = err?.internalDetail ? ` | Detail: ${err.internalDetail}` : '';
+  console.error(`[ErrorHandler] RequestId: ${requestId} | Method: ${req.method} | Path: ${req.path}${internalDetail}`, err);
 
   if (res.headersSent) {
     return;
@@ -32,20 +37,20 @@ export function errorHandler(
   const message = err instanceof Error ? err.message : String(err);
   const code = err?.code;
 
+  // CORS Origin Error
+  if (err instanceof CorsOriginError || code === 'CORS_FORBIDDEN' || message.includes('CORS')) {
+    res.status(403).json({
+      error: 'Forbidden',
+      code: 'CORS_FORBIDDEN',
+    });
+    return;
+  }
+
   // DB Unavailable / Tenant Context Required
   if (message.startsWith('DB_UNAVAILABLE') || message.startsWith('TENANT_CONTEXT_REQUIRED')) {
     res.status(503).json({
       error: 'Service Unavailable',
       code: 'DB_UNAVAILABLE',
-    });
-    return;
-  }
-
-  // CORS Forbidden
-  if (message.includes('CORS')) {
-    res.status(403).json({
-      error: 'Forbidden',
-      code: 'CORS_FORBIDDEN',
     });
     return;
   }
@@ -79,8 +84,10 @@ export function errorHandler(
 
   // AppError instance
   if (err instanceof AppError) {
+    const isServerError = err.statusCode >= 500;
+    const clientMessage = isServerError ? 'Service Unavailable' : err.message;
     res.status(err.statusCode).json({
-      error: err.message,
+      error: clientMessage,
       code: err.code,
     });
     return;

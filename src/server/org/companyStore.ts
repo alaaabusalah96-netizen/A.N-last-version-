@@ -1,5 +1,6 @@
 import { defaultCompanyRepository, CompanyRepository } from './companyRepository.js';
 import { Company, CreateCompanyInput } from './companyTypes.js';
+import { DbExecutor } from '../db/types.js';
 
 /**
  * Company Store (Delegates to PostgreSQL CompanyRepository — No Map fallback)
@@ -7,20 +8,20 @@ import { Company, CreateCompanyInput } from './companyTypes.js';
 export class CompanyStore {
   constructor(private repo: CompanyRepository = defaultCompanyRepository) {}
 
-  async create(input: CreateCompanyInput): Promise<Company> {
-    return this.repo.create(input);
+  async create(input: CreateCompanyInput, customExecutor?: DbExecutor): Promise<Company> {
+    return this.repo.create(input, customExecutor);
   }
 
-  async getById(id: string): Promise<Company | null> {
-    return this.repo.getById(id);
+  async getById(id: string, customExecutor?: DbExecutor): Promise<Company | null> {
+    return this.repo.getById(id, customExecutor);
   }
 
-  async findByCode(code: string): Promise<Company | null> {
-    return this.repo.findByCode(code);
+  async findByCode(code: string, customExecutor?: DbExecutor): Promise<Company | null> {
+    return this.repo.findByCode(code, customExecutor);
   }
 
-  async list(): Promise<Company[]> {
-    return this.repo.list();
+  async list(customExecutor?: DbExecutor): Promise<Company[]> {
+    return this.repo.list(customExecutor);
   }
 
   clear(): void {

@@ -103,6 +103,22 @@ export class SessionRepository {
     const res = await executor.query(sql, [userId]);
     return res.rowCount ?? 0;
   }
+
+  async purgeExpired(): Promise<number> {
+    try {
+      const executor = await this.getExecutor();
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const sql = `
+        DELETE FROM user_sessions
+        WHERE expires_at < $1 OR (revoked_at IS NOT NULL AND revoked_at < $1);
+      `;
+      const res = await executor.query(sql, [cutoff]);
+      return res.rowCount ?? 0;
+    } catch (err) {
+      console.error('[session] Error purging expired sessions:', err);
+      return 0;
+    }
+  }
 }
 
 export const defaultSessionRepository = new SessionRepository();

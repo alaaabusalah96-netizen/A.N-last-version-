@@ -1,9 +1,11 @@
 import { getDefaultExecutor } from '../db/index.js';
+import { DbExecutor } from '../db/types.js';
 import { CompanyMembership } from './membershipStore.js';
 import { RoleName } from '../rbac/roles.js';
 
 export class MembershipRepository {
-  private async getExecutor() {
+  private async getExecutor(customExecutor?: DbExecutor) {
+    if (customExecutor) return customExecutor;
     const executor = await getDefaultExecutor();
     if (!executor) {
       throw new Error('DB_UNAVAILABLE: Database executor not available for MembershipRepository');
@@ -15,9 +17,10 @@ export class MembershipRepository {
     userId: string,
     companyId: string,
     role: RoleName,
-    isActive: boolean = true
+    isActive: boolean = true,
+    customExecutor?: DbExecutor
   ): Promise<CompanyMembership> {
-    const executor = await this.getExecutor();
+    const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       INSERT INTO company_memberships (user_id, company_id, role, is_active)
@@ -31,8 +34,8 @@ export class MembershipRepository {
     return res.rows[0];
   }
 
-  async getMembership(userId: string, companyId: string): Promise<CompanyMembership | null> {
-    const executor = await this.getExecutor();
+  async getMembership(userId: string, companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership | null> {
+    const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
@@ -44,8 +47,8 @@ export class MembershipRepository {
     return res.rows[0] || null;
   }
 
-  async listByUser(userId: string): Promise<CompanyMembership[]> {
-    const executor = await this.getExecutor();
+  async listByUser(userId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
+    const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
@@ -57,8 +60,8 @@ export class MembershipRepository {
     return res.rows;
   }
 
-  async listByCompany(companyId: string): Promise<CompanyMembership[]> {
-    const executor = await this.getExecutor();
+  async listByCompany(companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
+    const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
@@ -70,8 +73,8 @@ export class MembershipRepository {
     return res.rows;
   }
 
-  async setMembershipStatus(userId: string, companyId: string, isActive: boolean): Promise<boolean> {
-    const executor = await this.getExecutor();
+  async setMembershipStatus(userId: string, companyId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
+    const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       UPDATE company_memberships

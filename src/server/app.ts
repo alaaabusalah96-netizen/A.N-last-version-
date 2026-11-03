@@ -9,6 +9,7 @@ import { csrfProtection } from './security/csrfProtection.js';
 import { requestIdMiddleware, errorHandler } from './http/errorHandler.js';
 import { authRoutes } from './routes/authRoutes.js';
 import { companyRoutes } from './routes/companyRoutes.js';
+import { tenantDemoRoutes } from './routes/tenantDemoRoutes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -35,6 +36,11 @@ export function createApp(): Express {
   // Modular Routers
   app.use('/api/auth', authRoutes);
   app.use('/api/companies', companyRoutes);
+
+  // Tenant Demo Routes (Development & Test environments only)
+  if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_TENANT_DEMO === '1') {
+    app.use('/api/companies/:companyId/demo-items', tenantDemoRoutes);
+  }
 
   // 404 Handler for undefined /api routes
   app.use('/api', (_req: Request, res: Response) => {

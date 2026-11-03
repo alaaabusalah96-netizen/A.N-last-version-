@@ -3,13 +3,17 @@
  */
 
 export class AppError extends Error {
+  public internalDetail?: string;
+
   constructor(
     public statusCode: number,
     public message: string,
-    public code: string
+    public code: string,
+    internalDetail?: string
   ) {
     super(message);
     this.name = 'AppError';
+    this.internalDetail = internalDetail;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -38,8 +42,14 @@ export class ValidationError extends AppError {
   }
 }
 
+export class CorsOriginError extends AppError {
+  constructor(message = 'CORS origin not allowed') {
+    super(403, message, 'CORS_FORBIDDEN');
+  }
+}
+
 export class AuditUnavailableError extends AppError {
-  constructor(message = 'Audit service unavailable') {
-    super(503, message, 'AUDIT_UNAVAILABLE');
+  constructor(internalDetail?: string) {
+    super(503, 'Audit service unavailable', 'AUDIT_UNAVAILABLE', internalDetail);
   }
 }

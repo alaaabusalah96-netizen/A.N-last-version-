@@ -1,20 +1,37 @@
 import 'dotenv/config';
 import { createApp } from './src/server/app.js';
 import { defaultAuthService } from './src/server/auth/authService.js';
-import { closeAllExecutors } from './src/server/db/index.js';
+import { defaultSessionRepository } from './src/server/auth/sessionRepository.js';
+import { defaultRateLimitStore } from './src/server/security/rateLimitStore.js';
+import { closeAllExecutors, getDefaultExecutor } from './src/server/db/index.js';
 import { assertSafeDbRole } from './src/server/db/roleGuard.js';
-import { getDefaultExecutor } from './src/server/db/index.js';
 
 const app = createApp();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
 async function startServer() {
-  // 1. Startup DB Role Safety Guard
+  // 1. Startup DB Role Safety & Health Check Retry Loop
   try {
     const executor = await getDefaultExecutor();
     if (executor) {
       await assertSafeDbRole(executor);
+
+      let healthOk = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const health = await executor.health();
+        if (health.ok) {
+          healthOk = true;
+          break;
+        }
+        console.warn(`[server] DB health check attempt ${attempt}/3 failed. Retrying in 2 seconds...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      if (!healthOk && isProd) {
+        console.error('[server] FATAL: Database health check failed after 3 attempts in production.');
+        process.exit(1);
+      }
     } else if (isProd) {
       console.error('[server] FATAL: DATABASE_URL missing or unable to connect in production');
       process.exit(1);
@@ -26,7 +43,15 @@ async function startServer() {
     }
   }
 
-  // 2. Initialize platform admin from environment variables
+  // 2. Startup Purge of Expired Records & Sessions
+  try {
+    await defaultRateLimitStore.purgeOld();
+    await defaultSessionRepository.purgeExpired();
+  } catch (err) {
+    console.warn('[server] Non-fatal error during startup purge:', err);
+  }
+
+  // 3. Initialize platform admin from environment variables
   try {
     await defaultAuthService.bootstrapPlatformAdminFromEnv();
   } catch (err) {
@@ -36,7 +61,7 @@ async function startServer() {
     }
   }
 
-  // 3. Start Express server
+  // 4. Start Express server
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[an-erp-platform] Server running on http://0.0.0.0:${PORT}`);
   });

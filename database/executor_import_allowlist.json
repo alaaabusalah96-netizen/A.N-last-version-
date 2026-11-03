@@ -1,0 +1,50 @@
+[
+  {
+    "file": "src/server/db/index.ts",
+    "reason": "Central database factory and executor resolution"
+  },
+  {
+    "file": "src/server/db/adapters/PostgresqlAdapter.ts",
+    "reason": "Low-level database adapter"
+  },
+  {
+    "file": "src/server/db/roleGuard.ts",
+    "reason": "Database connection role privilege enforcer"
+  },
+  {
+    "file": "src/server/auth/userRepository.ts",
+    "reason": "Platform user repository data access"
+  },
+  {
+    "file": "src/server/auth/sessionRepository.ts",
+    "reason": "Global session repository data access"
+  },
+  {
+    "file": "src/server/org/companyRepository.ts",
+    "reason": "Company repository data access"
+  },
+  {
+    "file": "src/server/org/membershipRepository.ts",
+    "reason": "Company membership repository data access"
+  },
+  {
+    "file": "src/server/org/tenantDemoRepository.ts",
+    "reason": "Tenant demo repository data access"
+  },
+  {
+    "file": "src/server/org/companyService.ts",
+    "reason": "Company creation service transaction orchestrator"
+  },
+  {
+    "file": "src/server/audit/auditRepository.ts",
+    "reason": "Audit repository data access"
+  },
+  {
+    "file": "src/server/security/rateLimitStore.ts",
+    "reason": "Rate limit store data access"
+  },
+  {
+    "file": "src/server/http/readiness.ts",
+    "reason": "Health & readiness probe database check"
+  }
+]

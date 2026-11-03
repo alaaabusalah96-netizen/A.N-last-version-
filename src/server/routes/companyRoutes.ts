@@ -2,14 +2,13 @@ import { Router, Response } from 'express';
 import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultMembershipStore } from '../org/membershipStore.js';
+import { defaultCompanyService } from '../org/companyService.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { requirePermission } from '../rbac/requirePermission.js';
 import { requirePlatformAdmin } from '../rbac/requirePlatformAdmin.js';
 import { wrap } from '../http/asyncHandler.js';
 import { isUuid, isValidCompanyCode } from '../http/validators.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
-import { defaultAuditService } from '../audit/auditService.js';
-import { getDefaultExecutor } from '../db/index.js';
 
 export const companyRoutes = Router();
 
@@ -56,39 +55,16 @@ companyRoutes.post(
       throw new ValidationError('English name must not exceed 255 characters');
     }
 
-    const executor = await getDefaultExecutor();
-    if (!executor) {
-      throw new Error('DB_UNAVAILABLE: Database executor required');
-    }
-
-    let createdCompany: any;
-
-    await executor.withTransaction(async (tx) => {
-      // 1. Create company
-      createdCompany = await defaultCompanyStore.create({
+    const createdCompany = await defaultCompanyService.createCompanyWithAdmin(
+      {
         code: code.trim(),
         nameAr: nameAr.trim(),
         nameEn: nameEn?.trim() || undefined,
         createdBy: user.id,
-      });
-
-      // 2. Grant creator company_admin membership
-      await defaultMembershipStore.addMember(user.id, createdCompany.id, 'company_admin', true);
-
-      // 3. Audit log (Required inside same transaction)
-      await defaultAuditService.record(
-        {
-          actorUserId: user.id,
-          companyId: createdCompany.id,
-          action: 'company.create',
-          entityType: 'company',
-          entityId: createdCompany.id,
-          ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
-          metadata: { code: createdCompany.code, nameAr: createdCompany.nameAr },
-        },
-        { mode: 'required', executor: tx }
-      );
-    });
+      },
+      user.id,
+      req.ip || req.socket.remoteAddress
+    );
 
     return res.status(201).json({ status: 'ok', company: createdCompany });
   })

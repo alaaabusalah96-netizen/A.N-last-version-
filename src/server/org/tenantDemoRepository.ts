@@ -25,9 +25,10 @@ export class TenantDemoRepository {
       const sql = `
         SELECT id, company_id as "companyId", label, created_at as "createdAt"
         FROM tenant_demo_items
+        WHERE company_id = $1
         ORDER BY created_at DESC;
       `;
-      const res = await tx.query<TenantDemoItem>(sql);
+      const res = await tx.query<TenantDemoItem>(sql, [companyId]);
       return res.rows;
     });
   }

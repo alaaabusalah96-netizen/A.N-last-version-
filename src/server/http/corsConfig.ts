@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { CorsOriginError } from './errors.js';
 
 /**
  * Hardened CORS Configuration
@@ -30,7 +31,7 @@ export function createCorsMiddleware() {
 
       // In production: reject any origin not explicitly present in CORS_ORIGINS
       if (isProd) {
-        return callback(new Error(`CORS policy violation: origin '${origin}' is not allowed`));
+        return callback(new CorsOriginError(`CORS policy violation: origin '${origin}' is not allowed`));
       }
 
       // In development: strictly allow exact localhost / 127.0.0.1 origins
@@ -38,7 +39,7 @@ export function createCorsMiddleware() {
         return callback(null, true);
       }
 
-      return callback(new Error(`CORS policy violation in dev: origin '${origin}' is not permitted`));
+      return callback(new CorsOriginError(`CORS policy violation in dev: origin '${origin}' is not permitted`));
     },
     credentials: true,
   });

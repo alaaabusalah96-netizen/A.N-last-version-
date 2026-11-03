@@ -29,23 +29,18 @@ async function provisionAppRole() {
 
     if (!roleExists) {
       console.log(`[provision] Creating role '${appDbUser}'...`);
-      // Escape password safely using DO block or pg format
-      const createRoleSql = `
-        DO $$
-        BEGIN
-          EXECUTE format('CREATE ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', '${appDbUser}', '${appDbPassword.replace(/'/g, "''")}');
-        END $$;
-      `;
-      await client.query(createRoleSql);
+      const fmtRes = await client.query(
+        "SELECT format('CREATE ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', $1::text, $2::text) as stmt",
+        [appDbUser, appDbPassword]
+      );
+      await client.query(fmtRes.rows[0].stmt);
     } else {
       console.log(`[provision] Role '${appDbUser}' exists. Updating credentials and attributes...`);
-      const alterRoleSql = `
-        DO $$
-        BEGIN
-          EXECUTE format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', '${appDbUser}', '${appDbPassword.replace(/'/g, "''")}');
-        END $$;
-      `;
-      await client.query(alterRoleSql);
+      const fmtRes = await client.query(
+        "SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', $1::text, $2::text) as stmt",
+        [appDbUser, appDbPassword]
+      );
+      await client.query(fmtRes.rows[0].stmt);
     }
 
     // Schema & Table Permissions
@@ -67,13 +62,14 @@ async function provisionAppRole() {
       END $$;
     `);
 
-    // Schema migrations table restriction
-    console.log(`[provision] Revoking ALL ON schema_migrations from '${appDbUser}'...`);
+    // Schema migrations table restriction: REVOKE ALL except GRANT SELECT
+    console.log(`[provision] Restricting schema_migrations to SELECT-only for '${appDbUser}'...`);
     await client.query(`
       DO $$
       BEGIN
         IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations') THEN
           EXECUTE format('REVOKE ALL ON TABLE schema_migrations FROM %I', '${appDbUser}');
+          EXECUTE format('GRANT SELECT ON TABLE schema_migrations TO %I', '${appDbUser}');
         END IF;
       END $$;
     `);

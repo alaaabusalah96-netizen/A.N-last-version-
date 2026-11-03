@@ -4,6 +4,28 @@ import { DbExecutor, QueryResult } from '../types.js';
 
 const { Pool } = pg;
 
+export function resolveSslConfig(env: Record<string, string | undefined>): pg.ConnectionConfig['ssl'] | undefined {
+  const isProd = env.NODE_ENV === 'production';
+
+  if (env.DATABASE_SSL === 'disable') {
+    if (isProd && env.ALLOW_INSECURE_DB_SSL !== '1') {
+      throw new Error(
+        'Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production unless ALLOW_INSECURE_DB_SSL=1 is explicitly set'
+      );
+    }
+    if (isProd && env.ALLOW_INSECURE_DB_SSL === '1') {
+      console.warn('[db] WARNING: ALLOW_INSECURE_DB_SSL=1 is set. Proceeding with insecure SSL connection in production.');
+    }
+    return undefined;
+  }
+
+  if (isProd || env.DATABASE_SSL === 'require') {
+    return { rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
+  }
+
+  return undefined;
+}
+
 class PostgresExecutor implements DbExecutor {
   private pool: pg.Pool;
 
@@ -89,26 +111,7 @@ export class PostgresqlAdapter implements DatabaseEngine {
       throw new Error('DATABASE_URL or config.connectionString is required to connect to PostgreSQL');
     }
 
-    const isProd = process.env.NODE_ENV === 'production';
-
-    // Strict security check: reject unencrypted DB connection in production unless explicitly overridden
-    if (isProd && process.env.DATABASE_SSL === 'disable') {
-      if (process.env.ALLOW_INSECURE_DB_SSL !== '1') {
-        throw new Error(
-          'Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production unless ALLOW_INSECURE_DB_SSL=1 is explicitly set'
-        );
-      } else {
-        console.warn('[db] WARNING: ALLOW_INSECURE_DB_SSL=1 is set. Proceeding with insecure SSL connection in production.');
-      }
-    }
-
-    const sslConfig = (() => {
-      if (process.env.DATABASE_SSL === 'disable') return undefined;
-      if (isProd || process.env.DATABASE_SSL === 'require') {
-        return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
-      }
-      return undefined;
-    })();
+    const sslConfig = resolveSslConfig(process.env);
 
     const pool = new Pool({
       connectionString,

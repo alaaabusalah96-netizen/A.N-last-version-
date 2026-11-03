@@ -1,5 +1,6 @@
 import { defaultMembershipRepository, MembershipRepository } from './membershipRepository.js';
 import { RoleName } from '../rbac/roles.js';
+import { DbExecutor } from '../db/types.js';
 
 export interface CompanyMembership {
   id: string;
@@ -20,30 +21,31 @@ export class MembershipStore {
     userId: string,
     companyId: string,
     role: RoleName,
-    isActive: boolean = true
+    isActive: boolean = true,
+    customExecutor?: DbExecutor
   ): Promise<CompanyMembership> {
-    return this.repo.addMember(userId, companyId, role, isActive);
+    return this.repo.addMember(userId, companyId, role, isActive, customExecutor);
   }
 
-  async getMembership(userId: string, companyId: string): Promise<CompanyMembership | null> {
-    return this.repo.getMembership(userId, companyId);
+  async getMembership(userId: string, companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership | null> {
+    return this.repo.getMembership(userId, companyId, customExecutor);
   }
 
-  async hasMembership(userId: string, companyId: string): Promise<boolean> {
-    const m = await this.repo.getMembership(userId, companyId);
+  async hasMembership(userId: string, companyId: string, customExecutor?: DbExecutor): Promise<boolean> {
+    const m = await this.repo.getMembership(userId, companyId, customExecutor);
     return Boolean(m && m.isActive !== false);
   }
 
-  async listByUser(userId: string): Promise<CompanyMembership[]> {
-    return this.repo.listByUser(userId);
+  async listByUser(userId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
+    return this.repo.listByUser(userId, customExecutor);
   }
 
-  async listByCompany(companyId: string): Promise<CompanyMembership[]> {
-    return this.repo.listByCompany(companyId);
+  async listByCompany(companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
+    return this.repo.listByCompany(companyId, customExecutor);
   }
 
-  async setMembershipStatus(userId: string, companyId: string, isActive: boolean): Promise<boolean> {
-    return this.repo.setMembershipStatus(userId, companyId, isActive);
+  async setMembershipStatus(userId: string, companyId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
+    return this.repo.setMembershipStatus(userId, companyId, isActive, customExecutor);
   }
 
   clear(): void {
