@@ -6,6 +6,7 @@ console.log('=== RUNNING FOUNDATION TEST BATTERY ===');
 console.log('========================================');
 
 const scripts = [
+  'scripts/verifyNoMemoryFallback.ts',
   'scripts/verifyFixRbacCompanies.ts',
   'scripts/verifyFixDbWiring.ts',
   'scripts/verifyRepair2.ts',

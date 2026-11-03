@@ -8,6 +8,9 @@ const rootDir = process.cwd();
 async function runTests() {
   let passed = 0;
   let failed = 0;
+  let blocked = 0;
+
+  const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim() !== '');
 
   // Test 1: vite.config.ts must be completely free of devApiPlugin, AdminPass123, dev_token_
   const viteConfigPath = path.join(rootDir, 'vite.config.ts');
@@ -42,8 +45,7 @@ async function runTests() {
   if (
     emptyRes === null &&
     spaceRes === null &&
-    dbIndexContent.includes('!companyId?.trim()') ||
-    dbIndexContent.includes('!companyId || !companyId.trim()')
+    (dbIndexContent.includes('!companyId?.trim()') || dbIndexContent.includes('!companyId || !companyId.trim()'))
   ) {
     console.log('[PASS] getExecutorForCompany strictly fails closed on empty / whitespace companyId');
     passed++;
@@ -58,8 +60,8 @@ async function runTests() {
 
   if (
     companyRoutesContent.includes('requirePlatformAdmin') &&
-    companyRoutesContent.includes("companyRoutes.post(\n  '/',\n  requireAuth,\n  requirePlatformAdmin") ||
-    companyRoutesContent.includes("requirePlatformAdmin,")
+    (companyRoutesContent.includes("companyRoutes.post(\n  '/',\n  requireAuth,\n  requirePlatformAdmin") ||
+      companyRoutesContent.includes("requirePlatformAdmin,"))
   ) {
     console.log('[PASS] POST /api/companies is strictly restricted to platform_admin via requirePlatformAdmin');
     passed++;
@@ -68,30 +70,40 @@ async function runTests() {
     failed++;
   }
 
-  // Test 5: Inactive membership is rejected in rbacService
-  const { MembershipStore } = await import('../src/server/org/membershipStore.js');
-  const { RbacService } = await import('../src/server/rbac/rbacService.js');
-  const testStore = new MembershipStore();
-  const rbac = new RbacService(testStore);
-
-  const testUser = {
-    id: 'u-inactive-test',
-    username: 'carol',
-    role: 'user' as const,
-    companyId: 'comp-X',
-    createdAt: new Date().toISOString(),
-  };
-
-  // Add inactive membership
-  await testStore.addMember(testUser.id, 'comp-X', 'company_admin', false);
-  const allowed = await rbac.hasPermission(testUser, 'company:read', 'comp-X');
-
-  if (!allowed) {
-    console.log('[PASS] Inactive membership (isActive=false) is rejected by RBAC');
-    passed++;
+  // Test 5: Inactive membership rejection (Live DB test or BLOCKED)
+  if (!hasDb) {
+    console.log('[BLOCKED] DATABASE_URL is not set. Live inactive membership RBAC test is BLOCKED.');
+    blocked++;
   } else {
-    console.error('[FAIL] Inactive membership was incorrectly allowed by RBAC');
-    failed++;
+    try {
+      const { MembershipStore } = await import('../src/server/org/membershipStore.js');
+      const { RbacService } = await import('../src/server/rbac/rbacService.js');
+      const testStore = new MembershipStore();
+      const rbac = new RbacService(testStore);
+
+      const testUser = {
+        id: 'u-inactive-test',
+        username: 'carol',
+        role: 'user' as const,
+        companyId: 'comp-X',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Add inactive membership to DB
+      await testStore.addMember(testUser.id, 'comp-X', 'company_admin', false);
+      const allowed = await rbac.hasPermission(testUser, 'company:read', 'comp-X');
+
+      if (!allowed) {
+        console.log('[PASS] Inactive membership (isActive=false) is rejected by RBAC');
+        passed++;
+      } else {
+        console.error('[FAIL] Inactive membership was incorrectly allowed by RBAC');
+        failed++;
+      }
+    } catch (err) {
+      console.error('[FAIL] Error testing inactive membership in DB:', err);
+      failed++;
+    }
   }
 
   // Test 6: Production SSL rejects disable without override
@@ -108,7 +120,7 @@ async function runTests() {
     failed++;
   }
 
-  console.log(`Passed: ${passed} | Failed: ${failed}`);
+  console.log(`Summary -> Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked}`);
   if (failed > 0) {
     process.exit(1);
   }

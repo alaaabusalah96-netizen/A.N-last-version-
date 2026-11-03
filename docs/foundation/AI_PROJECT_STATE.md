@@ -5,7 +5,7 @@
 - `UNIT_TESTED`: تم إجراء اختبارات سلوكية للأجزاء المنفذة.
 - `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات و RLS.
 - `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والعزل.
-- `PRODUCTION_READY`: جاهز بعد نجاح اختبارات CI في بيئة الإنتاج.
+- `PRODUCTION_READY`: جاهز بعد نجاح اختبارات CI في بيئة الإنتاج بوجود `REQUIRE_DB=1`.
 
 ---
 
@@ -20,13 +20,14 @@
 - **AN-TENANT-ISOLATION-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
 - **AN-AUTH-SECURITY-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
 - **AN-FOUNDATION-CI-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-  - بطارية اختبارات موحدة `npm run test:foundation`.
-  - سير عمل GitHub Actions متكامل مع خدمة PostgreSQL 16 حية.
+- **AN-FIX-NO-MEMORY-FALLBACK-1**: `IMPLEMENTED` + `SECURITY_VERIFIED`
+  - تم إزالة أي تراجع صامت لذاكرة الـ Map من كافة المستودعات (`MembershipRepository`, `UserRepository`, `SessionRepository`, `CompanyRepository`).
+  - النظام يدعم فقط PostgreSQL؛ وعند غياب قاعدة البيانات ترمي المستودعات صراحة `DB_UNAVAILABLE`.
+  - التطبيق ليس `PRODUCTION_READY` بعد حتى نجاح تشغيل CI الخارجي الكامل بوجود `REQUIRE_DB=1`.
 
 ---
 
 ## 3. محددات الأمان وقاعدة عدم البدء التلقائي
 - **حظر Firebase**: مؤكد ومفروض قطعيًا (`FORBIDDEN`).
 - **الموقف الحالي**: توقف تام وانتظار الاعتماد البشري.
-- **الحزمة التالية المقترحة**: `P05` (تتطلب أمرًا صريحًا من المستخدم).
 - **بدء P05**: ممنوع منعًا باتًا البدء في P05 دون موافقة صريحة ومباشرة.

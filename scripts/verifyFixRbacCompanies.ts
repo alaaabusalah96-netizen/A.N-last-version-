@@ -9,9 +9,9 @@ console.log('--- Running Behavioral RBAC Verification ---');
 async function runTests() {
   let passed = 0;
   let failed = 0;
+  let blocked = 0;
 
-  const testStore = new MembershipStore();
-  const rbac = new RbacService(testStore);
+  const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim() !== '');
 
   // Users
   const platformAdmin: Omit<User, 'passwordHash'> = {
@@ -46,11 +46,10 @@ async function runTests() {
     createdAt: new Date().toISOString(),
   };
 
-  // Add memberships
-  await testStore.addMember(companyUser.id, 'comp-A', 'company_user');
-  await testStore.addMember(companyAdminUser.id, 'comp-A', 'company_admin');
+  const testStore = new MembershipStore();
+  const rbac = new RbacService(testStore);
 
-  // Test 1: platform_admin has company:read without companyId
+  // Test 1: platform_admin has company:read without companyId (no DB query required)
   const t1 = await rbac.hasPermission(platformAdmin, PERMISSIONS.COMPANY_READ);
   if (t1) {
     console.log('[PASS] platform_admin + company:read -> true');
@@ -60,47 +59,7 @@ async function runTests() {
     failed++;
   }
 
-  // Test 2: companyUser has membership in comp-A -> company:read without companyId -> true
-  const t2 = await rbac.hasPermission(companyUser, PERMISSIONS.COMPANY_READ);
-  if (t2) {
-    console.log('[PASS] member user + company:read without companyId -> true');
-    passed++;
-  } else {
-    console.error('[FAIL] member user + company:read without companyId should be true');
-    failed++;
-  }
-
-  // Test 3: orphanUser with NO membership -> company:read without companyId -> false
-  const t3 = await rbac.hasPermission(orphanUser, PERMISSIONS.COMPANY_READ);
-  if (!t3) {
-    console.log('[PASS] orphan user without membership -> false');
-    passed++;
-  } else {
-    console.error('[FAIL] orphan user should be false');
-    failed++;
-  }
-
-  // Test 4: companyUser checks companyId='comp-B' (not a member) -> false
-  const t4 = await rbac.hasPermission(companyUser, PERMISSIONS.COMPANY_READ, 'comp-B');
-  if (!t4) {
-    console.log('[PASS] companyUser for non-member comp-B -> false');
-    passed++;
-  } else {
-    console.error('[FAIL] companyUser for non-member comp-B should be false');
-    failed++;
-  }
-
-  // Test 5: companyUser (role=company_user) checks company:write on comp-A -> false
-  const t5 = await rbac.hasPermission(companyUser, PERMISSIONS.COMPANY_WRITE, 'comp-A');
-  if (!t5) {
-    console.log('[PASS] company_user role cannot company:write on comp-A -> false');
-    passed++;
-  } else {
-    console.error('[FAIL] company_user should not have company:write');
-    failed++;
-  }
-
-  // Test 6: company_admin cannot perform platform-only company creation (requirePlatformAdmin middleware test)
+  // Test 2: company_admin cannot perform platform-only company creation (requirePlatformAdmin middleware test)
   let rejected = false;
   let statusSet = 0;
   const mockReq: any = { user: companyAdminUser };
@@ -127,7 +86,7 @@ async function runTests() {
     failed++;
   }
 
-  // Test 7: platformAdmin passes requirePlatformAdmin middleware
+  // Test 3: platformAdmin passes requirePlatformAdmin middleware
   let platformPassed = false;
   const mockPlatformReq: any = { user: platformAdmin };
   requirePlatformAdmin(mockPlatformReq, mockRes, () => {
@@ -141,7 +100,39 @@ async function runTests() {
     failed++;
   }
 
-  console.log(`Passed: ${passed} | Failed: ${failed}`);
+  // Live DB membership tests (Skipped / BLOCKED if no DATABASE_URL)
+  if (!hasDb) {
+    console.log('[BLOCKED] DATABASE_URL is not set. Live RBAC database membership tests are BLOCKED.');
+    blocked++;
+  } else {
+    try {
+      // orphanUser with NO membership -> company:read without companyId -> false
+      const tOrphan = await rbac.hasPermission(orphanUser, PERMISSIONS.COMPANY_READ);
+
+      await testStore.addMember(companyUser.id, 'comp-A', 'company_user');
+      await testStore.addMember(companyAdminUser.id, 'comp-A', 'company_admin');
+
+      // companyUser has membership in comp-A -> company:read without companyId -> true
+      const dbT1 = await rbac.hasPermission(companyUser, PERMISSIONS.COMPANY_READ);
+      // companyUser checks companyId='comp-B' (not a member) -> false
+      const dbT2 = await rbac.hasPermission(companyUser, PERMISSIONS.COMPANY_READ, 'comp-B');
+      // companyUser (role=company_user) checks company:write on comp-A -> false
+      const dbT3 = await rbac.hasPermission(companyUser, PERMISSIONS.COMPANY_WRITE, 'comp-A');
+
+      if (!tOrphan && dbT1 && !dbT2 && !dbT3) {
+        console.log('[PASS] Live database membership RBAC permissions verified');
+        passed++;
+      } else {
+        console.error('[FAIL] Live database membership RBAC permission checks failed');
+        failed++;
+      }
+    } catch (err) {
+      console.error('[FAIL] Live database membership operation error:', err);
+      failed++;
+    }
+  }
+
+  console.log(`Summary -> Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked}`);
   if (failed > 0) {
     process.exit(1);
   }
