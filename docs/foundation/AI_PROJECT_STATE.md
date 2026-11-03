@@ -3,8 +3,8 @@
 ## 1. مفردات الحالة المعيارية المعتمدة
 - `IMPLEMENTED`: تم بناء الهيكل والكود وفق المواصفات.
 - `UNIT_TESTED`: تم إجراء اختبارات سلوكية للأجزاء المنفذة.
-- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات و RLS.
-- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والعزل.
+- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات.
+- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والحماية.
 - `PRODUCTION_READY`: جاهز للنشر الإنتاجي المالي.
 
 ---
@@ -18,14 +18,15 @@
 - **AN-FOUNDATION-REPAIR-2**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
 - **AN-PERSISTENCE-CORE-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
 - **AN-TENANT-ISOLATION-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-  - تنفيذ `withTenantTransaction` مع تعيين معامل `app.current_tenant_id` محليًا داخل المعاملة.
-  - تفعيل سياسات أمان الصفوف (`Row-Level Security - RLS`) على جداول العزل التجريبية.
-  - اختبارات عزل المستأجرين (`test:tenant`) مع الإبلاغ النظامي كـ `BLOCKED` عند غياب الاتصال.
+- **AN-AUTH-SECURITY-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
+  - تفعيل حماية CSRF عبر النمط المزدوج للكوكيز.
+  - سجل التدقيق الدائم (`Audit Logs`) للمصادقة والعمليات الإدارية.
+  - تحديد معدل المحاولات الفاشلة (`Rate Limit Store`) عبر جدول قاعدة البيانات.
 
 ---
 
 ## 3. محددات الأمان وقاعدة عدم البدء التلقائي
 - **حظر Firebase**: مؤكد ومفروض قطعيًا (`FORBIDDEN`).
 - **الموقف الحالي**: توقف تام وانتظار الاعتماد البشري.
-- **الحزمة التالية المقترحة**: `AUTH-SECURITY-1` (بعد موافقة المستخدم).
+- **الحزمة التالية المقترحة**: `FOUNDATION-CI-1` (بعد موافقة المستخدم).
 - **بدء P05**: ممنوع منعًا باتًا البدء في P05 أو أي حزم محاسبية دون موافقة صريحة ومباشرة.

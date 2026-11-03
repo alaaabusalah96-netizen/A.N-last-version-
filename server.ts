@@ -6,6 +6,7 @@ import fs from 'fs';
 import { createCorsMiddleware } from './src/server/http/corsConfig.js';
 import { applySecurityMiddleware } from './src/server/http/securityMiddleware.js';
 import { handleLiveness, handleReadiness } from './src/server/http/readiness.js';
+import { csrfProtection } from './src/server/security/csrfProtection.js';
 import { authRoutes } from './src/server/routes/authRoutes.js';
 import { companyRoutes } from './src/server/routes/companyRoutes.js';
 import { defaultAuthService } from './src/server/auth/authService.js';
@@ -21,6 +22,9 @@ app.use(createCorsMiddleware());
 
 app.use(cookieParser());
 app.use(express.json());
+
+// Apply CSRF protection to all /api routes
+app.use('/api', csrfProtection);
 
 // Initialize platform admin from environment variables
 defaultAuthService.bootstrapPlatformAdminFromEnv().catch((err) => {

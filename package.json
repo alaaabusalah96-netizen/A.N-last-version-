@@ -16,6 +16,7 @@
     "test:repair2": "tsx scripts/verifyRepair2.ts",
     "test:persistence": "tsx scripts/verifyPersistence.ts",
     "test:tenant": "tsx scripts/verifyTenantIsolation.ts",
+    "test:auth-security": "tsx scripts/verifyAuthSecurity.ts",
     "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
