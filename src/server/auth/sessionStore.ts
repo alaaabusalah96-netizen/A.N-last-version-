@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import { defaultSessionRepository, SessionRepository } from './sessionRepository.js';
 
 export interface Session {
   id: string;
@@ -8,67 +8,42 @@ export interface Session {
 }
 
 /**
- * In-Memory Session Store
- * Handles cryptographically secure session tokens and expiration.
+ * Session Store (Delegates to PostgreSQL SessionRepository — No Map fallback)
  */
 export class SessionStore {
-  private sessions: Map<string, Session> = new Map();
+  constructor(private repo: SessionRepository = defaultSessionRepository) {}
 
-  private getTtlHours(): number {
-    const parsed = parseInt(process.env.SESSION_TTL_HOURS || '12', 10);
-    return isNaN(parsed) || parsed <= 0 ? 12 : parsed;
-  }
-
-  createSession(userId: string): Session {
-    if (!userId) {
-      throw new Error('userId is required to create a session');
-    }
-
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.getTtlHours() * 60 * 60 * 1000);
-
-    const session: Session = {
-      id: sessionId,
-      userId,
-      expiresAt,
-      createdAt: now,
+  async createSession(userId: string): Promise<Session & { rawToken?: string }> {
+    const res = await this.repo.createSession(userId);
+    return {
+      id: res.rawToken, // authService expects session.id to be the raw token set in cookie
+      userId: res.userId,
+      expiresAt: res.expiresAt,
+      createdAt: new Date(),
     };
-
-    this.sessions.set(sessionId, session);
-    return session;
   }
 
-  getSession(id: string): Session | null {
-    if (!id) return null;
-    const session = this.sessions.get(id);
-    if (!session) return null;
-
-    if (new Date() > session.expiresAt) {
-      this.sessions.delete(id);
-      return null;
-    }
-
-    return session;
+  async getSession(rawToken: string): Promise<Session | null> {
+    const rec = await this.repo.getSessionByToken(rawToken);
+    if (!rec) return null;
+    return {
+      id: rawToken,
+      userId: rec.userId,
+      expiresAt: rec.expiresAt,
+      createdAt: new Date(),
+    };
   }
 
-  revokeSession(id: string): boolean {
-    return this.sessions.delete(id);
+  async revokeSession(rawToken: string): Promise<boolean> {
+    return this.repo.revokeSessionByToken(rawToken);
   }
 
-  revokeAllForUser(userId: string): number {
-    let count = 0;
-    for (const [id, session] of this.sessions.entries()) {
-      if (session.userId === userId) {
-        this.sessions.delete(id);
-        count++;
-      }
-    }
-    return count;
+  async revokeAllForUser(userId: string): Promise<number> {
+    return this.repo.revokeAllForUser(userId);
   }
 
   clear(): void {
-    this.sessions.clear();
+    // No-op for database-backed store
   }
 }
 

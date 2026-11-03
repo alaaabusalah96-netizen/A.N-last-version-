@@ -47,12 +47,16 @@ authRoutes.post('/login', checkLoginRateLimit, async (req: Request, res: Respons
 });
 
 // POST /api/auth/logout
-authRoutes.post('/logout', (req: Request, res: Response) => {
+authRoutes.post('/logout', async (req: Request, res: Response) => {
   const cookieName = getSessionCookieName();
   const token = req.cookies?.[cookieName];
 
   if (token) {
-    defaultAuthService.logout(token);
+    try {
+      await defaultAuthService.logout(token);
+    } catch (err) {
+      console.error('[auth] Logout error:', err);
+    }
   }
 
   res.clearCookie(cookieName, {

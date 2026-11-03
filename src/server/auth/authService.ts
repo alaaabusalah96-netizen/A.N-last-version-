@@ -28,19 +28,19 @@ export class AuthService {
       throw new Error('Invalid username or password');
     }
 
-    const session = this.sessionStore.createSession(user.id);
+    const session = await this.sessionStore.createSession(user.id);
     const { passwordHash: _, ...safeUser } = user;
 
     return { session, user: safeUser };
   }
 
-  logout(sessionId: string): boolean {
+  async logout(sessionId: string): Promise<boolean> {
     if (!sessionId) return false;
-    return this.sessionStore.revokeSession(sessionId);
+    return await this.sessionStore.revokeSession(sessionId);
   }
 
   async getSessionUser(sessionId: string): Promise<Omit<User, 'passwordHash'> | null> {
-    const session = this.sessionStore.getSession(sessionId);
+    const session = await this.sessionStore.getSession(sessionId);
     if (!session) return null;
 
     const user = await this.userStore.findById(session.userId);
@@ -63,21 +63,26 @@ export class AuthService {
       return false;
     }
 
-    const existing = await this.userStore.findByUsername(username);
-    if (existing) {
+    try {
+      const existing = await this.userStore.findByUsername(username);
+      if (existing) {
+        return false;
+      }
+
+      const passwordHash = await hashPassword(password);
+      await this.userStore.createUser({
+        username,
+        passwordHash,
+        role: 'platform_admin',
+        companyId: null,
+      });
+
+      console.log(`[auth] Platform admin '${username}' initialized from environment variables.`);
+      return true;
+    } catch (err: unknown) {
+      console.error('[auth] Bootstrap platform admin skipped or failed:', err);
       return false;
     }
-
-    const passwordHash = await hashPassword(password);
-    await this.userStore.createUser({
-      username,
-      passwordHash,
-      role: 'platform_admin',
-      companyId: null,
-    });
-
-    console.log(`[auth] Platform admin '${username}' initialized from environment variables.`);
-    return true;
   }
 }
 

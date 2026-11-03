@@ -13,7 +13,9 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test:foundation": "tsx scripts/verifyFixRbacCompanies.ts && tsx scripts/verifyFixDbWiring.ts && tsx scripts/verifyRepair2.ts",
-    "test:repair2": "tsx scripts/verifyRepair2.ts"
+    "test:repair2": "tsx scripts/verifyRepair2.ts",
+    "test:persistence": "tsx scripts/verifyPersistence.ts",
+    "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -1,3 +1,4 @@
+import { defaultMembershipRepository, MembershipRepository } from './membershipRepository.js';
 import { RoleName } from '../rbac/roles.js';
 
 export interface CompanyMembership {
@@ -10,11 +11,10 @@ export interface CompanyMembership {
 }
 
 /**
- * Membership Store
- * Tracks user-to-company memberships and company-specific roles.
+ * Membership Store (Delegates to PostgreSQL MembershipRepository — No Map fallback)
  */
 export class MembershipStore {
-  private memberships: Map<string, CompanyMembership> = new Map();
+  constructor(private repo: MembershipRepository = defaultMembershipRepository) {}
 
   async addMember(
     userId: string,
@@ -22,52 +22,32 @@ export class MembershipStore {
     role: RoleName,
     isActive: boolean = true
   ): Promise<CompanyMembership> {
-    const key = `${userId}:${companyId}`;
-    const membership: CompanyMembership = {
-      id: key,
-      userId,
-      companyId,
-      role,
-      isActive,
-      createdAt: new Date().toISOString(),
-    };
-    this.memberships.set(key, membership);
-    return membership;
+    return this.repo.addMember(userId, companyId, role, isActive);
   }
 
   async getMembership(userId: string, companyId: string): Promise<CompanyMembership | null> {
-    const key = `${userId}:${companyId}`;
-    return this.memberships.get(key) || null;
+    return this.repo.getMembership(userId, companyId);
   }
 
   async hasMembership(userId: string, companyId: string): Promise<boolean> {
-    const key = `${userId}:${companyId}`;
-    const m = this.memberships.get(key);
+    const m = await this.repo.getMembership(userId, companyId);
     return Boolean(m && m.isActive !== false);
   }
 
   async listByUser(userId: string): Promise<CompanyMembership[]> {
-    return Array.from(this.memberships.values()).filter(
-      (m) => m.userId === userId && m.isActive !== false
-    );
+    return this.repo.listByUser(userId);
   }
 
   async listByCompany(companyId: string): Promise<CompanyMembership[]> {
-    return Array.from(this.memberships.values()).filter(
-      (m) => m.companyId === companyId && m.isActive !== false
-    );
+    return this.repo.listByCompany(companyId);
   }
 
   async setMembershipStatus(userId: string, companyId: string, isActive: boolean): Promise<boolean> {
-    const key = `${userId}:${companyId}`;
-    const m = this.memberships.get(key);
-    if (!m) return false;
-    m.isActive = isActive;
-    return true;
+    return this.repo.setMembershipStatus(userId, companyId, isActive);
   }
 
   clear(): void {
-    this.memberships.clear();
+    // No-op for database-backed store
   }
 }
 

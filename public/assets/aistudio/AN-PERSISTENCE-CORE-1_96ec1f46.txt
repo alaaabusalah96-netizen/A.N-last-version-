@@ -1,0 +1,164 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: AN-PERSISTENCE-CORE-1
+Type: FOUNDATION REPAIR — Phase 1 of Master Plan
+Executor: Google AI Studio (implement in repo, do not only advise)
+FORBIDDEN: P05 · Firebase · silent Map fallback · fake PASS tests
+CONSTRAINT: small files · do not inflate server.ts · reuse existing db/auth/rbac
+══════════════════════════════════════════════════════════════════
+
+## Context
+Users/sessions/companies/memberships still rely on in-memory Map (or must not fall back to Map).
+This package moves them to PostgreSQL via existing PostgresqlAdapter / getDefaultExecutor.
+Later packages: TENANT-ISOLATION-1 → AUTH-SECURITY-1 → INTEGRATION-TESTS → CI.
+Do NOT start tenant RLS full suite or P05 in this package.
+
+## Absolute rules
+1. Inspect HEAD before edit; write docs/foundation/REPAIR_MASTER_PREFLIGHT.md first.
+2. Reuse DbExecutor; no second DB stack.
+3. If DATABASE_URL missing: code + migrations still land; integration tests = BLOCKED (never PASS).
+4. No default passwords in source.
+5. Session: store token **hash** only.
+6. After success: status terms only IMPLEMENTED | UNIT_TESTED | INTEGRATION_TESTED | SECURITY_VERIFIED | PRODUCTION_READY.
+7. RESULTS REPORT last; no P05.
+
+──────────────────────────────────────────────────────────────────
+PHASE 0 — PREFLIGHT (mandatory before code change)
+──────────────────────────────────────────────────────────────────
+Inventory and write docs/foundation/REPAIR_MASTER_PREFLIGHT.md:
+- Current Map stores and all importers
+- Exact User/Session/Company/Membership interfaces
+- Whether REPAIR-2 removed vite mock (note YES/NO)
+- Existing migrations folder or none
+- package.json test scripts
+Do not edit application code until this file exists.
+
+──────────────────────────────────────────────────────────────────
+PHASE 1 — MIGRATIONS
+──────────────────────────────────────────────────────────────────
+Create database/migrations/ (SQL files, small):
+
+001_platform_users.sql
+- id UUID PK DEFAULT gen_random_uuid()
+- username UNIQUE NOT NULL, password_hash NOT NULL
+- platform_role VARCHAR, is_active BOOLEAN DEFAULT true
+- created_at, updated_at, last_login_at
+- extension pgcrypto if needed
+
+002_companies.sql
+- id UUID PK, code UNIQUE, name_ar, name_en nullable
+- is_active, database_mode DEFAULT 'central', database_connection_key nullable
+- created_by FK platform_users nullable, timestamps
+
+003_company_memberships.sql
+- id UUID, user_id FK, company_id FK, role_code, is_active DEFAULT true
+- UNIQUE(user_id, company_id), indexes
+
+004_user_sessions.sql
+- id UUID, user_id FK, token_hash UNIQUE NOT NULL
+- expires_at, revoked_at nullable, created_at, last_seen_at
+- ip_address, user_agent optional
+
+005_schema_migrations.sql (version tracking)
+- id / version text PK, applied_at
+
+Optional later (not required to finish CORE): audit_logs can wait for AUTH-SECURITY package unless trivial.
+
+Add scripts/migrate.ts:
+- reads DATABASE_URL via getDefaultExecutor or pg
+- applies pending files in order; records versions
+- fails closed if no DATABASE_URL when REQUIRE_DB=1
+package.json: "migrate": "tsx scripts/migrate.ts"
+
+──────────────────────────────────────────────────────────────────
+PHASE 2 — REPOSITORIES (new small files; keep store facades)
+──────────────────────────────────────────────────────────────────
+Create (do not duplicate if equivalent exists—adapt):
+src/server/auth/userRepository.ts
+src/server/auth/sessionRepository.ts
+src/server/org/companyRepository.ts
+src/server/org/membershipRepository.ts
+
+Each takes DbExecutor (or factory getDefaultExecutor).
+SQL parameterized only.
+
+Refactor:
+userStore.ts / sessionStore.ts / companyStore.ts / membershipStore.ts
+→ delegate to repositories; **remove Map as runtime path**.
+If DB unavailable: throw clear error (e.g. DB_UNAVAILABLE)—never silent memory.
+
+Preserve method names used by authService / routes where possible.
+
+Session create:
+- generate random token (crypto.randomBytes)
+- store sha256 (or argon2 hash) of token in DB
+- return raw token only to cookie layer once
+
+Bootstrap platform admin:
+- only from PLATFORM_ADMIN_USERNAME + PLATFORM_ADMIN_PASSWORD
+- create once if not exists; no default admin/AdminPass123 in code
+- requires DB
+
+──────────────────────────────────────────────────────────────────
+PHASE 3 — WIRING
+──────────────────────────────────────────────────────────────────
+- authService, authMiddleware, companyRoutes use async DB stores
+- startup: run migrate if safe flag RUN_MIGRATE_ON_BOOT=1 optional; else document npm run migrate
+- readiness: if DATABASE_URL set and connect fails → ready false / 503
+- production NODE_ENV=production without DATABASE_URL → not ready
+
+Ensure vite has NO mock API (if still present from old code: delete devApiPlugin and defaults as in REPAIR-2).
+
+──────────────────────────────────────────────────────────────────
+PHASE 4 — TESTS
+──────────────────────────────────────────────────────────────────
+scripts/verifyPersistence.ts
+Statuses: PASS | FAIL | BLOCKED | NOT_RUN
+- Without DATABASE_URL: all live cases BLOCKED, exit code non-zero if REQUIRE_DB=1 else exit 0 with explicit BLOCKED counts (never label BLOCKED as Passed)
+- With DATABASE_URL:
+  1) migrate
+  2) create user + company + membership + session
+  3) read back
+  4) simulate “new process” by new repository instances / clear any module cache and read again
+  5) revoke session → getSession null
+Print exact counts: Passed / Failed / Blocked
+
+scripts/verifyPersistenceStructural.ts optional: files exist, no "new Map" in those four store files for primary data.
+
+package.json:
+"test:persistence": "tsx scripts/verifyPersistence.ts"
+
+Run:
+npm run migrate (if URL present)
+npm run test:persistence
+npx tsc --noEmit
+
+──────────────────────────────────────────────────────────────────
+PHASE 5 — DOCS + STATE
+──────────────────────────────────────────────────────────────────
+docs/foundation/PERSISTENCE_CORE_RESULTS.md
+Update AI_PROJECT_STATE.md:
+- AN-PERSISTENCE-CORE-1: IMPLEMENTED + UNIT_TESTED or INTEGRATION_TESTED if DB tests PASS
+- Memory stores: removed for users/sessions/companies/memberships
+- Next: TENANT-ISOLATION-1 (human gate)
+- P05: BLOCKED
+- Firebase: FORBIDDEN
+
+git commit -m "feat(persistence-core): postgres users sessions companies memberships + migrations"
+
+STOP — do not start TENANT-ISOLATION or P05 in this run unless user explicitly sends that package.
+
+===== RESULTS REPORT =====
+PHASE: AN-PERSISTENCE-CORE-1
+PREFLIGHT_DOC: OK|FAIL
+MIGRATIONS: OK|FAIL
+MAP_REMOVED_USERS_SESSIONS_ORGS: OK|FAIL
+BOOTSTRAP_NO_DEFAULT_PASSWORD: OK|FAIL
+VERIFY_PERSISTENCE: Passed: <n> | Failed: <n> | Blocked: <n>
+DATABASE_URL_PRESENT: YES|NO
+TSC: OK|FAIL
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A
+P05_STARTED: NO
+NEXT: TENANT-ISOLATION-1 (await human)
+NOTES: <one line>
+===========================

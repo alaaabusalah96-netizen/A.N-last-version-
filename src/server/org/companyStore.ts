@@ -1,54 +1,30 @@
-import crypto from 'crypto';
+import { defaultCompanyRepository, CompanyRepository } from './companyRepository.js';
 import { Company, CreateCompanyInput } from './companyTypes.js';
 
 /**
- * In-Memory Company Store (V1 Organization Foundation)
- * Encapsulates tenant/company persistence behind a clean interface.
+ * Company Store (Delegates to PostgreSQL CompanyRepository — No Map fallback)
  */
 export class CompanyStore {
-  private companies: Map<string, Company> = new Map();
+  constructor(private repo: CompanyRepository = defaultCompanyRepository) {}
 
   async create(input: CreateCompanyInput): Promise<Company> {
-    const normalizedCode = input.code.trim().toUpperCase();
-    const existing = await this.findByCode(normalizedCode);
-    if (existing) {
-      throw new Error(`Company with code '${normalizedCode}' already exists`);
-    }
-
-    const company: Company = {
-      id: crypto.randomUUID(),
-      code: normalizedCode,
-      nameAr: input.nameAr.trim(),
-      nameEn: input.nameEn?.trim(),
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      createdBy: input.createdBy,
-    };
-
-    this.companies.set(company.id, company);
-    return company;
+    return this.repo.create(input);
   }
 
   async getById(id: string): Promise<Company | null> {
-    return this.companies.get(id) || null;
+    return this.repo.getById(id);
   }
 
   async findByCode(code: string): Promise<Company | null> {
-    const normalized = code.trim().toUpperCase();
-    for (const company of this.companies.values()) {
-      if (company.code === normalized) {
-        return company;
-      }
-    }
-    return null;
+    return this.repo.findByCode(code);
   }
 
   async list(): Promise<Company[]> {
-    return Array.from(this.companies.values());
+    return this.repo.list();
   }
 
   clear(): void {
-    this.companies.clear();
+    // No-op for database-backed store
   }
 }
 

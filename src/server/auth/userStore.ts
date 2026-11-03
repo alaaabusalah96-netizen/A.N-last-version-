@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import { defaultUserRepository, UserRepository } from './userRepository.js';
 
 export interface User {
   id: string;
@@ -17,52 +17,29 @@ export interface CreateUserInput {
 }
 
 /**
- * In-Memory User Store (V1 Core Identity)
- * Encapsulates user retrieval and creation behind a clean interface.
+ * User Store (Delegates to PostgreSQL UserRepository — No Map fallback)
  */
 export class UserStore {
-  private users: Map<string, User> = new Map();
+  constructor(private repo: UserRepository = defaultUserRepository) {}
 
   async createUser(input: CreateUserInput): Promise<User> {
-    const normalizedUsername = input.username.trim().toLowerCase();
-    const existing = await this.findByUsername(normalizedUsername);
-    if (existing) {
-      throw new Error(`User with username '${normalizedUsername}' already exists`);
-    }
-
-    const user: User = {
-      id: crypto.randomUUID(),
-      username: normalizedUsername,
-      passwordHash: input.passwordHash,
-      role: input.role,
-      companyId: input.companyId ?? null,
-      createdAt: new Date().toISOString(),
-    };
-
-    this.users.set(user.id, user);
-    return user;
+    return this.repo.createUser(input);
   }
 
   async findByUsername(username: string): Promise<User | null> {
-    const normalized = username.trim().toLowerCase();
-    for (const user of this.users.values()) {
-      if (user.username === normalized) {
-        return user;
-      }
-    }
-    return null;
+    return this.repo.findByUsername(username);
   }
 
   async findById(id: string): Promise<User | null> {
-    return this.users.get(id) || null;
+    return this.repo.findById(id);
   }
 
   async listUsers(): Promise<Omit<User, 'passwordHash'>[]> {
-    return Array.from(this.users.values()).map(({ passwordHash: _, ...safeUser }) => safeUser);
+    return this.repo.listUsers();
   }
 
   clear(): void {
-    this.users.clear();
+    // No-op for database-backed store
   }
 }
 
