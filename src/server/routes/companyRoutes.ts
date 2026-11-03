@@ -4,6 +4,7 @@ import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultMembershipStore } from '../org/membershipStore.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { requirePermission } from '../rbac/requirePermission.js';
+import { requirePlatformAdmin } from '../rbac/requirePlatformAdmin.js';
 
 export const companyRoutes = Router();
 
@@ -34,11 +35,11 @@ companyRoutes.get(
   }
 );
 
-// POST /api/companies — requireAuth + platform_admin only (V1)
+// POST /api/companies — requireAuth + platform_admin ONLY (Strict platform governance)
 companyRoutes.post(
   '/',
   requireAuth,
-  requirePermission(PERMISSIONS.COMPANY_WRITE),
+  requirePlatformAdmin,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const user = req.user!;
@@ -59,7 +60,7 @@ companyRoutes.post(
       });
 
       // Automatically grant the creator company_admin membership in the newly created company
-      await defaultMembershipStore.addMember(user.id, company.id, 'company_admin');
+      await defaultMembershipStore.addMember(user.id, company.id, 'company_admin', true);
 
       return res.status(201).json({ status: 'ok', company });
     } catch (err: unknown) {

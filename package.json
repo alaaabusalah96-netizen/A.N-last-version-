@@ -4,13 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "PORT=3001 tsx server.ts",
+    "dev:web": "vite",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist/server.cjs --packages=external",
     "start": "node dist/server.cjs",
     "server": "tsx server.ts",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test:foundation": "tsx scripts/verifyFixRbacCompanies.ts && tsx scripts/verifyFixDbWiring.ts"
+    "test:foundation": "tsx scripts/verifyFixRbacCompanies.ts && tsx scripts/verifyFixDbWiring.ts && tsx scripts/verifyRepair2.ts",
+    "test:repair2": "tsx scripts/verifyRepair2.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -37,6 +40,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^10.0.6",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",

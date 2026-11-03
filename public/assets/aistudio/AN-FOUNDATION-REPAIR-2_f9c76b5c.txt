@@ -1,0 +1,157 @@
+══════════════════════════════════════════════════════════════════
+PACKAGE: AN-FOUNDATION-REPAIR-2
+Type: HARDENING — لا P05 · لا محاسبة · لا Firebase
+Depends: repo after FIX-FOUNDATION-HARDENING-1 (commit ~31444162 or later)
+Executor: Google AI Studio
+CONSTRAINT: ملفات صغيرة؛ لا تضخم server.ts
+══════════════════════════════════════════════════════════════════
+
+## الهدف
+إغلاق الفجوات المتبقية بعد التقييمين الأخيرين:
+1) حذف نظام Vite التجريبي بالكامل (كلمات مرور افتراضية + API وهمي)
+2) توجيه /api في التطوير إلى Express الحقيقي
+3) إغلاق انحدار RBAC (إنشاء الشركات = platform_admin فقط)
+4) getExecutorForCompany يفشل مغلقًا إن companyId فارغ
+5) تشديد CORS في التطوير
+6) Rate limit: تنظيف + عدّ الفشل فقط على login
+7) SSL: منع DATABASE_SSL=disable في production إلا بصريح ALLOW_INSECURE_DB_SSL=1
+8) CSP أساسي عبر helmet (لا تترك contentSecurityPolicy:false بلا بديل)
+9) تصحيح AI_PROJECT_STATE: لا HARDENED/DONE زائف؛ استخدم مفردات الحالة
+10) عضوية isActive اختيارية في النموذج + احترامها في RBAC
+11) اختبارات تثبت حذف dev mock وعدم 403 الخاطئ وعدم سماح company_admin بإنشاء شركة
+
+## مفردات الحالة (ألزم التوثيق بها)
+IMPLEMENTED | UNIT_TESTED | INTEGRATION_TESTED | SECURITY_VERIFIED | PRODUCTION_READY
+لا تكتب DONE/HARDENED إلا مع دليل؛ بعد هذه الحزمة اكتب مثلًا:
+P02a: IMPLEMENTED + partial UNIT_TESTED (not PRODUCTION_READY)
+P03/P04: IMPLEMENTED (memory stores V1_ONLY)
+
+──────────────────────────────────────────────────────────────────
+الخطوة 0 — PRECHECK
+──────────────────────────────────────────────────────────────────
+```bash
+test -f vite.config.ts
+test -f src/server/rbac/rbacService.ts
+test -f src/server/routes/companyRoutes.ts
+grep -n "devApiPlugin\|AdminPass123\|dev_token_" vite.config.ts || true
+```
+
+──────────────────────────────────────────────────────────────────
+1) إزالة Vite mock API بالكامل
+──────────────────────────────────────────────────────────────────
+أعد كتابة vite.config.ts بحيث:
+- plugins: react + tailwind فقط — **احذف devApiPlugin بالكامل**
+- لا Map جلسات، لا شركات وهمية، لا admin/AdminPass123!
+- أضف proxy لكل /api إلى الخادم الحقيقي:
+
+```ts
+server: {
+  port: 3000,
+  host: '0.0.0.0',
+  proxy: {
+    '/api': {
+      target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:3001',
+      changeOrigin: true,
+    },
+  },
+},
+```
+
+في package.json:
+- "dev:api": "tsx server.ts" مع PORT=3001 في السكربت أو .env.example
+- "dev:web": "vite"
+- "dev": أبقِه واضحًا — إما concurrently إن وُجدت الحزمة، أو وثّق أن يجب تشغيل dev:api و dev:web
+  يُفضّل إضافة concurrently كـ devDependency و:
+  "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\""
+  مع PORT=3001 للـ API في dev:api
+
+.env.example:
+```
+PORT=3001
+API_PROXY_TARGET=http://127.0.0.1:3001
+# لا تضع كلمات مرور افتراضية في أي ملف كود
+```
+
+تحقق: grep -R "AdminPass123\|dev_token_\|devApiPlugin" --include='*.ts' --include='*.tsx' يجب أن يفشل (لا تطابق) ما عدا ربما docs تذكر الحذف.
+
+──────────────────────────────────────────────────────────────────
+2) RBAC — إنشاء الشركات للمنصة فقط + isActive
+──────────────────────────────────────────────────────────────────
+### permissions / routes
+POST /api/companies: ارفض إن user.role !== 'platform_admin' حتى لو عنده company:write
+(أضف middleware requirePlatformAdmin صغير في src/server/rbac/requirePlatformAdmin.ts)
+
+### rbacService
+- عند فحص عضوية: إن وُجد حقل isActive === false اعتبرها غير صالحة
+### membershipStore / types
+- أضف isActive: boolean افتراضي true للعضويات الجديدة
+
+### اختبار
+company_admin لديه company:write لكن POST إنشاء شركة → يجب أن يُرفض على مستوى المسار (platform only)
+
+──────────────────────────────────────────────────────────────────
+3) DB fail-closed + سياق المستأجر
+──────────────────────────────────────────────────────────────────
+### getExecutorForCompany(companyId)
+- إذا !companyId?.trim() → throw أو return null صراحة مع log؛ **لا** تُرجع default pool
+### مستند قصير في docs/foundation/TENANT_ISOLATION_STATUS.md
+- الحالة: IMPLEMENTED resolver+registry؛ NOT PRODUCTION_READY (لا RLS بعد؛ المخازن الذاكرة)
+- الحزم التالية المقترحة: PERSISTENCE-CORE ثم TENANT-ISOLATION
+
+──────────────────────────────────────────────────────────────────
+4) CORS / Rate limit / SSL / CSP
+──────────────────────────────────────────────────────────────────
+### corsConfig
+- لا تستخدم includes('localhost') بشكل يمرر evil-localhost.com
+- طابق أصلًا بدقة أو قائمة بادئات آمنة (http://localhost: و http://127.0.0.1:)
+- لا تسمح بنمط .run.app عام لكل التطبيقات؛ اطلب origins صريحة في CORS_ORIGINS
+
+### rate limit على login
+- عدّ المحاولات **الفاشلة** فقط (أو وثّق إن عدّ الكل)
+- TTL تنظيف دوري لمفاتيح Map القديمة
+
+### SSL
+- إذا NODE_ENV=production و DATABASE_SSL=disable دون ALLOW_INSECURE_DB_SSL=1 → ارفض الاتصال / ارمه خطأ عند connect
+
+### helmet
+- فعّل CSP مضبوطًا minimal مناسب لـ SPA (defaultSrc 'self'؛ scriptSrc 'self'؛ …) بدل contentSecurityPolicy: false
+- إن تعارض مع Vite في dev فقط، خفّف في development وليس production
+
+──────────────────────────────────────────────────────────────────
+5) اختبارات
+──────────────────────────────────────────────────────────────────
+scripts/verifyRepair2.ts يفشل إذا:
+- وُجد AdminPass123 أو dev_token_ أو devApiPlugin في vite.config.ts
+- getExecutorForCompany يقبل companyId فارغ ويعيد executor (افحص مصدر الدالة: يجب أن تتحقق من الفراغ)
+- POST companies غير محمي بـ platform_admin في companyRoutes
+
+scripts/verifyFixRbacCompanies.ts — أضف سيناريو: company_admin لا يُعتبر platform لإنشاء شركة (اختبار مسار requirePlatformAdmin إن أمكن)
+
+package.json:
+"test:repair2": "tsx scripts/verifyRepair2.ts"
+
+──────────────────────────────────────────────────────────────────
+6) توثيق
+──────────────────────────────────────────────────────────────────
+docs/foundation/REPAIR2_RESULTS.md
+حدّث AI_PROJECT_STATE.md بالمفردات الجديدة — أزل HARDENED الزائف
+MVP_SCOPE: جملة واحدة أن V1 مؤجل HR/… وفق الدستور؛ الخارطة الكاملة في PRODUCT_CONSTITUTION (لا تدّعِ أن كل الموديولات منفّذة)
+
+git commit -m "fix(repair2): remove vite mock auth, tighten RBAC/CORS/SSL, fail-closed tenant executor"
+
+STOP — لا P05.
+
+===== RESULTS REPORT =====
+PHASE: AN-FOUNDATION-REPAIR-2
+VITE_MOCK_REMOVED: OK|FAIL
+DEV_PROXY_OR_CONCURRENT: OK|FAIL
+PLATFORM_ONLY_CREATE_COMPANY: OK|FAIL
+EXECUTOR_FAIL_CLOSED: OK|FAIL
+CORS_TIGHTENED: OK|FAIL
+SSL_PROD_SAFE: OK|FAIL
+VERIFY_REPAIR2: Passed: <n> | Failed: <n>
+COMMIT: <hash|N/A>
+PUSH: OK|FAIL|N/A>
+P05_STARTED: NO
+NOTES: <سطر واحد>
+===========================

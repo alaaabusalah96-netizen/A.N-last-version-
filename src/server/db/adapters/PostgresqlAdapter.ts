@@ -82,9 +82,18 @@ export class PostgresqlAdapter implements DatabaseEngine {
       throw new Error('DATABASE_URL or config.connectionString is required to connect to PostgreSQL');
     }
 
+    const isProd = process.env.NODE_ENV === 'production';
+
+    // Strict security check: reject unencrypted DB connection in production unless explicitly overridden
+    if (isProd && process.env.DATABASE_SSL === 'disable' && process.env.ALLOW_INSECURE_DB_SSL !== '1') {
+      throw new Error(
+        'Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production unless ALLOW_INSECURE_DB_SSL=1 is explicitly set'
+      );
+    }
+
     const sslConfig = (() => {
       if (process.env.DATABASE_SSL === 'disable') return undefined;
-      if (process.env.NODE_ENV === 'production' || process.env.DATABASE_SSL === 'require') {
+      if (isProd || process.env.DATABASE_SSL === 'require') {
         return { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
       }
       return undefined;

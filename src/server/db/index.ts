@@ -48,14 +48,19 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
 /**
  * Resolves and provides a DbExecutor for a specific company/tenant.
  * Routes through TenantDatabaseResolver and ConnectionRegistry.
+ *
+ * FAIL-CLOSED: Refuses to return a default executor if companyId is empty or whitespace.
  */
 export async function getExecutorForCompany(companyId: string): Promise<DbExecutor | null> {
-  if (!companyId) {
-    return getDefaultExecutor();
+  if (!companyId || !companyId.trim()) {
+    console.error('[db] getExecutorForCompany: companyId must be a non-empty string. Refusing fallback to default (fail-closed).');
+    return null;
   }
 
+  const normalizedCompanyId = companyId.trim();
+
   // 1) Resolve tenant reference
-  const ref = defaultResolver.resolve(companyId);
+  const ref = defaultResolver.resolve(normalizedCompanyId);
 
   // 2) Check cache
   if (executorCache.has(ref.connectionKey)) {

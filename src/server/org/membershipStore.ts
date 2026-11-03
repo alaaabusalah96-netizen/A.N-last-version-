@@ -5,6 +5,7 @@ export interface CompanyMembership {
   userId: string;
   companyId: string;
   role: RoleName;
+  isActive: boolean;
   createdAt: string;
 }
 
@@ -15,13 +16,19 @@ export interface CompanyMembership {
 export class MembershipStore {
   private memberships: Map<string, CompanyMembership> = new Map();
 
-  async addMember(userId: string, companyId: string, role: RoleName): Promise<CompanyMembership> {
+  async addMember(
+    userId: string,
+    companyId: string,
+    role: RoleName,
+    isActive: boolean = true
+  ): Promise<CompanyMembership> {
     const key = `${userId}:${companyId}`;
     const membership: CompanyMembership = {
       id: key,
       userId,
       companyId,
       role,
+      isActive,
       createdAt: new Date().toISOString(),
     };
     this.memberships.set(key, membership);
@@ -35,15 +42,28 @@ export class MembershipStore {
 
   async hasMembership(userId: string, companyId: string): Promise<boolean> {
     const key = `${userId}:${companyId}`;
-    return this.memberships.has(key);
+    const m = this.memberships.get(key);
+    return Boolean(m && m.isActive !== false);
   }
 
   async listByUser(userId: string): Promise<CompanyMembership[]> {
-    return Array.from(this.memberships.values()).filter((m) => m.userId === userId);
+    return Array.from(this.memberships.values()).filter(
+      (m) => m.userId === userId && m.isActive !== false
+    );
   }
 
   async listByCompany(companyId: string): Promise<CompanyMembership[]> {
-    return Array.from(this.memberships.values()).filter((m) => m.companyId === companyId);
+    return Array.from(this.memberships.values()).filter(
+      (m) => m.companyId === companyId && m.isActive !== false
+    );
+  }
+
+  async setMembershipStatus(userId: string, companyId: string, isActive: boolean): Promise<boolean> {
+    const key = `${userId}:${companyId}`;
+    const m = this.memberships.get(key);
+    if (!m) return false;
+    m.isActive = isActive;
+    return true;
   }
 
   clear(): void {

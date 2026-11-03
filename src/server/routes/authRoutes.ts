@@ -1,15 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { defaultAuthService } from '../auth/authService.js';
 import { AuthenticatedRequest, getSessionCookieName, requireAuth } from '../auth/authMiddleware.js';
-import { loginRateLimiter } from '../http/securityMiddleware.js';
+import { checkLoginRateLimit, recordLoginFailure, recordLoginSuccess } from '../http/securityMiddleware.js';
 
 export const authRoutes = Router();
 
-// POST /api/auth/login — protected with loginRateLimiter
-authRoutes.post('/login', loginRateLimiter, async (req: Request, res: Response) => {
+// POST /api/auth/login — protected with checkLoginRateLimit
+authRoutes.post('/login', checkLoginRateLimit, async (req: Request, res: Response) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown-ip';
+
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {
+      recordLoginFailure(ip);
       return res.status(400).json({
         error: 'Bad Request',
         message: 'Username and password are required',
@@ -17,8 +20,9 @@ authRoutes.post('/login', loginRateLimiter, async (req: Request, res: Response) 
     }
 
     const { session, user } = await defaultAuthService.login(username, password);
-    const cookieName = getSessionCookieName();
+    recordLoginSuccess(ip);
 
+    const cookieName = getSessionCookieName();
     res.cookie(cookieName, session.id, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -33,6 +37,7 @@ authRoutes.post('/login', loginRateLimiter, async (req: Request, res: Response) 
       expiresAt: session.expiresAt,
     });
   } catch (err: unknown) {
+    recordLoginFailure(ip);
     const message = err instanceof Error ? err.message : 'Login failed';
     return res.status(401).json({
       error: 'Unauthorized',

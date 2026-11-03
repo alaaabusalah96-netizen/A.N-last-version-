@@ -2,14 +2,19 @@ import cors from 'cors';
 
 /**
  * Hardened CORS Configuration
- * Prevents wildcard origin reflection when credentials (cookies) are transmitted.
+ * Strictly prevents wildcard origin reflection and domain prefix spoofing (e.g. evil-localhost.com).
  */
 export function createCorsMiddleware() {
   const isProd = process.env.NODE_ENV === 'production';
   const allowedOriginsEnv = process.env.CORS_ORIGINS;
   const configuredOrigins = allowedOriginsEnv
-    ? allowedOriginsEnv.split(',').map((o) => o.trim())
+    ? allowedOriginsEnv
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean)
     : [];
+
+  const localOriginRegex = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
   return cors({
     origin: (origin, callback) => {
@@ -18,26 +23,22 @@ export function createCorsMiddleware() {
         return callback(null, true);
       }
 
-      // In production, strictly match configured origins
-      if (isProd) {
-        if (configuredOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(new Error(`CORS blocked for origin: ${origin}`));
-      }
-
-      // In development: allow configured origins, or localhost, or dev domains
-      if (
-        configuredOrigins.length === 0 ||
-        configuredOrigins.includes(origin) ||
-        origin.includes('localhost') ||
-        origin.includes('127.0.0.1') ||
-        origin.includes('.run.app')
-      ) {
+      // Check explicit configured origins first (exact match)
+      if (configuredOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      return callback(new Error(`CORS blocked in dev for origin: ${origin}`));
+      // In production: reject any origin not explicitly present in CORS_ORIGINS
+      if (isProd) {
+        return callback(new Error(`CORS policy violation: origin '${origin}' is not allowed`));
+      }
+
+      // In development: strictly allow exact localhost / 127.0.0.1 origins
+      if (localOriginRegex.test(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS policy violation in dev: origin '${origin}' is not permitted`));
     },
     credentials: true,
   });

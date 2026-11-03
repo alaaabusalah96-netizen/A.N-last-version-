@@ -2,6 +2,7 @@ import { User } from '../src/server/auth/userStore.js';
 import { MembershipStore } from '../src/server/org/membershipStore.js';
 import { RbacService } from '../src/server/rbac/rbacService.js';
 import { PERMISSIONS } from '../src/server/rbac/permissions.js';
+import { requirePlatformAdmin } from '../src/server/rbac/requirePlatformAdmin.js';
 
 console.log('--- Running Behavioral RBAC Verification ---');
 
@@ -21,6 +22,14 @@ async function runTests() {
     createdAt: new Date().toISOString(),
   };
 
+  const companyAdminUser: Omit<User, 'passwordHash'> = {
+    id: 'user-comp-admin',
+    username: 'dan',
+    role: 'user',
+    companyId: 'comp-A',
+    createdAt: new Date().toISOString(),
+  };
+
   const companyUser: Omit<User, 'passwordHash'> = {
     id: 'user-member-1',
     username: 'alice',
@@ -37,8 +46,9 @@ async function runTests() {
     createdAt: new Date().toISOString(),
   };
 
-  // Add memberships for companyUser
+  // Add memberships
   await testStore.addMember(companyUser.id, 'comp-A', 'company_user');
+  await testStore.addMember(companyAdminUser.id, 'comp-A', 'company_admin');
 
   // Test 1: platform_admin has company:read without companyId
   const t1 = await rbac.hasPermission(platformAdmin, PERMISSIONS.COMPANY_READ);
@@ -87,6 +97,47 @@ async function runTests() {
     passed++;
   } else {
     console.error('[FAIL] company_user should not have company:write');
+    failed++;
+  }
+
+  // Test 6: company_admin cannot perform platform-only company creation (requirePlatformAdmin middleware test)
+  let rejected = false;
+  let statusSet = 0;
+  const mockReq: any = { user: companyAdminUser };
+  const mockRes: any = {
+    status: (code: number) => {
+      statusSet = code;
+      return {
+        json: () => {
+          rejected = true;
+        },
+      };
+    },
+  };
+  const mockNext = () => {
+    rejected = false;
+  };
+
+  requirePlatformAdmin(mockReq, mockRes, mockNext);
+  if (rejected && statusSet === 403) {
+    console.log('[PASS] company_admin is strictly rejected (403) by requirePlatformAdmin middleware');
+    passed++;
+  } else {
+    console.error('[FAIL] company_admin was not rejected by requirePlatformAdmin');
+    failed++;
+  }
+
+  // Test 7: platformAdmin passes requirePlatformAdmin middleware
+  let platformPassed = false;
+  const mockPlatformReq: any = { user: platformAdmin };
+  requirePlatformAdmin(mockPlatformReq, mockRes, () => {
+    platformPassed = true;
+  });
+  if (platformPassed) {
+    console.log('[PASS] platform_admin passes requirePlatformAdmin middleware');
+    passed++;
+  } else {
+    console.error('[FAIL] platform_admin failed requirePlatformAdmin');
     failed++;
   }
 
