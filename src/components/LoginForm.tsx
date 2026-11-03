@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, User as UserIcon, LogIn, AlertCircle } from 'lucide-react';
+import { apiFetch } from '../lib/apiClient.js';
 
 interface LoginFormProps {
   onLoginSuccess: (user: { id: string; username: string; role: string }) => void;
@@ -17,17 +18,15 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ username, password }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.message || 'فشل تسجيل الدخول');
+        throw new Error(data.message || data.error || 'فشل تسجيل الدخول');
       }
 
       onLoginSuccess(data.user);

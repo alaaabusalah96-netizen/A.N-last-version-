@@ -15,11 +15,17 @@ const executorCache: Map<string, DbExecutor> = new Map();
 
 /**
  * Returns the default DbExecutor using PostgreSQL adapter and ConnectionRegistry.
- * Returns null if DATABASE_URL is not configured (graceful degradation in development).
+ * Returns null if DATABASE_URL is not configured in development mode.
+ * Throws DB_UNAVAILABLE in production if DATABASE_URL is missing or fails to connect.
  */
 export async function getDefaultExecutor(): Promise<DbExecutor | null> {
+  const isProd = process.env.NODE_ENV === 'production';
   const databaseUrl = process.env.DATABASE_URL;
+
   if (!databaseUrl || databaseUrl.trim() === '') {
+    if (isProd) {
+      throw new Error('DB_UNAVAILABLE: DATABASE_URL is strictly required in production mode');
+    }
     return null;
   }
 
@@ -27,7 +33,6 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
     return executorCache.get('default')!;
   }
 
-  // Register default connection configuration if not already present
   if (!defaultRegistry.has('default')) {
     defaultRegistry.register('default', { connectionString: databaseUrl });
   }
@@ -40,7 +45,10 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
     executorCache.set('default', executor);
     return executor;
   } catch (err: unknown) {
-    console.error('[db] Failed to initialize default PostgreSQL executor');
+    console.error('[db] Failed to initialize default PostgreSQL executor:', err);
+    if (isProd) {
+      throw new Error('DB_UNAVAILABLE: Failed to connect to default PostgreSQL database in production');
+    }
     return null;
   }
 }
@@ -49,12 +57,11 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
  * Resolves and provides a DbExecutor for a specific company/tenant.
  * Routes through TenantDatabaseResolver and ConnectionRegistry.
  *
- * FAIL-CLOSED: Refuses to return a default executor if companyId is empty or whitespace.
+ * FAIL-CLOSED: Throws TENANT_CONTEXT_REQUIRED if companyId is blank or whitespace.
  */
-export async function getExecutorForCompany(companyId: string): Promise<DbExecutor | null> {
+export async function getExecutorForCompany(companyId: string): Promise<DbExecutor> {
   if (!companyId || !companyId.trim()) {
-    console.error('[db] getExecutorForCompany: companyId must be a non-empty string. Refusing fallback to default (fail-closed).');
-    return null;
+    throw new Error('TENANT_CONTEXT_REQUIRED: companyId must be provided and non-empty');
   }
 
   const normalizedCompanyId = companyId.trim();
@@ -78,7 +85,7 @@ export async function getExecutorForCompany(companyId: string): Promise<DbExecut
   }
 
   if (!config) {
-    return null;
+    throw new Error(`DB_UNAVAILABLE: No database configuration found for tenant connection key '${ref.connectionKey}'`);
   }
 
   // 4) Connect via adapter and cache
@@ -88,7 +95,21 @@ export async function getExecutorForCompany(companyId: string): Promise<DbExecut
     executorCache.set(ref.connectionKey, executor);
     return executor;
   } catch (err: unknown) {
-    console.error(`[db] Failed to initialize executor for connection key: '${ref.connectionKey}'`);
-    return null;
+    console.error(`[db] Failed to initialize executor for connection key: '${ref.connectionKey}'`, err);
+    throw new Error(`DB_UNAVAILABLE: Failed to connect to database for tenant key '${ref.connectionKey}'`);
   }
+}
+
+/**
+ * Closes all cached database executors and clears the cache
+ */
+export async function closeAllExecutors(): Promise<void> {
+  for (const [key, executor] of executorCache.entries()) {
+    try {
+      await executor.close();
+    } catch (err) {
+      console.error(`[db] Error closing executor for key '${key}':`, err);
+    }
+  }
+  executorCache.clear();
 }

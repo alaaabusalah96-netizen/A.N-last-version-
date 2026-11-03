@@ -1,15 +1,16 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../auth/authMiddleware.js';
+import { wrap } from '../http/asyncHandler.js';
 
 /**
  * Middleware requiring the user to hold the 'platform_admin' role.
  * Restricts platform-wide tenant management actions (like creating new companies).
  */
-export function requirePlatformAdmin(
+export const requirePlatformAdmin = wrap(async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): void {
+): Promise<void> => {
   if (!req.user) {
     res.status(401).json({
       error: 'Unauthorized',
@@ -27,4 +28,4 @@ export function requirePlatformAdmin(
   }
 
   next();
-}
+});

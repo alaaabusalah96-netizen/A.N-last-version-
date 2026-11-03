@@ -1,4 +1,6 @@
 import { getDefaultExecutor } from '../db/index.js';
+import { DbExecutor } from '../db/types.js';
+import { AuditUnavailableError } from '../http/errors.js';
 
 export interface AuditLogInput {
   actorUserId?: string | null;
@@ -11,16 +13,28 @@ export interface AuditLogInput {
 }
 
 export class AuditRepository {
-  async log(input: AuditLogInput): Promise<void> {
+  async log(input: AuditLogInput, customExecutor?: DbExecutor): Promise<void> {
+    const executor = customExecutor || (await getDefaultExecutor());
+    if (!executor) {
+      throw new AuditUnavailableError('Database executor not available for audit logging');
+    }
+
+    const cleanMetadata = { ...input.metadata };
+    delete (cleanMetadata as any).password;
+    delete (cleanMetadata as any).token;
+    delete (cleanMetadata as any).cookie;
+
+    const userAgent = typeof cleanMetadata.userAgent === 'string' ? cleanMetadata.userAgent.substring(0, 200) : undefined;
+    if (userAgent) {
+      cleanMetadata.userAgent = userAgent;
+    }
+
+    const sql = `
+      INSERT INTO audit_logs (actor_user_id, company_id, action, entity_type, entity_id, ip_address, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6, $7);
+    `;
+
     try {
-      const executor = await getDefaultExecutor();
-      if (!executor) return; // Silent skip if DB not configured in dev/non-DB mode
-
-      const sql = `
-        INSERT INTO audit_logs (actor_user_id, company_id, action, entity_type, entity_id, ip_address, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7);
-      `;
-
       await executor.query(sql, [
         input.actorUserId || null,
         input.companyId || null,
@@ -28,10 +42,10 @@ export class AuditRepository {
         input.entityType || null,
         input.entityId || null,
         input.ipAddress || null,
-        JSON.stringify(input.metadata || {}),
+        JSON.stringify(cleanMetadata),
       ]);
     } catch (err) {
-      console.error('[audit] Failed to write audit log:', err);
+      throw new AuditUnavailableError(`Failed to write audit record: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

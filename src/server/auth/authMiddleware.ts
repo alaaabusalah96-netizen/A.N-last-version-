@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { defaultAuthService } from './authService.js';
 import { User } from './userStore.js';
+import { wrap } from '../http/asyncHandler.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: Omit<User, 'passwordHash'>;
@@ -14,12 +15,13 @@ export function getSessionCookieName(): string {
 /**
  * Middleware requiring a valid active session.
  * Reads token from httpOnly cookie (or Bearer Authorization header).
+ * Rejects inactive users with 401.
  */
-export async function requireAuth(
+export const requireAuth = wrap(async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): Promise<void> {
+): Promise<void> => {
   const cookieName = getSessionCookieName();
   let token = req.cookies?.[cookieName];
 
@@ -39,7 +41,7 @@ export async function requireAuth(
   }
 
   const user = await defaultAuthService.getSessionUser(token);
-  if (!user) {
+  if (!user || (user as any).isActive === false) {
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Session has expired or is invalid',
@@ -50,4 +52,4 @@ export async function requireAuth(
   req.user = user;
   req.sessionId = token;
   next();
-}
+});

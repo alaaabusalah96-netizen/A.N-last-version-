@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Plus, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { apiFetch } from '../lib/apiClient.js';
 
 export interface CompanyItem {
   id: string;
@@ -33,12 +34,10 @@ export function CompaniesPanel({ userRole }: CompaniesPanelProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/companies', {
-        credentials: 'include',
-      });
+      const res = await apiFetch('/api/companies');
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `HTTP ${res.status}`);
+        throw new Error(data.message || data.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
       setCompanies(data.companies || []);
@@ -59,10 +58,8 @@ export function CompaniesPanel({ userRole }: CompaniesPanelProps) {
     setSubmitting(true);
 
     try {
-      const res = await fetch('/api/companies', {
+      const res = await apiFetch('/api/companies', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           code: code.trim(),
           nameAr: nameAr.trim(),
@@ -72,7 +69,7 @@ export function CompaniesPanel({ userRole }: CompaniesPanelProps) {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || 'فشل إنشاء الشركة');
+        throw new Error(data.message || data.error || 'فشل إنشاء الشركة');
       }
 
       setCode('');

@@ -1,0 +1,45 @@
+/**
+ * Custom application errors for centralized error handling
+ */
+
+export class AppError extends Error {
+  constructor(
+    public statusCode: number,
+    public message: string,
+    public code: string
+  ) {
+    super(message);
+    this.name = 'AppError';
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export class InvalidCredentialsError extends AppError {
+  constructor(message = 'Invalid username or password') {
+    super(401, message, 'INVALID_CREDENTIALS');
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message = 'Resource conflict') {
+    super(409, message, 'CONFLICT');
+  }
+}
+
+export class NotFoundError extends AppError {
+  constructor(message = 'Resource not found') {
+    super(404, message, 'NOT_FOUND');
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(message = 'Validation failed') {
+    super(400, message, 'VALIDATION_ERROR');
+  }
+}
+
+export class AuditUnavailableError extends AppError {
+  constructor(message = 'Audit service unavailable') {
+    super(503, message, 'AUDIT_UNAVAILABLE');
+  }
+}

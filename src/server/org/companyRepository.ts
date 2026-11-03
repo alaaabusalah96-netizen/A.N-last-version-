@@ -1,5 +1,6 @@
 import { getDefaultExecutor } from '../db/index.js';
 import { Company, CreateCompanyInput } from './companyTypes.js';
+import { isUuid } from '../http/validators.js';
 
 export class CompanyRepository {
   private async getExecutor() {
@@ -14,6 +15,8 @@ export class CompanyRepository {
     const executor = await this.getExecutor();
     const normalizedCode = input.code.trim().toUpperCase();
 
+    const createdByUuid = input.createdBy && isUuid(input.createdBy) ? input.createdBy : null;
+
     const sql = `
       INSERT INTO companies (code, name_ar, name_en, created_by, is_active)
       VALUES ($1, $2, $3, $4, true)
@@ -24,7 +27,7 @@ export class CompanyRepository {
       normalizedCode,
       input.nameAr.trim(),
       input.nameEn?.trim() || null,
-      input.createdBy,
+      createdByUuid,
     ]);
 
     return res.rows[0];

@@ -1,4 +1,4 @@
-import { getDefaultExecutor } from './index.js';
+import { getExecutorForCompany } from './index.js';
 import { DbExecutor } from './types.js';
 import { tenantContextStorage } from './tenantContext.js';
 
@@ -16,10 +16,7 @@ export async function withTenantTransaction<T>(
   }
 
   const normalizedCompanyId = companyId.trim();
-  const executor = await getDefaultExecutor();
-  if (!executor) {
-    throw new Error('DB_UNAVAILABLE: Database executor required for tenant transactions');
-  }
+  const executor = await getExecutorForCompany(normalizedCompanyId);
 
   return await executor.withTransaction(async (tx) => {
     // Set transaction-local tenant context variable for RLS

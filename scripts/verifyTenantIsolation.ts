@@ -1,119 +1,164 @@
-import 'dotenv/config';
-import { getDefaultExecutor } from '../src/server/db/index.js';
-import { withTenantTransaction } from '../src/server/db/transactionManager.js';
-import { TenantDemoRepository } from '../src/server/org/tenantDemoRepository.js';
+import { check, blocked, summary } from './lib/testkit.js';
 import { CompanyRepository } from '../src/server/org/companyRepository.js';
+import { TenantDemoRepository } from '../src/server/org/tenantDemoRepository.js';
+import { withTenantTransaction } from '../src/server/db/transactionManager.js';
+import { getExecutorForCompany, getDefaultExecutor } from '../src/server/db/index.js';
 
-async function runTenantIsolationVerification() {
-  console.log('--- Running AN-TENANT-ISOLATION-1 Verification ---');
+console.log('--- Running Tenant Isolation Verification ---');
 
-  let passed = 0;
-  let failed = 0;
-  let blocked = 0;
-
-  const databaseUrl = process.env.DATABASE_URL;
-  const requireDb = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true';
-
-  if (!databaseUrl || databaseUrl.trim() === '') {
-    console.log('[BLOCKED] DATABASE_URL is not set. Live RLS tenant isolation tests are BLOCKED.');
-    blocked++;
-    console.log(`Summary -> Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked}`);
-    if (requireDb) {
-      console.error('[FAIL] REQUIRE_DB=1 is set but DATABASE_URL is missing.');
-      process.exit(1);
-    }
-    process.exit(0);
-  }
-
-  const executor = await getDefaultExecutor();
-  if (!executor) {
-    console.log('[BLOCKED] Failed to connect to PostgreSQL database.');
-    blocked++;
-    console.log(`Summary -> Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked}`);
-    process.exit(requireDb ? 1 : 0);
+async function runTests() {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl || dbUrl.trim() === '') {
+    blocked('DATABASE_URL is not set. Live RLS tenant isolation tests are BLOCKED.');
+    const { exitCode } = summary();
+    process.exit(exitCode);
+    return;
   }
 
   try {
+    const executor = await getDefaultExecutor();
+    if (!executor) {
+      blocked('Unable to connect to database for tenant isolation test.');
+      const { exitCode } = summary();
+      process.exit(exitCode);
+      return;
+    }
+
+    // Role check: Ensure not running as superuser or bypassrls role
+    const roleCheckRes = await executor.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+      'SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user'
+    );
+    const userRole = roleCheckRes.rows[0];
+
+    const isSuperOrBypass = userRole && (userRole.rolsuper || userRole.rolbypassrls);
+    if (isSuperOrBypass) {
+      await check(
+        'Isolation test role check (must NOT be superuser or BYPASSRLS)',
+        false,
+        'Connected user has BYPASSRLS or SUPERUSER privileges which bypasses RLS'
+      );
+      const { exitCode } = summary();
+      process.exit(exitCode);
+      return;
+    }
+
+    await check('Role is restricted (NOBYPASSRLS and NOSUPERUSER)', true);
+
     const companyRepo = new CompanyRepository();
     const demoRepo = new TenantDemoRepository();
 
     const suffix = Date.now();
-    const codeA = `TCA_${suffix}`;
-    const codeB = `TCB_${suffix}`;
+    const codeA = `ISO_A_${suffix}`;
+    const codeB = `ISO_B_${suffix}`;
 
-    // 1) Create Company A and B
-    const compA = await companyRepo.create({ code: codeA, nameAr: 'شركة أ', createdBy: '' });
-    const compB = await companyRepo.create({ code: codeB, nameAr: 'شركة ب', createdBy: '' });
+    // Create test companies A and B
+    const compA = await companyRepo.create({ code: codeA, nameAr: 'شركة العزل أ', createdBy: null });
+    const compB = await companyRepo.create({ code: codeB, nameAr: 'شركة العزل ب', createdBy: null });
 
-    if (compA && compB) {
-      console.log('[PASS] Created test companies A and B');
-      passed++;
-    } else {
-      console.error('[FAIL] Failed to create test companies');
-      failed++;
-    }
+    await check('Created test companies A and B', Boolean(compA && compB));
 
-    // 2) Insert items via withTenantTransaction
-    const itemA = await demoRepo.createItem(compA.id, 'Item for A');
-    const itemB = await demoRepo.createItem(compB.id, 'Item for B');
+    // 1 & 2) Insert items and check visibility
+    const itemA = await demoRepo.createItem(compA.id, 'Demo Item Company A');
+    const itemB = await demoRepo.createItem(compB.id, 'Demo Item Company B');
 
-    if (itemA && itemB) {
-      console.log('[PASS] Inserted demo items within tenant transactions');
-      passed++;
-    } else {
-      console.error('[FAIL] Failed to insert demo items');
-      failed++;
-    }
-
-    // 3) Select items under transaction A -> should only see A items
     const listA = await demoRepo.listItems(compA.id);
-    if (listA.length === 1 && listA[0].label === 'Item for A') {
-      console.log('[PASS] Tenant A transaction correctly isolates and sees only Tenant A items');
-      passed++;
-    } else {
-      console.error('[FAIL] Tenant A item isolation check failed', listA);
-      failed++;
-    }
+    await check(
+      'Company A transaction sees ONLY Company A items',
+      listA.length === 1 && listA[0].id === itemA.id
+    );
 
-    // 4) Select items under transaction B -> should only see B items
     const listB = await demoRepo.listItems(compB.id);
-    if (listB.length === 1 && listB[0].label === 'Item for B') {
-      console.log('[PASS] Tenant B transaction correctly isolates and sees only Tenant B items');
-      passed++;
-    } else {
-      console.error('[FAIL] Tenant B item isolation check failed', listB);
-      failed++;
-    }
+    await check(
+      'Company B transaction sees ONLY Company B items',
+      listB.length === 1 && listB[0].id === itemB.id
+    );
 
-    // 5) Empty companyId transaction -> must throw
-    let errorThrown = false;
+    // 3) Direct query without set_config returns 0 rows due to RLS
+    const directRes = await executor.query('SELECT * FROM tenant_demo_items;');
+    await check(
+      'Direct query on RLS table without set_config returns 0 rows',
+      directRes.rows.length === 0
+    );
+
+    // 4) Attempting to INSERT B's company_id inside A's transaction fails WITH CHECK
+    let checkFailed = false;
+    try {
+      await withTenantTransaction(compA.id, async (tx) => {
+        await tx.query(
+          'INSERT INTO tenant_demo_items (company_id, label) VALUES ($1, $2)',
+          [compB.id, 'Cross-tenant write attempt']
+        );
+      });
+    } catch {
+      checkFailed = true;
+    }
+    await check(
+      'Cross-tenant write with mismatched company_id is rejected by RLS WITH CHECK',
+      checkFailed
+    );
+
+    // 5) Calling withTenantTransaction('') throws TENANT_CONTEXT_REQUIRED
+    let emptyTxFailed = false;
     try {
       await withTenantTransaction('', async (tx) => {
         await tx.query('SELECT 1');
       });
-    } catch {
-      errorThrown = true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      emptyTxFailed = msg.includes('TENANT_CONTEXT_REQUIRED');
+    }
+    await check('withTenantTransaction("") throws TENANT_CONTEXT_REQUIRED', emptyTxFailed);
+
+    // 6) Concurrency test: 40 parallel withTenantTransaction calls alternating A and B
+    const tasks = Array.from({ length: 40 }, (_, i) => {
+      const targetCompany = i % 2 === 0 ? compA : compB;
+      const expectedLabel = i % 2 === 0 ? 'Demo Item Company A' : 'Demo Item Company B';
+
+      return withTenantTransaction(targetCompany.id, async (tx) => {
+        const res = await tx.query<{ label: string }>('SELECT label FROM tenant_demo_items');
+        return res.rows.length === 1 && res.rows[0].label === expectedLabel;
+      });
+    });
+
+    const concurrencyResults = await Promise.all(tasks);
+    const allConcurrentIsolated = concurrencyResults.every((res) => res === true);
+    await check('40 parallel concurrent transactions maintained strict RLS isolation', allConcurrentIsolated);
+
+    // 7) Session setting reset check on new pool client
+    const freshExecutor = await getDefaultExecutor();
+    if (freshExecutor) {
+      const settingRes = await freshExecutor.query<{ val: string }>(
+        "SELECT current_setting('app.current_tenant_id', true) as val"
+      );
+      const val = settingRes.rows[0]?.val;
+      await check(
+        'Tenant context variable resets after transaction completion',
+        !val || val === ''
+      );
     }
 
-    if (errorThrown) {
-      console.log('[PASS] Empty companyId transaction correctly throws error (fail-closed)');
-      passed++;
-    } else {
-      console.error('[FAIL] Empty companyId transaction should have thrown error');
-      failed++;
+    // 8) getExecutorForCompany('') throws TENANT_CONTEXT_REQUIRED
+    let emptyExecFailed = false;
+    try {
+      await getExecutorForCompany('');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      emptyExecFailed = msg.includes('TENANT_CONTEXT_REQUIRED');
     }
-  } catch (err: unknown) {
-    console.error('[FAIL] Exception during tenant isolation verification:', err);
-    failed++;
+    await check('getExecutorForCompany("") throws TENANT_CONTEXT_REQUIRED', emptyExecFailed);
+
+    // Cleanup test data
+    await executor.query('DELETE FROM tenant_demo_items WHERE company_id IN ($1, $2)', [compA.id, compB.id]);
+    await executor.query('DELETE FROM companies WHERE id IN ($1, $2)', [compA.id, compB.id]);
+  } catch (err) {
+    await check('Tenant isolation test execution', false, err instanceof Error ? err.message : String(err));
   }
 
-  console.log(`Summary -> Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked}`);
-  if (failed > 0) {
-    process.exit(1);
-  }
+  const { exitCode } = summary();
+  process.exit(exitCode);
 }
 
-runTenantIsolationVerification().catch((err) => {
-  console.error('Fatal test error:', err);
+runTests().catch((err) => {
+  console.error('Test execution error:', err);
   process.exit(1);
 });

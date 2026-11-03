@@ -6,50 +6,80 @@ console.log('=== RUNNING FOUNDATION TEST BATTERY ===');
 console.log('========================================');
 
 const scripts = [
-  'scripts/verifyNoMemoryFallback.ts',
   'scripts/verifyFixRbacCompanies.ts',
   'scripts/verifyFixDbWiring.ts',
   'scripts/verifyRepair2.ts',
   'scripts/verifyPersistence.ts',
   'scripts/verifyTenantIsolation.ts',
   'scripts/verifyAuthSecurity.ts',
+  'scripts/verifyRlsCoverage.ts',
+  'scripts/verifyHttpSecurity.ts',
+  'scripts/verifyRbacHttp.ts',
+  'scripts/verifyMigrations.ts',
 ];
 
-let totalPassed = 0;
-let totalFailed = 0;
-let totalBlocked = 0;
+interface ScriptRunResult {
+  script: string;
+  status: 'PASS' | 'FAIL' | 'BLOCKED';
+  exitCode: number | null;
+}
+
+const runResults: ScriptRunResult[] = [];
+let passedScripts = 0;
+let failedScripts = 0;
+let blockedScripts = 0;
+
+const tsxBin = path.resolve(process.cwd(), 'node_modules/.bin/tsx');
 
 for (const script of scripts) {
   console.log(`\n--- Running: ${script} ---`);
   const fullPath = path.resolve(process.cwd(), script);
-  const result = spawnSync('npx', ['tsx', fullPath], {
+
+  const result = spawnSync(tsxBin, [fullPath], {
     stdio: 'inherit',
     env: process.env,
   });
 
-  if (result.status !== 0) {
-    console.error(`[ERROR] Script failed or exited non-zero: ${script}`);
-    totalFailed++;
+  const exitCode = result.status;
+  let status: 'PASS' | 'FAIL' | 'BLOCKED' = 'FAIL';
+
+  if (exitCode === 0) {
+    status = 'PASS';
+    passedScripts++;
+  } else if (exitCode === 2) {
+    status = 'BLOCKED';
+    blockedScripts++;
   } else {
-    totalPassed++;
+    status = 'FAIL';
+    failedScripts++;
   }
+
+  runResults.push({ script, status, exitCode });
 }
 
-const requireDb = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true';
+const isDbRequired = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true' || process.env.CI === 'true';
 
-console.log('\n========================================');
-console.log('=== FOUNDATION BATTERY SUMMARY       ===');
-console.log(`Scripts Executed: ${scripts.length}`);
-console.log(`Passed Scripts:   ${totalPassed}`);
-console.log(`Failed Scripts:   ${totalFailed}`);
-console.log('========================================');
+console.log('\n======================================================');
+console.log('=== FOUNDATION BATTERY SUMMARY                      ===');
+console.log('======================================================');
+console.log('| Script                             | Status    | Exit |');
+console.log('|------------------------------------|-----------|------|');
+for (const r of runResults) {
+  const scriptName = r.script.padEnd(34, ' ');
+  const statusStr = r.status.padEnd(9, ' ');
+  const exitStr = String(r.exitCode ?? 'ERR').padStart(4, ' ');
+  console.log(`| ${scriptName} | ${statusStr} | ${exitStr} |`);
+}
+console.log('======================================================');
+console.log(`Total Scripts: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts}`);
 
-if (totalFailed > 0) {
+if (failedScripts > 0) {
+  console.error('\n[BATTERY ERROR] One or more test scripts FAILED.');
   process.exit(1);
 }
 
-if (requireDb && totalBlocked > 0) {
-  console.error('[ERROR] REQUIRE_DB=1 is set, but some checks reported BLOCKED.');
+if (isDbRequired && blockedScripts > 0) {
+  console.error('\n[BATTERY ERROR] REQUIRE_DB=1 or CI=true is set, but test scripts reported BLOCKED.');
   process.exit(1);
 }
 

@@ -17,6 +17,10 @@
     "test:persistence": "tsx scripts/verifyPersistence.ts",
     "test:tenant": "tsx scripts/verifyTenantIsolation.ts",
     "test:auth-security": "tsx scripts/verifyAuthSecurity.ts",
+    "test:http": "tsx scripts/verifyHttpSecurity.ts",
+    "test:rbac-http": "tsx scripts/verifyRbacHttp.ts",
+    "test:rls-coverage": "tsx scripts/verifyRlsCoverage.ts",
+    "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {

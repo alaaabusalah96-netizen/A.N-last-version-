@@ -5,12 +5,12 @@ export interface Company {
   nameEn?: string;
   isActive: boolean;
   createdAt: string;
-  createdBy: string;
+  createdBy: string | null;
 }
 
 export interface CreateCompanyInput {
   code: string;
   nameAr: string;
   nameEn?: string;
-  createdBy: string;
+  createdBy?: string | null;
 }

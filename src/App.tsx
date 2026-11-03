@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, LogOut, Layers, CheckCircle2, User, Key, RefreshCw } from 'lucide-react';
 import { LoginForm } from './components/LoginForm.js';
 import { CompaniesPanel } from './components/CompaniesPanel.js';
+import { apiFetch } from './lib/apiClient.js';
 
 interface AuthUser {
   id: string;
@@ -18,9 +19,7 @@ export default function App() {
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
     try {
-      const res = await fetch('/api/auth/me', {
-        credentials: 'include',
-      });
+      const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
         setCurrentUser(data.user);
@@ -41,9 +40,8 @@ export default function App() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      await fetch('/api/auth/logout', {
+      await apiFetch('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include',
       });
       setCurrentUser(null);
     } catch (err) {
@@ -70,7 +68,7 @@ export default function App() {
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            P04 Org RBAC
+            AN Foundation Repair
           </span>
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
             <ShieldCheck className="w-3.5 h-3.5" />
@@ -130,7 +128,7 @@ export default function App() {
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                     حوكمة الصلاحيات
                   </p>
-                  <p className="text-sm font-semibold text-emerald-400">RBAC + Company Context</p>
+                  <p className="text-sm font-semibold text-emerald-400">RBAC + Tenant Isolation</p>
                 </div>
               </div>
             </div>
@@ -146,7 +144,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500">
-        A.N ERP Platform &bull; الإصدار الأول V1 &bull; الحزمة المعتمدة P04
+        A.N ERP Platform &bull; الإصدار الأول V1
       </footer>
     </div>
   );

@@ -1,65 +1,134 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import { getDefaultExecutor } from '../src/server/db/index.js';
+import crypto from 'crypto';
+import pg from 'pg';
+
+const { Client } = pg;
 
 async function runMigrations() {
   console.log('--- Running Database Migrations ---');
 
-  const executor = await getDefaultExecutor();
-  if (!executor) {
-    const requireDb = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true';
-    console.warn('[migrate] No DATABASE_URL configured.');
-    if (requireDb) {
-      console.error('[migrate] ERROR: REQUIRE_DB=1 is set but DATABASE_URL is missing. Failing closed.');
+  const isProd = process.env.NODE_ENV === 'production';
+  const isCi = process.env.CI === 'true';
+  const requireDb = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true';
+
+  let migrationDbUrl = process.env.MIGRATION_DATABASE_URL;
+
+  if (!migrationDbUrl) {
+    if (isProd) {
+      console.error('[migrate] ERROR: MIGRATION_DATABASE_URL is strictly required in production!');
       process.exit(1);
     }
-    console.log('[migrate] Skipping migrations in local non-DB mode.');
+    console.warn('[migrate] WARNING: MIGRATION_DATABASE_URL is missing. Falling back to DATABASE_URL.');
+    migrationDbUrl = process.env.DATABASE_URL;
+  }
+
+  if (!migrationDbUrl || migrationDbUrl.trim() === '') {
+    console.warn('[migrate] No database connection string provided.');
+    if (requireDb || isCi || isProd) {
+      console.error('[migrate] ERROR: Database connection required. Failing closed.');
+      process.exit(1);
+    }
+    console.log('[migrate] Skipping migrations in non-DB mode.');
     return;
   }
 
-  // Ensure schema_migrations table exists first
-  await executor.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version VARCHAR(255) PRIMARY KEY,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
+  const client = new Client({ connectionString: migrationDbUrl });
 
-  const migrationsDir = path.resolve(process.cwd(), 'database/migrations');
-  if (!fs.existsSync(migrationsDir)) {
-    console.log('[migrate] No database/migrations directory found.');
-    return;
+  try {
+    await client.connect();
+  } catch (err) {
+    console.error('[migrate] Failed to connect to database for migration:', err);
+    if (requireDb || isCi || isProd) {
+      process.exit(1);
+    } else {
+      console.log('[migrate] Connection failed in local dev mode. Skipping.');
+      return;
+    }
   }
 
-  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  try {
+    // Ensure schema_migrations table exists with checksum column
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version VARCHAR(255) PRIMARY KEY,
+        checksum TEXT,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
 
-  // Get applied versions
-  const appliedResult = await executor.query<{ version: string }>('SELECT version FROM schema_migrations;');
-  const appliedVersions = new Set(appliedResult.rows.map((r) => r.version));
+    // Ensure checksum column exists if table was created in earlier migration
+    await client.query(`
+      ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT;
+    `);
 
-  for (const file of files) {
-    if (appliedVersions.has(file)) {
-      console.log(`[migrate] Skipping already applied: ${file}`);
-      continue;
+    const migrationsDir = path.resolve(process.cwd(), 'database/migrations');
+    if (!fs.existsSync(migrationsDir)) {
+      console.log('[migrate] No database/migrations directory found.');
+      return;
     }
 
-    console.log(`[migrate] Applying migration: ${file}`);
-    const filePath = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(filePath, 'utf8');
+    const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
 
-    await executor.withTransaction(async (tx) => {
-      await tx.query(sql);
-      await tx.query('INSERT INTO schema_migrations (version) VALUES ($1)', [file]);
-    });
+    // Fetch existing applied migrations
+    const appliedRes = await client.query<{ version: string; checksum: string | null }>(
+      'SELECT version, checksum FROM schema_migrations;'
+    );
+    const appliedMap = new Map<string, string | null>(appliedRes.rows.map((r) => [r.version, r.checksum]));
 
-    console.log(`[migrate] Successfully applied: ${file}`);
+    for (const file of files) {
+      const filePath = path.join(migrationsDir, file);
+      const sqlContent = fs.readFileSync(filePath, 'utf8');
+      const currentChecksum = crypto.createHash('sha256').update(sqlContent).digest('hex');
+
+      if (appliedMap.has(file)) {
+        const storedChecksum = appliedMap.get(file);
+        if (storedChecksum && storedChecksum !== currentChecksum) {
+          console.error(`[migrate] FATAL: Migration checksum mismatch for applied file '${file}'! Stored: ${storedChecksum}, Current: ${currentChecksum}`);
+          process.exit(1);
+        }
+        if (!storedChecksum) {
+          console.log(`[migrate] Backfilling missing checksum for applied migration: ${file}`);
+          await client.query('UPDATE schema_migrations SET checksum = $1 WHERE version = $2', [currentChecksum, file]);
+        } else {
+          console.log(`[migrate] Skipping already applied migration: ${file}`);
+        }
+        continue;
+      }
+
+      console.log(`[migrate] Applying migration: ${file}`);
+
+      try {
+        await client.query('BEGIN');
+        // Transaction-level advisory lock
+        await client.query('SELECT pg_advisory_xact_lock(727001)');
+
+        // Re-verify in case another process ran it
+        const recheckRes = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [file]);
+        if (recheckRes.rows.length === 0) {
+          await client.query(sqlContent);
+          await client.query('INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)', [
+            file,
+            currentChecksum,
+          ]);
+        }
+        await client.query('COMMIT');
+        console.log(`[migrate] Successfully applied: ${file}`);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`[migrate] ERROR: Failed to apply migration '${file}':`, err);
+        process.exit(1);
+      }
+    }
+
+    console.log('--- All Migrations Completed Successfully ---');
+  } finally {
+    await client.end();
   }
-
-  console.log('--- All Migrations Completed Successfully ---');
 }
 
 runMigrations().catch((err) => {
-  console.error('[migrate] Migration failed:', err);
+  console.error('[migrate] Migration script fatal error:', err);
   process.exit(1);
 });
