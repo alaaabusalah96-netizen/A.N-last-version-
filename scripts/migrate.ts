@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import pg from 'pg';
+import { resolveSslConfig } from '../src/server/db/adapters/PostgresqlAdapter.js';
 
 const { Client } = pg;
 
@@ -34,7 +35,11 @@ async function runMigrations() {
     return;
   }
 
-  const client = new Client({ connectionString: migrationDbUrl });
+  const sslConfig = resolveSslConfig(process.env);
+  const client = new Client({
+    connectionString: migrationDbUrl,
+    ssl: sslConfig,
+  });
 
   try {
     await client.connect();

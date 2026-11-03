@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { resolveSslConfig } from '../src/server/db/adapters/PostgresqlAdapter.js';
 
 const { Client } = pg;
 
@@ -19,7 +20,11 @@ async function provisionAppRole() {
 
   const appDbUser = process.env.APP_DB_USER || 'an_app';
 
-  const client = new Client({ connectionString: migrationDbUrl });
+  const sslConfig = resolveSslConfig(process.env);
+  const client = new Client({
+    connectionString: migrationDbUrl,
+    ssl: sslConfig,
+  });
   try {
     await client.connect();
 
