@@ -9,7 +9,7 @@ export * from './DatabaseEngine.js';
 export * from './ConnectionRegistry.js';
 export * from './TenantDatabaseResolver.js';
 export * from './tenantContext.js';
-export { PostgresqlAdapter } from './adapters/PostgresqlAdapter.js';
+export { PostgresqlAdapter, PostgresExecutor } from './adapters/PostgresqlAdapter.js';
 
 const executorCache: Map<string, DbExecutor> = new Map();
 

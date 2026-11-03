@@ -10,14 +10,8 @@ import { Server } from 'http';
 console.log('--- Running HTTP Security Verification (S9.1) ---');
 
 async function runTests() {
-  // 11) Unit test: withTransaction rollback error handling
+  // 1) ErrorHandler test: suppresses internal error details
   try {
-    const mockExecutor: any = {
-      health: async () => ({ ok: true }),
-    };
-    const { PostgresqlAdapter } = await import('../src/server/db/adapters/PostgresqlAdapter.js');
-    const adapter = new PostgresqlAdapter();
-    // Test that errorHandler hides secret internal details
     let errorHandledCorrectly = false;
     const mockRes: any = {
       status: (statusCode: number) => ({
@@ -31,44 +25,90 @@ async function runTests() {
     errorHandler(new Error('DB_UNAVAILABLE: secret_internal_detail'), {} as any, mockRes, (() => {}) as any);
     await check('ErrorHandler suppresses internal error details from response body', errorHandledCorrectly);
 
-    // R4.3: Unit test: PostgresqlAdapter withTransaction rollback failure
-    // When callback throws error A and ROLLBACK fails, error A must be thrown to caller
-    const mockClientWithFailingRollback: any = {
+    // 2) R4.3: Real PostgresqlAdapter.withTransaction behavioral tests
+    const { PostgresqlAdapter } = await import('../src/server/db/adapters/PostgresqlAdapter.js');
+
+    // Test Case A: When callback throws error A and ROLLBACK fails, error A must be thrown to caller and client.release(true) called
+    let rollbackAttempted = false;
+    let releasedWithError: boolean | undefined = undefined;
+    const mockFailingClient: any = {
       query: async (sql: string) => {
         if (sql === 'BEGIN') return {};
-        if (sql === 'ROLLBACK') throw new Error('ROLLBACK_FAILED_SOCKET_DEAD');
+        if (sql === 'ROLLBACK') {
+          rollbackAttempted = true;
+          throw new Error('ROLLBACK_DEAD_CONNECTION');
+        }
         return { rows: [] };
       },
-      release: () => {},
+      release: (errState?: boolean) => {
+        releasedWithError = errState;
+      },
     };
-    const mockPool: any = {
-      connect: async () => mockClientWithFailingRollback,
+
+    const mockFailingPool: any = {
+      connect: async () => mockFailingClient,
+      on: () => {},
     };
-    // Instantiate adapter or simulate its exact transaction block
-    let callerReceivedOriginalError = false;
+
+    const adapterFailing = new PostgresqlAdapter(() => mockFailingPool);
+    const executorFailing = await adapterFailing.connect({ connectionString: 'postgresql://mock:5432/test' });
+
+    let caughtError: Error | null = null;
     try {
-      const client = await mockPool.connect();
-      let hasError = false;
-      try {
-        await client.query('BEGIN');
+      await executorFailing.withTransaction(async () => {
         throw new Error('ORIGINAL_TRANSACTION_ERROR_A');
-      } catch (originalErr) {
-        hasError = true;
-        try {
-          await client.query('ROLLBACK');
-        } catch (rollbackErr) {
-          // Logged server-side without replacing originalErr
-        }
-        throw originalErr;
-      } finally {
-        client.release(hasError);
-      }
+      });
     } catch (err) {
-      if (err instanceof Error && err.message === 'ORIGINAL_TRANSACTION_ERROR_A') {
-        callerReceivedOriginalError = true;
-      }
+      caughtError = err as Error;
     }
-    await check('withTransaction re-throws original error A even when ROLLBACK fails', callerReceivedOriginalError);
+
+    await check(
+      'PostgresqlAdapter.withTransaction re-throws original error A even when ROLLBACK fails',
+      caughtError !== null && caughtError.message === 'ORIGINAL_TRANSACTION_ERROR_A'
+    );
+    await check(
+      'PostgresqlAdapter.withTransaction attempts ROLLBACK and calls client.release(true) on error',
+      rollbackAttempted && releasedWithError === true
+    );
+
+    // Test Case B: Success path: BEGIN -> COMMIT -> returns callback result, client.release(false) called
+    let beginCalled = false;
+    let commitCalled = false;
+    let releasedOnSuccess: boolean | undefined = undefined;
+    const mockSuccessClient: any = {
+      query: async (sql: string) => {
+        if (sql === 'BEGIN') {
+          beginCalled = true;
+          return {};
+        }
+        if (sql === 'COMMIT') {
+          commitCalled = true;
+          return {};
+        }
+        return { rows: [{ val: 123 }] };
+      },
+      release: (errState?: boolean) => {
+        releasedOnSuccess = errState;
+      },
+    };
+
+    const mockSuccessPool: any = {
+      connect: async () => mockSuccessClient,
+      on: () => {},
+    };
+
+    const adapterSuccess = new PostgresqlAdapter(() => mockSuccessPool);
+    const executorSuccess = await adapterSuccess.connect({ connectionString: 'postgresql://mock:5432/test' });
+
+    const successResult = await executorSuccess.withTransaction(async (tx) => {
+      const q = await tx.query<{ val: number }>('SELECT 1');
+      return q.rows[0].val * 2;
+    });
+
+    await check(
+      'PostgresqlAdapter.withTransaction executes BEGIN, commits, and returns callback result on success',
+      beginCalled && commitCalled && successResult === 246 && releasedOnSuccess === false
+    );
   } catch (err) {
     await check('Unit tests error handling', false, String(err));
   }
@@ -256,9 +296,8 @@ async function runTests() {
     }
     await check('DELETE or UPDATE mutation on audit_logs table is blocked by trigger', auditMutationBlocked);
 
-    // Cleanup test data
+    // Cleanup test rate events (platform_users remains in ephemeral CI DB due to audit_logs FK RESTRICT)
     await executor.query('DELETE FROM login_rate_events WHERE rate_key IN ($1, $2, $3)', [ipRateKey, userRateKey1, userRateKey2]);
-    await executor.query('DELETE FROM platform_users WHERE id = $1', [testUser.id]);
 
   } finally {
     if (server) server.close();

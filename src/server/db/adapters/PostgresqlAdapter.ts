@@ -26,7 +26,7 @@ export function resolveSslConfig(env: Record<string, string | undefined>): pg.Co
   return undefined;
 }
 
-class PostgresExecutor implements DbExecutor {
+export class PostgresExecutor implements DbExecutor {
   private pool: pg.Pool;
 
   constructor(pool: pg.Pool) {
@@ -98,8 +98,12 @@ class PostgresExecutor implements DbExecutor {
   }
 }
 
+export type PoolFactory = (config: pg.PoolConfig) => any;
+
 export class PostgresqlAdapter implements DatabaseEngine {
   readonly id = 'postgresql';
+
+  constructor(private poolFactory?: PoolFactory) {}
 
   async connect(config: Record<string, string>): Promise<DbExecutor> {
     const connectionString =
@@ -113,7 +117,7 @@ export class PostgresqlAdapter implements DatabaseEngine {
 
     const sslConfig = resolveSslConfig(process.env);
 
-    const pool = new Pool({
+    const poolConfig: pg.PoolConfig = {
       connectionString,
       ssl: sslConfig,
       max: config.max ? parseInt(config.max, 10) : 10,
@@ -121,9 +125,11 @@ export class PostgresqlAdapter implements DatabaseEngine {
       idleTimeoutMillis: 30000,
       statement_timeout: 15000,
       application_name: 'an-erp-platform',
-    });
+    };
 
-    pool.on('error', (err) => {
+    const pool = this.poolFactory ? this.poolFactory(poolConfig) : new Pool(poolConfig);
+
+    pool.on('error', (err: any) => {
       console.error('[db] Idle client error on pool:', err instanceof Error ? err.message : String(err));
     });
 

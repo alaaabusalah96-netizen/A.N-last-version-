@@ -23,15 +23,14 @@
 - **AN-FOUNDATION-REPAIR-3**: `IMPLEMENTED`
 - **AN-FOUNDATION-REPAIR-4**: `IMPLEMENTED`
 - **AN-FOUNDATION-REPAIR-5**: `IMPLEMENTED`
-  - CI_STATUS: `PENDING` (في انتظار تشغيل GitHub Actions الخارجي واستحصال العلامة الخضراء).
-  - إصلاح R1: توثيق استثناء `allowOptionalCompanyId` لجدول `platform_users` وتحسين استعلام catalog في `verifyRlsCoverage.ts` بالاعتماد المباشر على `pg_constraint`.
-  - إصلاح R2: تصحيح صلاحيات مستخدم الاختبار A في `verifyTenantHttp.ts` إلى `company_admin` وتمرير Transaction Executor في `tenantContextStorage` لمنع انقطاع السياق وتأكيد سلامة ROLLBACK وعدم تسرب السياق بين الشركات.
-  - إصلاح R3: تفعيل `loginAs()` المتوافقة مع CSRF Rotation في `verifyRbacHttp.ts` وإضافة أكواد الأخطاء الدقيقة (`FORBIDDEN_PLATFORM_ADMIN`).
-  - إصلاح R4: معالجة تكامل CORS وCSRF في `verifyHttpSecurity.ts`، وإضافة اختبارات عزل عداد IP في `RateLimitStore` واختبار صمود `withTransaction` عند تعثر ROLLBACK، واختبارات الجاهزية `/api/ready`.
-  - إصلاح R5: مقارنة شاملة لكافة ملفات migrations على القرص مع `schema_migrations` في `readiness.ts`، وإضافة اختبارات Idempotency وChecksum mismatch في `verifyMigrations.ts`.
-  - إصلاح R6: حصر أخطاء CORS بـ `CorsOriginError` فقط، وتحصين مسح `internalDetail` ومعالجة CR/LF في Request ID، وتوسيع اختبارات مصنع CSRF، وحارس صلاحيات قاعدة البيانات `assertSafeDbRole`، ودلالات فشل المصادقة `DB_UNAVAILABLE`.
-  - إصلاح R7: توحيد تقارير البطارية في ملف `foundation-test-report.json` و`foundation-battery.log` ورفعها كـ Artifact مع مهلة استبقاء 7 أيام.
-  - تنبيه بيئة CI: قاعدة بيانات PostgreSQL المستخدمة في سير عمل GitHub Actions هي قاعدة بيانات اختبارية مؤقتة (Ephemeral Test Database) مخصصة فقط لتشغيل بطارية الفحص، وليست قاعدة بيانات إنتاجية للمشروع أو قاعدة بيانات العميل. لا يُعلن عن أي ترقية لحالة `SECURITY_VERIFIED` أو `INTEGRATION_TESTED` أو `PRODUCTION_READY` قبل استكمال تشغيل أخضر لـ CI برقم run وcommit SHA محددين.
+- **AN-FOUNDATION-REPAIR-6**: `IMPLEMENTED` + `UNIT_TESTED`
+  - CI_STATUS: `PENDING` (في انتظار تشغيل GitHub Actions للتحقق من تشغيل البطارية الحية على بيئة CI).
+  - تصحيح `verifyHttpSecurity.ts`: إزالة حذف `testUser` المتعارض مع قيد `audit_logs` FK RESTRICT وقاعدة Append-Only، واختبار الدالة الفعلية `PostgresqlAdapter.withTransaction` بسلوك حقيقي على mock client ومحاكاة فشل ROLLBACK دون استبدال الخطأ الأصلي، واختبار مسار النجاح والـ client release.
+  - تصحيح `verifyRbacHttp.ts`: تصحيح استعلام التحقق من حدث إنشاء الشركة لاستخدام العمود الحقيقي `action = 'company.create'` بدلاً من العمود غير الموجود `event`، وإلغاء محاولات تفريغ وحذف سجلات التدقيق والشركات والمستخدمين المرتبطة بقيود RESTRICT في الـ cleanup.
+  - تصحيح `verifyTenantHttp.ts`: بناء اختبار تراجع المعاملات (Rollback) الفعلي عبر تنفيذ INSERT حقيقي داخل المعاملة ثم إلقاء خطأ اختباري والتأكد من عدم وجود أي كتابة جزئية بعد التراجع خارج المعاملة، وإزالة عمليات الحذف المتعارضة مع سجل التدقيق في الـ cleanup.
+  - تعزيز قاعدة استبقاء بيانات التدقيق (Audit Data Retention Rule): بيانات الاختبارات التي تتضمن سجلات تدقيق تبقى في قاعدة بيانات CI المؤقتة، ويتم التخلص منها تلقائياً بانتهاء دورة حياة حاوية خدمة PostgreSQL المرتبطة بالـ GitHub Actions Job.
+  - الحفاظ الصارم على قيود الأمان: RLS مفعلة، Append-Only Trigger مفعل على `audit_logs`، قيود FK RESTRICT لم تُمس، ولا توجد أي صلاحيات superuser أو bypassrls ممنوحة للتطبيق.
+  - لا يتم ترقية الحالة إلى `INTEGRATION_TESTED` أو `SECURITY_VERIFIED` أو `PRODUCTION_READY` قبل استكمال تشغيل أخضر لـ CI برقم run وcommit SHA محددين.
 
 ---
 

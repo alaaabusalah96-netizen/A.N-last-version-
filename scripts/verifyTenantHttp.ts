@@ -91,8 +91,8 @@ async function runTests() {
       listRes.status === 200 &&
         listData.companyId === compA.id &&
         listData.activeContextCompanyId === compA.id &&
-        listData.items.length === 1 &&
-        listData.items[0].id === createData.item?.id
+        listData.items.length >= 1 &&
+        listData.items.some((it: any) => it.id === createData.item?.id && it.label === 'عنصر اختبار المستأجر أ')
     );
 
     // 6. User A attempts read/write on Company B => 403
@@ -117,23 +117,50 @@ async function runTests() {
     const { tenantContextStorage } = await import('../src/server/db/tenantContext.js');
     await check('Tenant context does not leak outside of transaction', tenantContextStorage.getCurrent() === undefined);
 
-    // 9. After failed transaction, no partial data remains
+    // 9. Real Transactional Rollback Proof: INSERT inside real transaction, intentional error, verify zero partial write
+    const { withTenantTransaction } = await import('../src/server/db/transactionManager.js');
+    const { defaultTenantDemoRepository } = await import('../src/server/org/tenantDemoRepository.js');
+    const rollbackLabel = `rollback_item_${suffix}`;
+    let insertedItemId: string | undefined = undefined;
+    let intentionalErrorThrown = false;
+    let errorCaughtByCaller = false;
+
     try {
-      await jarA.fetch(`${baseUrl}/api/companies/${compA.id}/demo-items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfA },
-        body: JSON.stringify({ label: '' }), // Invalid empty label triggers ValidationError and rollback
+      await withTenantTransaction(compA.id, async (tx) => {
+        // Step 1: Real INSERT inside active tenant transaction
+        const item = await defaultTenantDemoRepository.createItem(compA.id, rollbackLabel, tx);
+        insertedItemId = item.id;
+
+        // Step 2: Verify row exists inside the active transaction
+        const inTxRes = await tx.query<{ count: number }>(
+          'SELECT COUNT(*)::int as count FROM tenant_demo_items WHERE id = $1 AND company_id = $2',
+          [item.id, compA.id]
+        );
+        if (inTxRes.rows[0]?.count === 1) {
+          intentionalErrorThrown = true;
+        }
+
+        // Step 3: Deliberately raise test error before callback completes
+        throw new Error('INTENTIONAL_ROLLBACK_TEST_ERROR');
       });
-    } catch {}
-    const listAfterFailedRes = await jarA.fetch(`${baseUrl}/api/companies/${compA.id}/demo-items`);
-    const listAfterFailedData = await listAfterFailedRes.json();
+    } catch (err) {
+      if (err instanceof Error && err.message === 'INTENTIONAL_ROLLBACK_TEST_ERROR') {
+        errorCaughtByCaller = true;
+      }
+    }
+
+    // Step 4: After transaction ends with error, perform independent query outside transaction
+    const postRollbackRes = await executor.query<{ count: number }>(
+      'SELECT COUNT(*)::int as count FROM tenant_demo_items WHERE id = $1',
+      [insertedItemId]
+    );
+
     await check(
-      'Failed transaction rolled back cleanly without leaving partial data',
-      listAfterFailedData.items.length === 1
+      'Real transaction rollback proof: record inserted in failed transaction does not exist after rollback',
+      intentionalErrorThrown && errorCaughtByCaller && postRollbackRes.rows[0]?.count === 0
     );
 
     // 10. Connection reuse across alternating companies ensures zero tenant context leak
-    const { withTenantTransaction } = await import('../src/server/db/transactionManager.js');
     let noCrossLeak = true;
     for (let i = 0; i < 6; i++) {
       const targetComp = i % 2 === 0 ? compA : compB;
@@ -146,11 +173,8 @@ async function runTests() {
     }
     await check('Sequential reuse across alternating companies maintains strict isolation', noCrossLeak);
 
-    // Cleanup test data
+    // Cleanup test tenant items (companies, users, memberships remain in ephemeral CI DB due to audit FK RESTRICT)
     await executor.query('DELETE FROM tenant_demo_items WHERE company_id IN ($1, $2)', [compA.id, compB.id]);
-    await executor.query('DELETE FROM company_memberships WHERE company_id IN ($1, $2)', [compA.id, compB.id]);
-    await executor.query('DELETE FROM platform_users WHERE id IN ($1, $2)', [userA.id, userInactive.id]);
-    await executor.query('DELETE FROM companies WHERE id IN ($1, $2)', [compA.id, compB.id]);
 
   } finally {
     if (server) server.close();

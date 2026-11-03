@@ -121,12 +121,12 @@ async function runTests() {
     const createData = await createRes.json();
     await check('Platform Admin creating company succeeds with 201 Created', createRes.status === 201 && createData.company?.code === createCode);
 
-    // Verify audit_logs record was written with event = 'company.create'
-    const auditRes = await executor.query<{ event: string }>(
-      'SELECT event FROM audit_logs WHERE company_id = $1 AND event = $2',
+    // Verify audit_logs record was written with action = 'company.create'
+    const auditRes = await executor.query<{ action: string }>(
+      'SELECT action FROM audit_logs WHERE company_id = $1 AND action = $2',
       [createData.company.id, 'company.create']
     );
-    await check('audit_logs records company.create event after successful company creation', auditRes.rows.length > 0);
+    await check('audit_logs records company.create action after successful company creation', auditRes.rows.length > 0);
 
     // Test F: Duplicate company code returns 409 Conflict
     const dupRes = await jarPlat.fetch(`${baseUrl}/api/companies`, {
@@ -160,11 +160,9 @@ async function runTests() {
       inactDirectRes.status === 403 && inactDirectData.code === 'FORBIDDEN'
     );
 
-    // Cleanup test data
-    await executor.query('DELETE FROM audit_logs WHERE company_id IN ($1, $2, $3)', [compA.id, compB.id, createData.company.id]);
-    await executor.query('DELETE FROM company_memberships WHERE company_id IN ($1, $2, $3)', [compA.id, compB.id, createData.company.id]);
-    await executor.query('DELETE FROM platform_users WHERE id IN ($1, $2, $3)', [platformAdminUser.id, compAUser.id, compAdminUser.id]);
-    await executor.query('DELETE FROM companies WHERE id IN ($1, $2, $3)', [compA.id, compB.id, createData.company.id]);
+    // Note: Test companies, users, memberships and audit records remain in the ephemeral
+    // PostgreSQL CI service container and are discarded when the CI job container terminates.
+    // Explicit deletion is omitted to preserve Append-Only audit triggers and FK RESTRICT rules.
 
   } finally {
     if (server) server.close();
