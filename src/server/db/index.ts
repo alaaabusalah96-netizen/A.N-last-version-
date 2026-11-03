@@ -2,6 +2,7 @@ import { DatabaseEngine } from './DatabaseEngine.js';
 import { ConnectionRegistry, defaultRegistry } from './ConnectionRegistry.js';
 import { TenantDatabaseResolver, defaultResolver } from './TenantDatabaseResolver.js';
 import { PostgresqlAdapter } from './adapters/PostgresqlAdapter.js';
+import { assertSafeDbRole } from './roleGuard.js';
 import { DatabaseMode, DbExecutor, QueryResult, TenantDbRef } from './types.js';
 
 export * from './types.js';
@@ -42,6 +43,7 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
 
   try {
     const executor = await adapter.connect(config);
+    await assertSafeDbRole(executor);
     executorCache.set('default', executor);
     return executor;
   } catch (err: unknown) {

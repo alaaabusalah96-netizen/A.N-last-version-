@@ -50,31 +50,52 @@ async function provisionAppRole() {
 
     // Schema & Table Permissions
     console.log(`[provision] Granting permissions to '${appDbUser}'...`);
-    await client.query(`GRANT USAGE ON SCHEMA public TO "${appDbUser}";`);
-    await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${appDbUser}";`);
-    await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${appDbUser}";`);
-    await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${appDbUser}";`);
-    await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${appDbUser}";`);
+    const grantUsageRes = await client.query('SELECT format(\'GRANT USAGE ON SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
+    await client.query(grantUsageRes.rows[0].stmt);
+
+    const grantTablesRes = await client.query('SELECT format(\'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
+    await client.query(grantTablesRes.rows[0].stmt);
+
+    const grantSeqRes = await client.query('SELECT format(\'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
+    await client.query(grantSeqRes.rows[0].stmt);
+
+    const defaultTablesRes = await client.query('SELECT format(\'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I;\', $1::text) as stmt', [appDbUser]);
+    await client.query(defaultTablesRes.rows[0].stmt);
+
+    const defaultSeqRes = await client.query('SELECT format(\'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I;\', $1::text) as stmt', [appDbUser]);
+    await client.query(defaultSeqRes.rows[0].stmt);
 
     // Append-only audit log restriction
     console.log(`[provision] Revoking UPDATE/DELETE/TRUNCATE on audit_logs from '${appDbUser}'...`);
+    const auditRevokeRes = await client.query(
+      "SELECT format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM %I', $1::text) as stmt",
+      [appDbUser]
+    );
     await client.query(`
       DO $$
       BEGIN
         IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'audit_logs') THEN
-          EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM %I', '${appDbUser}');
+          EXECUTE $sql$ ${auditRevokeRes.rows[0].stmt} $sql$;
         END IF;
       END $$;
     `);
 
     // Schema migrations table restriction: REVOKE ALL except GRANT SELECT
     console.log(`[provision] Restricting schema_migrations to SELECT-only for '${appDbUser}'...`);
+    const migRevokeRes = await client.query(
+      "SELECT format('REVOKE ALL ON TABLE schema_migrations FROM %I', $1::text) as stmt",
+      [appDbUser]
+    );
+    const migGrantRes = await client.query(
+      "SELECT format('GRANT SELECT ON TABLE schema_migrations TO %I', $1::text) as stmt",
+      [appDbUser]
+    );
     await client.query(`
       DO $$
       BEGIN
         IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations') THEN
-          EXECUTE format('REVOKE ALL ON TABLE schema_migrations FROM %I', '${appDbUser}');
-          EXECUTE format('GRANT SELECT ON TABLE schema_migrations TO %I', '${appDbUser}');
+          EXECUTE $sql$ ${migRevokeRes.rows[0].stmt} $sql$;
+          EXECUTE $sql$ ${migGrantRes.rows[0].stmt} $sql$;
         END IF;
       END $$;
     `);
