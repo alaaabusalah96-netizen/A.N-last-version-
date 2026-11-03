@@ -1,8 +1,10 @@
 import { AsyncLocalStorage } from 'async_hooks';
+import type { DbExecutor } from './types.js';
 
 export interface TenantContext {
   companyId: string;
   userId?: string;
+  executor?: DbExecutor;
 }
 
 const asyncLocalStorage = new AsyncLocalStorage<TenantContext>();
@@ -23,4 +25,9 @@ export const tenantContextStorage = {
   getCurrentCompanyId(): string | undefined {
     return asyncLocalStorage.getStore()?.companyId;
   },
+
+  getCurrentExecutor(): DbExecutor | undefined {
+    return asyncLocalStorage.getStore()?.executor;
+  },
 };
+

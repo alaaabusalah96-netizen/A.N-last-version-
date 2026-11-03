@@ -143,10 +143,14 @@ export async function loginAs(
   baseUrl: string,
   username: string,
   password: string
-): Promise<{ csrfToken: string; user: any }> {
+): Promise<{ csrfToken: string; user: any; jar: CookieJarFetch }> {
   const csrfRes = await jar.fetch(`${baseUrl}/api/auth/csrf`);
   const csrfData = await csrfRes.json();
   const preLoginToken = csrfData.csrfToken;
+
+  if (!preLoginToken) {
+    throw new Error(`loginAs failed for '${username}': pre-login CSRF token missing in /api/auth/csrf response`);
+  }
 
   const loginRes = await jar.fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
@@ -164,6 +168,15 @@ export async function loginAs(
 
   const loginData = await loginRes.json();
   const postLoginToken = loginData.csrfToken;
+  const csrfCookie = jar.getCookie('an_csrf');
 
-  return { csrfToken: postLoginToken, user: loginData.user };
+  if (!postLoginToken || !csrfCookie) {
+    throw new Error(`loginAs failed for '${username}': post-login response missing token or an_csrf cookie (token: ${postLoginToken}, cookie: ${csrfCookie})`);
+  }
+
+  if (csrfCookie !== postLoginToken) {
+    throw new Error(`loginAs failed for '${username}': an_csrf cookie does not match rotated CSRF token in login response`);
+  }
+
+  return { csrfToken: postLoginToken, user: loginData.user, jar };
 }

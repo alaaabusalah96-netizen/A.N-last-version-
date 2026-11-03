@@ -64,7 +64,7 @@ async function runTests() {
       role: 'user',
     });
 
-    await defaultMembershipRepository.addMember(userA.id, compA.id, 'company_user', true);
+    await defaultMembershipRepository.addMember(userA.id, compA.id, 'company_admin', true);
     await defaultMembershipRepository.addMember(userInactive.id, compA.id, 'company_user', false);
 
     // 3. User A logs in
@@ -78,14 +78,21 @@ async function runTests() {
       body: JSON.stringify({ label: 'عنصر اختبار المستأجر أ' }),
     });
     const createData = await createRes.json();
-    await check('User A creating demo item in Company A succeeds (201)', createRes.status === 201 && createData.item?.label === 'عنصر اختبار المستأجر أ');
+    await check(
+      'User A creating demo item in Company A succeeds (201)',
+      createRes.status === 201 && createData.item?.label === 'عنصر اختبار المستأجر أ'
+    );
 
-    // 5. User A reads items in Company A => 200 & activeContextCompanyId matches
+    // 5. User A reads items in Company A => 200 & activeContextCompanyId matches & matches created item
     const listRes = await jarA.fetch(`${baseUrl}/api/companies/${compA.id}/demo-items`);
     const listData = await listRes.json();
     await check(
       'User A reading demo items in Company A succeeds and context matches company ID',
-      listRes.status === 200 && listData.companyId === compA.id && listData.activeContextCompanyId === compA.id && listData.items.length === 1
+      listRes.status === 200 &&
+        listData.companyId === compA.id &&
+        listData.activeContextCompanyId === compA.id &&
+        listData.items.length === 1 &&
+        listData.items[0].id === createData.item?.id
     );
 
     // 6. User A attempts read/write on Company B => 403
@@ -105,6 +112,45 @@ async function runTests() {
 
     const inactRes = await jarInact.fetch(`${baseUrl}/api/companies/${compA.id}/demo-items`);
     await check('User with inactive membership attempting access receives 403 Forbidden', inactRes.status === 403);
+
+    // 8. After transaction completion, tenant context does not leak
+    const { tenantContextStorage } = await import('../src/server/db/tenantContext.js');
+    await check('Tenant context does not leak outside of transaction', tenantContextStorage.getCurrent() === undefined);
+
+    // 9. After failed transaction, no partial data remains
+    try {
+      await jarA.fetch(`${baseUrl}/api/companies/${compA.id}/demo-items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfA },
+        body: JSON.stringify({ label: '' }), // Invalid empty label triggers ValidationError and rollback
+      });
+    } catch {}
+    const listAfterFailedRes = await jarA.fetch(`${baseUrl}/api/companies/${compA.id}/demo-items`);
+    const listAfterFailedData = await listAfterFailedRes.json();
+    await check(
+      'Failed transaction rolled back cleanly without leaving partial data',
+      listAfterFailedData.items.length === 1
+    );
+
+    // 10. Connection reuse across alternating companies ensures zero tenant context leak
+    const { withTenantTransaction } = await import('../src/server/db/transactionManager.js');
+    let noCrossLeak = true;
+    for (let i = 0; i < 6; i++) {
+      const targetComp = i % 2 === 0 ? compA : compB;
+      await withTenantTransaction(targetComp.id, async (tx) => {
+        const checkRes = await tx.query<{ val: string }>("SELECT current_setting('app.current_tenant_id', true) as val");
+        if (checkRes.rows[0]?.val !== targetComp.id) {
+          noCrossLeak = false;
+        }
+      });
+    }
+    await check('Sequential reuse across alternating companies maintains strict isolation', noCrossLeak);
+
+    // Cleanup test data
+    await executor.query('DELETE FROM tenant_demo_items WHERE company_id IN ($1, $2)', [compA.id, compB.id]);
+    await executor.query('DELETE FROM company_memberships WHERE company_id IN ($1, $2)', [compA.id, compB.id]);
+    await executor.query('DELETE FROM platform_users WHERE id IN ($1, $2)', [userA.id, userInactive.id]);
+    await executor.query('DELETE FROM companies WHERE id IN ($1, $2)', [compA.id, compB.id]);
 
   } finally {
     if (server) server.close();

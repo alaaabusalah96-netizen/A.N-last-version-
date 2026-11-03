@@ -37,8 +37,8 @@ export function errorHandler(
   const message = err instanceof Error ? err.message : String(err);
   const code = err?.code;
 
-  // CORS Origin Error
-  if (err instanceof CorsOriginError || code === 'CORS_FORBIDDEN' || message.includes('CORS')) {
+  // CORS Origin Error (identify strictly via CorsOriginError or code CORS_FORBIDDEN)
+  if (err instanceof CorsOriginError || code === 'CORS_FORBIDDEN') {
     res.status(403).json({
       error: 'Forbidden',
       code: 'CORS_FORBIDDEN',

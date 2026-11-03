@@ -19,6 +19,10 @@ async function runTests() {
       for (const item of items) {
         const fullPath = path.join(currentDir, item.name);
         if (item.isDirectory()) {
+          // Skip ephemeral platform upload directory (ignored in .gitignore)
+          if (item.name === 'aistudio') {
+            continue;
+          }
           scanDir(fullPath);
         } else if (item.isFile()) {
           const ext = path.extname(item.name).toLowerCase();

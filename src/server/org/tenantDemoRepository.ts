@@ -1,4 +1,5 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
+import { DbExecutor } from '../db/types.js';
 
 export interface TenantDemoItem {
   id: string;
@@ -8,8 +9,8 @@ export interface TenantDemoItem {
 }
 
 export class TenantDemoRepository {
-  async createItem(companyId: string, label: string): Promise<TenantDemoItem> {
-    return await withTenantTransaction(companyId, async (tx) => {
+  async createItem(companyId: string, label: string, customExecutor?: DbExecutor): Promise<TenantDemoItem> {
+    const run = async (tx: DbExecutor) => {
       const sql = `
         INSERT INTO tenant_demo_items (company_id, label)
         VALUES ($1, $2)
@@ -17,11 +18,16 @@ export class TenantDemoRepository {
       `;
       const res = await tx.query<TenantDemoItem>(sql, [companyId, label.trim()]);
       return res.rows[0];
-    });
+    };
+
+    if (customExecutor) {
+      return run(customExecutor);
+    }
+    return await withTenantTransaction(companyId, run);
   }
 
-  async listItems(companyId: string): Promise<TenantDemoItem[]> {
-    return await withTenantTransaction(companyId, async (tx) => {
+  async listItems(companyId: string, customExecutor?: DbExecutor): Promise<TenantDemoItem[]> {
+    const run = async (tx: DbExecutor) => {
       const sql = `
         SELECT id, company_id as "companyId", label, created_at as "createdAt"
         FROM tenant_demo_items
@@ -30,7 +36,12 @@ export class TenantDemoRepository {
       `;
       const res = await tx.query<TenantDemoItem>(sql, [companyId]);
       return res.rows;
-    });
+    };
+
+    if (customExecutor) {
+      return run(customExecutor);
+    }
+    return await withTenantTransaction(companyId, run);
   }
 }
 

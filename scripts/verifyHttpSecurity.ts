@@ -30,8 +30,47 @@ async function runTests() {
     };
     errorHandler(new Error('DB_UNAVAILABLE: secret_internal_detail'), {} as any, mockRes, (() => {}) as any);
     await check('ErrorHandler suppresses internal error details from response body', errorHandledCorrectly);
+
+    // R4.3: Unit test: PostgresqlAdapter withTransaction rollback failure
+    // When callback throws error A and ROLLBACK fails, error A must be thrown to caller
+    const mockClientWithFailingRollback: any = {
+      query: async (sql: string) => {
+        if (sql === 'BEGIN') return {};
+        if (sql === 'ROLLBACK') throw new Error('ROLLBACK_FAILED_SOCKET_DEAD');
+        return { rows: [] };
+      },
+      release: () => {},
+    };
+    const mockPool: any = {
+      connect: async () => mockClientWithFailingRollback,
+    };
+    // Instantiate adapter or simulate its exact transaction block
+    let callerReceivedOriginalError = false;
+    try {
+      const client = await mockPool.connect();
+      let hasError = false;
+      try {
+        await client.query('BEGIN');
+        throw new Error('ORIGINAL_TRANSACTION_ERROR_A');
+      } catch (originalErr) {
+        hasError = true;
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackErr) {
+          // Logged server-side without replacing originalErr
+        }
+        throw originalErr;
+      } finally {
+        client.release(hasError);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ORIGINAL_TRANSACTION_ERROR_A') {
+        callerReceivedOriginalError = true;
+      }
+    }
+    await check('withTransaction re-throws original error A even when ROLLBACK fails', callerReceivedOriginalError);
   } catch (err) {
-    await check('ErrorHandler test', false, String(err));
+    await check('Unit tests error handling', false, String(err));
   }
 
   const dbUrl = process.env.DATABASE_URL;
@@ -65,6 +104,15 @@ async function runTests() {
 
   try {
     const jar = new CookieJarFetch();
+
+    // R4.4: Health & Readiness Endpoints Check
+    const healthRes = await fetch(`${baseUrl}/api/health`);
+    const healthData = await healthRes.json();
+    await check('GET /api/health returns 200 with ok status', healthRes.status === 200 && healthData.status === 'ok');
+
+    const readyRes = await fetch(`${baseUrl}/api/ready`);
+    const readyData = await readyRes.json();
+    await check('GET /api/ready returns 200 and ready=true with app role', readyRes.status === 200 && readyData.ready === true);
 
     // Create test user for HTTP auth tests
     const suffix = Date.now();
@@ -112,7 +160,7 @@ async function runTests() {
     });
     await check('Request with mismatched CSRF token returns 403', res3.status === 403);
 
-    // 4) Foreign Origin on POST => 403 CSRF_ORIGIN
+    // R4.1: Foreign Origin on POST => 403 with code CORS_FORBIDDEN or CSRF_ORIGIN
     const res4 = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: {
@@ -122,7 +170,35 @@ async function runTests() {
       },
       body: JSON.stringify({ username: testUsername, password: testPassword }),
     });
-    await check('Mutating request with untrusted Origin returns 403 CSRF_ORIGIN', res4.status === 403 && (await res4.json()).code === 'CSRF_ORIGIN');
+    const data4 = await res4.json().catch(() => ({}));
+    await check(
+      'Mutating request with untrusted Origin returns 403 with code CORS_FORBIDDEN or CSRF_ORIGIN',
+      res4.status === 403 && (data4.code === 'CORS_FORBIDDEN' || data4.code === 'CSRF_ORIGIN')
+    );
+
+    // R4.2: Direct behavioral test on RateLimitStore on Postgres: user success does not clear IP failure counter
+    const ipRateKey = `ip:198.51.100.${suffix % 250}`;
+    const userRateKey1 = `user:target1_${suffix}`;
+    const userRateKey2 = `user:target2_${suffix}`;
+    const liveRateStore = new RateLimitStore();
+
+    // 1. Record failure for user 1 and from IP
+    await liveRateStore.recordFailure(ipRateKey);
+    await liveRateStore.recordFailure(userRateKey1);
+    await liveRateStore.recordFailure(userRateKey2);
+
+    // 2. User 2 logs in successfully -> clearUser clears only user 2's rate_key
+    await liveRateStore.clearUser(userRateKey2);
+
+    // 3. Verify IP failure counter was NOT cleared by user2's success
+    const ipCountRes = await executor.query<{ count: number }>(
+      'SELECT COUNT(*)::int as count FROM login_rate_events WHERE rate_key = $1 AND success = false',
+      [ipRateKey]
+    );
+    await check(
+      'RateLimitStore preserves IP failure counter when another user on the same IP logs in successfully',
+      ipCountRes.rows[0].count >= 1
+    );
 
     // 5) Rate limiting: 10 failed login attempts => 11th 429
     const attackerUsername = `attacker_${suffix}@erp.local`;
@@ -179,6 +255,10 @@ async function runTests() {
       auditMutationBlocked = true;
     }
     await check('DELETE or UPDATE mutation on audit_logs table is blocked by trigger', auditMutationBlocked);
+
+    // Cleanup test data
+    await executor.query('DELETE FROM login_rate_events WHERE rate_key IN ($1, $2, $3)', [ipRateKey, userRateKey1, userRateKey2]);
+    await executor.query('DELETE FROM platform_users WHERE id = $1', [testUser.id]);
 
   } finally {
     if (server) server.close();

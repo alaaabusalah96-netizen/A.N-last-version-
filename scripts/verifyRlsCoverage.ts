@@ -10,6 +10,7 @@ interface TableOwnership {
   table: string;
   scope: 'global' | 'shared' | 'tenant';
   reason: string;
+  allowOptionalCompanyId?: boolean;
 }
 
 async function runTests() {
@@ -71,27 +72,56 @@ async function runTests() {
       const companyIdCol = colsRes.rows.find((c) => c.column_name === 'company_id');
 
       if (regItem.scope === 'global') {
-        // Rule 4: Global scope MUST NOT have company_id column
-        await check(`Global table '${regItem.table}' does NOT contain company_id column`, !colNames.has('company_id'));
+        if (colNames.has('company_id')) {
+          const isAllowedException = regItem.allowOptionalCompanyId === true && regItem.table === 'platform_users';
+          await check(
+            `Global table '${regItem.table}' company_id column is permitted via explicit schema registry exception`,
+            isAllowedException
+          );
+          if (isAllowedException) {
+            await check(
+              `Global table '${regItem.table}' optional company_id column is nullable`,
+              companyIdCol?.is_nullable === 'YES'
+            );
+          }
+        } else {
+          await check(`Global table '${regItem.table}' does NOT contain company_id column`, true);
+        }
       } else if (regItem.scope === 'tenant') {
         // Rule 3: Tenant scope requirements
         await check(`Tenant table '${regItem.table}' contains company_id column`, Boolean(companyIdCol));
         await check(`Tenant table '${regItem.table}' company_id column is NOT NULL`, companyIdCol?.is_nullable === 'NO');
 
-        // Foreign Key Check
-        const fkSql = `
-          SELECT kcu.column_name
-          FROM information_schema.table_constraints tc
-          JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-          JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-          WHERE tc.constraint_type = 'FOREIGN KEY'
-            AND tc.table_schema = 'public'
-            AND tc.table_name = $1
-            AND kcu.column_name = 'company_id'
-            AND ccu.table_name = 'companies';
+        // Robust catalog Foreign Key Check using pg_constraint, pg_class, pg_namespace, and pg_attribute
+        const fkCatalogSql = `
+          SELECT 
+            con.conname AS constraint_name,
+            c_src.relname AS source_table,
+            a_src.attname AS source_column,
+            c_ref.relname AS ref_table,
+            a_ref.attname AS ref_column,
+            con.convalidated AS is_validated
+          FROM pg_constraint con
+          JOIN pg_class c_src ON c_src.oid = con.conrelid
+          JOIN pg_namespace n_src ON n_src.oid = c_src.relnamespace
+          JOIN pg_class c_ref ON c_ref.oid = con.confrelid
+          JOIN pg_namespace n_ref ON n_ref.oid = c_ref.relnamespace
+          JOIN pg_attribute a_src ON a_src.attrelid = con.conrelid AND a_src.attnum = ANY(con.conkey)
+          JOIN pg_attribute a_ref ON a_ref.attrelid = con.confrelid AND a_ref.attnum = ANY(con.confkey)
+          WHERE con.contype = 'f'
+            AND n_src.nspname = 'public'
+            AND n_ref.nspname = 'public'
+            AND c_src.relname = $1
+            AND a_src.attname = 'company_id'
+            AND c_ref.relname = 'companies'
+            AND a_ref.attname = 'id'
+            AND con.convalidated = true;
         `;
-        const fkRes = await executor.query(fkSql, [regItem.table]);
-        await check(`Tenant table '${regItem.table}' has FK on company_id referencing companies(id)`, fkRes.rows.length > 0);
+        const fkRes = await executor.query(fkCatalogSql, [regItem.table]);
+        await check(
+          `Tenant table '${regItem.table}' has valid active FK on company_id referencing companies(id)`,
+          fkRes.rows.length > 0
+        );
 
         // RLS Enabled & Forced
         await check(`Tenant table '${regItem.table}' has RLS enabled (relrowsecurity=true)`, dbTable.relrowsecurity === true);

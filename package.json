@@ -25,6 +25,10 @@
     "test:http": "tsx scripts/verifyHttpSecurity.ts",
     "test:rbac-http": "tsx scripts/verifyRbacHttp.ts",
     "test:rls-coverage": "tsx scripts/verifyRlsCoverage.ts",
+    "test:migrations": "tsx scripts/verifyMigrations.ts",
+    "test:no-memory-fallback": "tsx scripts/verifyNoMemoryFallback.ts",
+    "test:fix-rbac-companies": "tsx scripts/verifyFixRbacCompanies.ts",
+    "test:fix-db-wiring": "tsx scripts/verifyFixDbWiring.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts"
   },

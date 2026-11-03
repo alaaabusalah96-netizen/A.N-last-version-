@@ -16,15 +16,25 @@ export async function withTenantTransaction<T>(
   }
 
   const normalizedCompanyId = companyId.trim();
+
+  // If already inside an active tenant transaction for this company, reuse the existing executor
+  const currentCtx = tenantContextStorage.getCurrent();
+  if (currentCtx?.executor && currentCtx.companyId === normalizedCompanyId) {
+    return await fn(currentCtx.executor);
+  }
+
   const executor = await getExecutorForCompany(normalizedCompanyId);
 
   return await executor.withTransaction(async (tx) => {
     // Set transaction-local tenant context variable for RLS
     await tx.query("SELECT set_config('app.current_tenant_id', $1, true)", [normalizedCompanyId]);
 
-    // Run within AsyncLocalStorage tenant context as well
-    return await tenantContextStorage.run({ companyId: normalizedCompanyId }, async () => {
-      return await fn(tx);
-    });
+    // Run within AsyncLocalStorage tenant context as well, retaining active transaction executor
+    return await tenantContextStorage.run(
+      { companyId: normalizedCompanyId, userId: currentCtx?.userId, executor: tx },
+      async () => {
+        return await fn(tx);
+      }
+    );
   });
 }

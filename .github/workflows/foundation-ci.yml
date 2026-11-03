@@ -90,5 +90,6 @@ jobs:
         with:
           name: foundation-test-results
           path: |
-            *.log
+            foundation-test-report.json
+            foundation-battery.log
           retention-days: 7

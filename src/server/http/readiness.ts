@@ -32,23 +32,28 @@ export async function handleReadiness(_req: Request, res: Response): Promise<voi
     // 2. Role Guard
     await assertSafeDbRole(executor);
 
-    // 3. Schema Migrations Verification
+    // 3. Complete Schema Migrations Verification
     const migrationsDir = path.resolve(process.cwd(), 'database/migrations');
     if (fs.existsSync(migrationsDir)) {
       const sqlFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-      const latestFile = sqlFiles[sqlFiles.length - 1];
+      const migRes = await executor.query<{ version: string }>('SELECT version FROM schema_migrations;');
+      const appliedSet = new Set(migRes.rows.map((r) => r.version));
 
-      if (latestFile) {
-        const migRes = await executor.query<{ version: string }>(
-          'SELECT version FROM schema_migrations ORDER BY applied_at DESC, version DESC LIMIT 1;'
-        );
-        const latestApplied = migRes.rows[0]?.version;
+      // Check for any on-disk migrations not yet applied
+      const pendingFiles = sqlFiles.filter((f) => !appliedSet.has(f));
+      if (pendingFiles.length > 0) {
+        console.warn(`[readiness] Pending migrations detected: ${pendingFiles.join(', ')}`);
+        res.status(503).json({ ready: false, database: 'migrations_pending' });
+        return;
+      }
 
-        if (latestApplied !== latestFile) {
-          console.warn(`[readiness] Pending migrations detected! Latest applied: ${latestApplied}, Latest file: ${latestFile}`);
-          res.status(503).json({ ready: false, database: 'migrations_pending' });
-          return;
-        }
+      // Check for any applied migrations missing from disk
+      const diskSet = new Set(sqlFiles);
+      const orphanApplied = Array.from(appliedSet).filter((v) => !diskSet.has(v));
+      if (orphanApplied.length > 0) {
+        console.warn(`[readiness] Unrecognized migrations in database: ${orphanApplied.join(', ')}`);
+        res.status(503).json({ ready: false, database: 'migrations_mismatch' });
+        return;
       }
     }
 

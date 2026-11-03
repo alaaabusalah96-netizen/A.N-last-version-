@@ -22,6 +22,7 @@ export const requirePlatformAdmin = wrap(async (
   if (req.user.role !== 'platform_admin') {
     res.status(403).json({
       error: 'Forbidden',
+      code: 'FORBIDDEN_PLATFORM_ADMIN',
       message: 'Platform administrator role required to perform this action',
     });
     return;
