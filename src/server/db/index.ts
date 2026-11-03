@@ -90,15 +90,23 @@ export async function getExecutorForCompany(companyId: string): Promise<DbExecut
     throw new Error(`DB_UNAVAILABLE: No database configuration found for tenant connection key '${ref.connectionKey}'`);
   }
 
-  // 4) Connect via adapter and cache
+  // 4) Connect via adapter, guard role, and cache
   const adapter = new PostgresqlAdapter();
   try {
     const executor = await adapter.connect(config);
+    try {
+      await assertSafeDbRole(executor);
+    } catch (guardErr) {
+      await executor.close();
+      throw guardErr;
+    }
     executorCache.set(ref.connectionKey, executor);
     return executor;
   } catch (err: unknown) {
-    console.error(`[db] Failed to initialize executor for connection key: '${ref.connectionKey}'`, err);
-    throw new Error(`DB_UNAVAILABLE: Failed to connect to database for tenant key '${ref.connectionKey}'`);
+    console.error(`[db] Failed to initialize/guard executor for connection key: '${ref.connectionKey}'`, err);
+    throw err instanceof Error && err.message.includes('dbRoleGuard')
+      ? err
+      : new Error(`DB_UNAVAILABLE: Failed to connect to database for tenant key '${ref.connectionKey}'`);
   }
 }
 
