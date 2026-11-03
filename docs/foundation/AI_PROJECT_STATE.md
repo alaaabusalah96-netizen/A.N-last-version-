@@ -3,9 +3,9 @@
 ## 1. مفردات الحالة المعيارية المعتمدة
 - `IMPLEMENTED`: تم بناء الهيكل والكود وفق المواصفات.
 - `UNIT_TESTED`: تم إجراء اختبارات سلوكية للأجزاء المنفذة.
-- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات.
-- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والحماية.
-- `PRODUCTION_READY`: جاهز للنشر الإنتاجي المالي.
+- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات و RLS.
+- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والعزل.
+- `PRODUCTION_READY`: جاهز بعد نجاح اختبارات CI في بيئة الإنتاج.
 
 ---
 
@@ -19,14 +19,14 @@
 - **AN-PERSISTENCE-CORE-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
 - **AN-TENANT-ISOLATION-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
 - **AN-AUTH-SECURITY-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
-  - تفعيل حماية CSRF عبر النمط المزدوج للكوكيز.
-  - سجل التدقيق الدائم (`Audit Logs`) للمصادقة والعمليات الإدارية.
-  - تحديد معدل المحاولات الفاشلة (`Rate Limit Store`) عبر جدول قاعدة البيانات.
+- **AN-FOUNDATION-CI-1**: `IMPLEMENTED` + `INTEGRATION_TESTED` + `SECURITY_VERIFIED`
+  - بطارية اختبارات موحدة `npm run test:foundation`.
+  - سير عمل GitHub Actions متكامل مع خدمة PostgreSQL 16 حية.
 
 ---
 
 ## 3. محددات الأمان وقاعدة عدم البدء التلقائي
 - **حظر Firebase**: مؤكد ومفروض قطعيًا (`FORBIDDEN`).
 - **الموقف الحالي**: توقف تام وانتظار الاعتماد البشري.
-- **الحزمة التالية المقترحة**: `FOUNDATION-CI-1` (بعد موافقة المستخدم).
-- **بدء P05**: ممنوع منعًا باتًا البدء في P05 أو أي حزم محاسبية دون موافقة صريحة ومباشرة.
+- **الحزمة التالية المقترحة**: `P05` (تتطلب أمرًا صريحًا من المستخدم).
+- **بدء P05**: ممنوع منعًا باتًا البدء في P05 دون موافقة صريحة ومباشرة.
