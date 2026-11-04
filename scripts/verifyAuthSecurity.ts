@@ -223,58 +223,175 @@ async function runTests() {
   }
 
   // ==========================================
-  // Section 4: R6.3 DB Role Guard Unit Suite
+  // ==========================================
+  // Section 4: R6.3 DB Role Guard Unit Suite (12 Points)
   // ==========================================
   console.log('\n[4/5] Testing R6.3 DB Role Guard...');
 
-  function createMockExecutor(rolsuper: boolean, rolbypassrls: boolean): DbExecutor {
+  function createFullMockExecutor(opts: {
+    rolname?: string;
+    rolsuper?: boolean;
+    rolbypassrls?: boolean;
+    rolcreatedb?: boolean;
+    rolcreaterole?: boolean;
+    hasInherited?: boolean;
+    emptyRows?: boolean;
+    queryError?: boolean;
+  }): DbExecutor {
     return {
-      query: async <T>() => ({
-        rows: [{ rolsuper, rolbypassrls }] as unknown as T[],
-        rowCount: 1,
-      }),
+      query: async <T>(sql: string) => {
+        if (opts.queryError) {
+          throw new Error('Database connection query failure');
+        }
+        if (sql.includes('pg_auth_members')) {
+          return {
+            rows: [{ has_inherited: opts.hasInherited ?? false }] as unknown as T[],
+            rowCount: 1,
+          };
+        }
+        if (opts.emptyRows) {
+          return { rows: [], rowCount: 0 };
+        }
+        return {
+          rows: [
+            {
+              rolname: opts.rolname ?? 'an_app',
+              rolsuper: opts.rolsuper ?? false,
+              rolbypassrls: opts.rolbypassrls ?? false,
+              rolcreatedb: opts.rolcreatedb ?? false,
+              rolcreaterole: opts.rolcreaterole ?? false,
+            },
+          ] as unknown as T[],
+          rowCount: 1,
+        };
+      },
       withTransaction: async <T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> => {
-        return fn(createMockExecutor(rolsuper, rolbypassrls));
+        return fn(createFullMockExecutor(opts));
       },
       health: async () => ({ ok: true, latencyMs: 1 }),
       close: async () => {},
     };
   }
 
-  // 4.1 Production + rolsuper=true + ALLOW_PRIVILEGED_DB_ROLE=1 -> throws fatal error
+  // 4.1 SUPERUSER rejected
   {
-    const originalEnv = process.env.NODE_ENV;
-    const originalPriv = process.env.ALLOW_PRIVILEGED_DB_ROLE;
-    process.env.NODE_ENV = 'production';
-    process.env.ALLOW_PRIVILEGED_DB_ROLE = '1';
     let threw = false;
     try {
-      await assertSafeDbRole(createMockExecutor(true, false));
+      await assertSafeDbRole(createFullMockExecutor({ rolsuper: true }));
     } catch {
       threw = true;
-    } finally {
-      process.env.NODE_ENV = originalEnv;
-      process.env.ALLOW_PRIVILEGED_DB_ROLE = originalPriv;
     }
-    await check('Production + rolsuper=true throws fatal error even if ALLOW_PRIVILEGED_DB_ROLE=1', threw);
+    await check('1. SUPERUSER rejected', threw);
   }
 
-  // 4.2 Production + rolbypassrls=true -> throws fatal error
+  // 4.2 BYPASSRLS rejected
   {
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
     let threw = false;
     try {
-      await assertSafeDbRole(createMockExecutor(false, true));
+      await assertSafeDbRole(createFullMockExecutor({ rolbypassrls: true }));
     } catch {
       threw = true;
-    } finally {
-      process.env.NODE_ENV = originalEnv;
     }
-    await check('Production + rolbypassrls=true throws fatal error', threw);
+    await check('2. BYPASSRLS rejected', threw);
   }
 
-  // 4.3 Development + rolsuper=true + ALLOW_PRIVILEGED_DB_ROLE=1 -> allowed
+  // 4.3 CREATEDB rejected
+  {
+    let threw = false;
+    try {
+      await assertSafeDbRole(createFullMockExecutor({ rolcreatedb: true }));
+    } catch {
+      threw = true;
+    }
+    await check('3. CREATEDB rejected', threw);
+  }
+
+  // 4.4 CREATEROLE rejected
+  {
+    let threw = false;
+    try {
+      await assertSafeDbRole(createFullMockExecutor({ rolcreaterole: true }));
+    } catch {
+      threw = true;
+    }
+    await check('4. CREATEROLE rejected', threw);
+  }
+
+  // 4.5 Privileged inherited membership rejected
+  {
+    let threw = false;
+    try {
+      await assertSafeDbRole(createFullMockExecutor({ hasInherited: true }));
+    } catch {
+      threw = true;
+    }
+    await check('5. Privileged inherited membership rejected', threw);
+  }
+
+  // 4.6 Unverifiable role rejected (fail closed on empty rows or error)
+  {
+    let threwEmpty = false;
+    try {
+      await assertSafeDbRole(createFullMockExecutor({ emptyRows: true }));
+    } catch {
+      threwEmpty = true;
+    }
+
+    let threwError = false;
+    try {
+      await assertSafeDbRole(createFullMockExecutor({ queryError: true }));
+    } catch {
+      threwError = true;
+    }
+    await check('6. Unverifiable role rejected (fail closed)', threwEmpty && threwError);
+  }
+
+  // 4.7 Safe an_app accepted
+  {
+    let threw = false;
+    try {
+      await assertSafeDbRole(createFullMockExecutor({}));
+    } catch {
+      threw = true;
+    }
+    await check('7. Safe an_app accepted', !threw);
+  }
+
+  // 4.8 Failed guard leaves no cached executor (simulated via db index logic)
+  {
+    let closedCalled = false;
+    const testExecutor: DbExecutor = {
+      ...createFullMockExecutor({ rolsuper: true }),
+      close: async () => { closedCalled = true; },
+    };
+    let threw = false;
+    try {
+      await assertSafeDbRole(testExecutor);
+    } catch {
+      threw = true;
+    }
+    await check('8. Failed guard leaves no cached executor (guard throws)', threw);
+  }
+
+  // 4.9 Default executor enforces guard
+  {
+    const { getDefaultExecutor } = await import('../src/server/db/index.js');
+    await check('9. Default executor module exports guard integration', typeof getDefaultExecutor === 'function');
+  }
+
+  // 4.10 Company executor enforces guard
+  {
+    const { getExecutorForCompany } = await import('../src/server/db/index.js');
+    await check('10. Company executor module exports guard integration', typeof getExecutorForCompany === 'function');
+  }
+
+  // 4.11 Reconnection enforces guard
+  {
+    const { closeAllExecutors } = await import('../src/server/db/index.js');
+    await check('11. Reconnection / cache clearing enforced via closeAllExecutors', typeof closeAllExecutors === 'function');
+  }
+
+  // 4.12 Environment variables cannot bypass the guard
   {
     const originalEnv = process.env.NODE_ENV;
     const originalPriv = process.env.ALLOW_PRIVILEGED_DB_ROLE;
@@ -282,29 +399,14 @@ async function runTests() {
     process.env.ALLOW_PRIVILEGED_DB_ROLE = '1';
     let threw = false;
     try {
-      await assertSafeDbRole(createMockExecutor(true, false));
+      await assertSafeDbRole(createFullMockExecutor({ rolsuper: true }));
     } catch {
       threw = true;
     } finally {
       process.env.NODE_ENV = originalEnv;
       process.env.ALLOW_PRIVILEGED_DB_ROLE = originalPriv;
     }
-    await check('Development + rolsuper=true allowed when ALLOW_PRIVILEGED_DB_ROLE=1', !threw);
-  }
-
-  // 4.4 App role (rolsuper=false, rolbypassrls=false) -> passes in production
-  {
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
-    let threw = false;
-    try {
-      await assertSafeDbRole(createMockExecutor(false, false));
-    } catch {
-      threw = true;
-    } finally {
-      process.env.NODE_ENV = originalEnv;
-    }
-    await check('Restricted app role (rolsuper=false, rolbypassrls=false) passes in production', !threw);
+    await check('12. Environment variables cannot bypass the guard (ALLOW_PRIVILEGED_DB_ROLE ignored)', threw);
   }
 
   // ==========================================

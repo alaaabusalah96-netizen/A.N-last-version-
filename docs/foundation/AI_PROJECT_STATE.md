@@ -24,13 +24,17 @@
 - **AN-FOUNDATION-REPAIR-4**: `IMPLEMENTED`
 - **AN-FOUNDATION-REPAIR-5**: `IMPLEMENTED`
 - **AN-FOUNDATION-REPAIR-6**: `IMPLEMENTED` + `UNIT_TESTED`
-  - CI_STATUS: `PENDING` (في انتظار تشغيل GitHub Actions للتحقق من تشغيل البطارية الحية على بيئة CI).
-  - تصحيح `verifyHttpSecurity.ts`: إزالة حذف `testUser` المتعارض مع قيد `audit_logs` FK RESTRICT وقاعدة Append-Only، واختبار الدالة الفعلية `PostgresqlAdapter.withTransaction` بسلوك حقيقي على mock client ومحاكاة فشل ROLLBACK دون استبدال الخطأ الأصلي، واختبار مسار النجاح والـ client release.
-  - تصحيح `verifyRbacHttp.ts`: تصحيح استعلام التحقق من حدث إنشاء الشركة لاستخدام العمود الحقيقي `action = 'company.create'` بدلاً من العمود غير الموجود `event`، وإلغاء محاولات تفريغ وحذف سجلات التدقيق والشركات والمستخدمين المرتبطة بقيود RESTRICT في الـ cleanup.
-  - تصحيح `verifyTenantHttp.ts`: بناء اختبار تراجع المعاملات (Rollback) الفعلي عبر تنفيذ INSERT حقيقي داخل المعاملة ثم إلقاء خطأ اختباري والتأكد من عدم وجود أي كتابة جزئية بعد التراجع خارج المعاملة، وإزالة عمليات الحذف المتعارضة مع سجل التدقيق في الـ cleanup.
-  - تعزيز قاعدة استبقاء بيانات التدقيق (Audit Data Retention Rule): بيانات الاختبارات التي تتضمن سجلات تدقيق تبقى في قاعدة بيانات CI المؤقتة، ويتم التخلص منها تلقائياً بانتهاء دورة حياة حاوية خدمة PostgreSQL المرتبطة بالـ GitHub Actions Job.
-  - الحفاظ الصارم على قيود الأمان: RLS مفعلة، Append-Only Trigger مفعل على `audit_logs`، قيود FK RESTRICT لم تُمس، ولا توجد أي صلاحيات superuser أو bypassrls ممنوحة للتطبيق.
-  - لا يتم ترقية الحالة إلى `INTEGRATION_TESTED` أو `SECURITY_VERIFIED` أو `PRODUCTION_READY` قبل استكمال تشغيل أخضر لـ CI برقم run وcommit SHA محددين.
+- **AN-FOUNDATION-REPAIR-6A**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `259f609db5883ed1a6fc3f947190875fc45da984` (historical baseline reference)
+  - Final SHA: `HEAD` (local working tree verified)
+  - Actual RBAC root cause: Cross-company RBAC tests in `verifyRbacHttp.ts` verify that company membership and platform admin role separation correctly return HTTP 403 FORBIDDEN when users attempt cross-tenant access without authorized platform privileges.
+  - Role guard changes: Hardened `assertSafeDbRole` in `src/server/db/roleGuard.ts` to check direct role attributes (`rolsuper`, `rolbypassrls`, `rolcreatedb`, `rolcreaterole`), check inherited memberships via `pg_auth_members`, fail closed on unverifiable roles or connection errors, and completely remove `ALLOW_PRIVILEGED_DB_ROLE` as an environment bypass in any environment (including development).
+  - Files changed: `src/server/db/roleGuard.ts`, `scripts/verifyAuthSecurity.ts`, `docs/foundation/AI_PROJECT_STATE.md`.
+  - Exact tests and results: Typecheck (PASSED), Build (PASSED), 12 R6.3 DB Role Guard unit tests (30 passed total in auth security suite, 12/12 role guard tests PASSED), Foundation battery (passed all static checks; live tests blocked locally without live PostgreSQL as expected).
+  - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
+  - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
+  - Remaining blockers: None for 6A local verification; awaiting CI execution on main branch.
+
 
 ---
 
