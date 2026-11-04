@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-04T07:20:19.829Z",
+  "timestamp": "2026-11-04T08:33:16.360Z",
   "environment": {
     "nodeEnv": "development",
     "hasDatabaseUrl": false,
@@ -16,108 +16,108 @@
     {
       "script": "scripts/verifyPublicAssets.ts",
       "status": "PASS",
-      "durationMs": 380,
+      "durationMs": 354,
       "exitCode": 0
     },
     {
       "script": "scripts/verifyExecutorImports.ts",
       "status": "PASS",
-      "durationMs": 363,
+      "durationMs": 338,
       "exitCode": 0
     },
     {
       "script": "scripts/verifyNoMemoryFallback.ts",
       "status": "PASS",
-      "durationMs": 357,
+      "durationMs": 241,
       "exitCode": 0
     },
     {
       "script": "scripts/verifyFixRbacCompanies.ts",
       "status": "BLOCKED",
-      "durationMs": 448,
+      "durationMs": 436,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Behavioral RBAC tests are BLOCKED."
     },
     {
       "script": "scripts/verifyFixDbWiring.ts",
       "status": "BLOCKED",
-      "durationMs": 414,
+      "durationMs": 425,
       "exitCode": 2,
       "failureReason": "Live DB probe skipped (DATABASE_URL is not set in environment)"
     },
     {
       "script": "scripts/verifyRepair2.ts",
       "status": "BLOCKED",
-      "durationMs": 504,
+      "durationMs": 462,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live inactive membership RBAC test is BLOCKED."
     },
     {
       "script": "scripts/verifyPersistence.ts",
       "status": "PASS",
-      "durationMs": 486,
+      "durationMs": 413,
       "exitCode": 0
     },
     {
       "script": "scripts/verifyTenantIsolation.ts",
       "status": "BLOCKED",
-      "durationMs": 419,
+      "durationMs": 456,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live RLS tenant isolation tests are BLOCKED."
     },
     {
       "script": "scripts/verifyAuthSecurity.ts",
       "status": "BLOCKED",
-      "durationMs": 560,
+      "durationMs": 454,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live audit log and rate limit DB tests are BLOCKED."
     },
     {
       "script": "scripts/verifyRlsCoverage.ts",
       "status": "BLOCKED",
-      "durationMs": 371,
+      "durationMs": 367,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Skipping live DB table ownership & RLS queries."
     },
     {
       "script": "scripts/verifyHttpSecurity.ts",
       "status": "BLOCKED",
-      "durationMs": 690,
+      "durationMs": 645,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live HTTP security tests are BLOCKED."
     },
     {
       "script": "scripts/verifyRbacHttp.ts",
       "status": "BLOCKED",
-      "durationMs": 664,
+      "durationMs": 678,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live RBAC HTTP integration tests are BLOCKED."
     },
     {
       "script": "scripts/verifyMigrations.ts",
       "status": "BLOCKED",
-      "durationMs": 478,
+      "durationMs": 394,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live migration verification tests are BLOCKED."
     },
     {
       "script": "scripts/verifyCompanyAtomicity.ts",
       "status": "BLOCKED",
-      "durationMs": 434,
+      "durationMs": 503,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Live company atomicity tests are BLOCKED."
     },
     {
       "script": "scripts/verifyTenantHttp.ts",
       "status": "BLOCKED",
-      "durationMs": 704,
+      "durationMs": 690,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Tenant HTTP E2E tests are BLOCKED."
     },
     {
       "script": "scripts/verifyDbPrivileges.ts",
       "status": "BLOCKED",
-      "durationMs": 468,
+      "durationMs": 416,
       "exitCode": 2,
       "failureReason": "DATABASE_URL is not set. Database privilege tests are BLOCKED."
     }
