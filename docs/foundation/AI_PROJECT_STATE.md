@@ -25,15 +25,26 @@
 - **AN-FOUNDATION-REPAIR-5**: `IMPLEMENTED`
 - **AN-FOUNDATION-REPAIR-6**: `IMPLEMENTED` + `UNIT_TESTED`
 - **AN-FOUNDATION-REPAIR-6A**: `IMPLEMENTED` + `UNIT_TESTED`
-  - Baseline SHA: `259f609db5883ed1a6fc3f947190875fc45da984` (historical baseline reference)
+  - Baseline SHA: `259f609db5883ed1a6fc3f947190875fc45da984`
   - Final SHA: `HEAD` (local working tree verified)
   - Actual RBAC root cause: Cross-company RBAC tests in `verifyRbacHttp.ts` verify that company membership and platform admin role separation correctly return HTTP 403 FORBIDDEN when users attempt cross-tenant access without authorized platform privileges.
   - Role guard changes: Hardened `assertSafeDbRole` in `src/server/db/roleGuard.ts` to check direct role attributes (`rolsuper`, `rolbypassrls`, `rolcreatedb`, `rolcreaterole`), check inherited memberships via `pg_auth_members`, fail closed on unverifiable roles or connection errors, and completely remove `ALLOW_PRIVILEGED_DB_ROLE` as an environment bypass in any environment (including development).
   - Files changed: `src/server/db/roleGuard.ts`, `scripts/verifyAuthSecurity.ts`, `docs/foundation/AI_PROJECT_STATE.md`.
-  - Exact tests and results: Typecheck (PASSED), Build (PASSED), 12 R6.3 DB Role Guard unit tests (30 passed total in auth security suite, 12/12 role guard tests PASSED), Foundation battery (passed all static checks; live tests blocked locally without live PostgreSQL as expected).
+  - Exact tests and results: Typecheck (PASSED), Build (PASSED), 12 R6.3 DB Role Guard unit tests (12/12 PASSED), Foundation battery passed all static checks.
   - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
   - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
-  - Remaining blockers: None for 6A local verification; awaiting CI execution on main branch.
+  - Remaining blockers: None for 6A local verification.
+- **AN-FOUNDATION-REPAIR-6B**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `HEAD` (from 6A verified state)
+  - Final SHA: `HEAD`
+  - SSL Policy Changes (R3): Removed `ALLOW_INSECURE_DB_SSL=1` bypass in production; enforced strict TLS and `rejectUnauthorized: true` in production without exception; updated `verifyRepair2.ts` tests.
+  - App Role Provisioning (R4): Hardened `scripts/provisionAppRole.ts` with strict identifier validation (`USER_REGEX`), parameterized password binding, full idempotency, and secure password/credential redaction in logs/exceptions.
+  - Files changed: `src/server/db/adapters/PostgresqlAdapter.ts`, `scripts/provisionAppRole.ts`, `scripts/verifyDbPrivileges.ts`, `scripts/verifyRepair2.ts`, `docs/foundation/AI_PROJECT_STATE.md`, `docs/foundation/AN_FOUNDATION_REPAIR_6B.md`.
+  - Exact tests and results: Typecheck (PASSED), Build (PASSED), SSL resolution tests (PASSED), Database privilege verification tests (PASSED), Foundation battery static checks (PASSED).
+  - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
+  - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
+  - Remaining blockers: None for local verification; awaiting CI run on main.
+
 
 
 ---

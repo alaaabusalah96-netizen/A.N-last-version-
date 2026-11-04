@@ -8,19 +8,30 @@ export function resolveSslConfig(env: Record<string, string | undefined>): pg.Co
   const isProd = env.NODE_ENV === 'production';
 
   if (env.DATABASE_SSL === 'disable') {
-    if (isProd && env.ALLOW_INSECURE_DB_SSL !== '1') {
+    if (isProd) {
       throw new Error(
-        'Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production unless ALLOW_INSECURE_DB_SSL=1 is explicitly set'
+        'Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production'
       );
-    }
-    if (isProd && env.ALLOW_INSECURE_DB_SSL === '1') {
-      console.warn('[db] WARNING: ALLOW_INSECURE_DB_SSL=1 is set. Proceeding with insecure SSL connection in production.');
     }
     return undefined;
   }
 
-  if (isProd || env.DATABASE_SSL === 'require') {
+  if (isProd) {
+    if (env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') {
+      throw new Error(
+        'Insecure database connection rejected: DATABASE_SSL_REJECT_UNAUTHORIZED=false is strictly forbidden in production'
+      );
+    }
+    return { rejectUnauthorized: true };
+  }
+
+  // Non-production (test/development)
+  if (env.DATABASE_SSL === 'require' || env.DATABASE_SSL === 'true' || env.DATABASE_SSL === 'ssl') {
     return { rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
+  }
+
+  if (env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') {
+    return { rejectUnauthorized: false };
   }
 
   return undefined;

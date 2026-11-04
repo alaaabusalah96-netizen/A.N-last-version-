@@ -1,7 +1,7 @@
 import { check, blocked, summary } from './lib/testkit.js';
 import { getDefaultExecutor } from '../src/server/db/index.js';
 
-console.log('--- Running Database Privileges Matrix Verification (R10) ---');
+console.log('--- Running Database Privileges Matrix Verification (R10 & R4) ---');
 
 async function runTests() {
   const dbUrl = process.env.DATABASE_URL;
@@ -21,26 +21,62 @@ async function runTests() {
   }
 
   try {
-    // 1. Role privileges: rolsuper = false, rolbypassrls = false
-    const roleRes = await executor.query<{ rolsuper: boolean; rolbypassrls: boolean; user_name: string }>(
-      'SELECT rolsuper, rolbypassrls, current_user as user_name FROM pg_roles WHERE rolname = current_user;'
+    // 1. Role privileges: rolsuper = false, rolbypassrls = false, rolcreatedb = false, rolcreaterole = false
+    const roleRes = await executor.query<{
+      rolsuper: boolean;
+      rolbypassrls: boolean;
+      rolcreatedb: boolean;
+      rolcreaterole: boolean;
+      user_name: string;
+    }>(
+      'SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, current_user as user_name FROM pg_roles WHERE rolname = current_user;'
     );
     const roleInfo = roleRes.rows[0];
 
-    await check('Connected DB user is NOT SUPERUSER', roleInfo && roleInfo.rolsuper === false);
-    await check('Connected DB user does NOT have BYPASSRLS privilege', roleInfo && roleInfo.rolbypassrls === false);
+    await check('1. Connected DB user is NOT SUPERUSER', roleInfo && roleInfo.rolsuper === false);
+    await check('2. Connected DB user does NOT have BYPASSRLS privilege', roleInfo && roleInfo.rolbypassrls === false);
+    await check('3. Connected DB user does NOT have CREATEDB privilege', roleInfo && roleInfo.rolcreatedb === false);
+    await check('4. Connected DB user does NOT have CREATEROLE privilege', roleInfo && roleInfo.rolcreaterole === false);
 
-    // 2. Table Ownership: connected user must NOT be owner of any public tables
+    // 5. Privileged inherited membership check
+    const inheritedRes = await executor.query<{ has_inherited: boolean }>(
+      `SELECT EXISTS (
+        SELECT 1 FROM pg_auth_members m
+        JOIN pg_roles r ON m.roleid = r.oid
+        JOIN pg_roles u ON m.member = u.oid
+        WHERE u.rolname = current_user AND (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole)
+      ) as has_inherited;`
+    );
+    await check('5. Connected DB user has no privileged inherited membership', !inheritedRes.rows[0]?.has_inherited);
+
+    // 6. Test DDL prohibitions (CREATE DATABASE / CREATE ROLE should fail for an_app)
+    let createDbFailed = false;
+    try {
+      await executor.query('CREATE DATABASE test_forbidden_db;');
+    } catch {
+      createDbFailed = true;
+    }
+    await check('6. an_app cannot CREATE DATABASE', createDbFailed);
+
+    let createRoleFailed = false;
+    try {
+      await executor.query('CREATE ROLE test_forbidden_role;');
+    } catch {
+      createRoleFailed = true;
+    }
+    await check('7. an_app cannot CREATE ROLE', createRoleFailed);
+
+    // 7. Table Ownership: connected user must NOT be owner of any public tables
     const ownerRes = await executor.query<{ tablename: string; tableowner: string }>(
       "SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'public' AND tableowner = current_user;"
     );
     await check(
-      'App role is NOT owner of any tables in public schema',
+      '8. App role is NOT owner of any tables in public schema',
       ownerRes.rows.length === 0,
       ownerRes.rows.length > 0 ? `Owned tables: ${ownerRes.rows.map((r) => r.tablename).join(', ')}` : undefined
     );
 
-    // 3. Table Privilege Matrix
+    // 8. Table Privilege Matrix
     const tablesRes = await executor.query<{ tablename: string }>(
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public';"
     );
@@ -68,12 +104,12 @@ async function runTests() {
 
       if (tbl === 'audit_logs') {
         await check(
-          "audit_logs table privileges (SELECT=true, INSERT=true, UPDATE=false, DELETE=false, TRUNCATE=false)",
+          "9. audit_logs table privileges (SELECT=true, INSERT=true, UPDATE=false, DELETE=false, TRUNCATE=false)",
           p.can_select && p.can_insert && !p.can_update && !p.can_delete && !p.can_truncate
         );
       } else if (tbl === 'schema_migrations') {
         await check(
-          "schema_migrations table privileges (SELECT=true, INSERT=false, UPDATE=false, DELETE=false, TRUNCATE=false)",
+          "10. schema_migrations table privileges (SELECT=true, INSERT=false, UPDATE=false, DELETE=false, TRUNCATE=false)",
           p.can_select && !p.can_insert && !p.can_update && !p.can_delete && !p.can_truncate
         );
       } else {

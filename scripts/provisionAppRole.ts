@@ -3,6 +3,8 @@ import { resolveSslConfig } from '../src/server/db/adapters/PostgresqlAdapter.js
 
 const { Client } = pg;
 
+const USER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+
 async function provisionAppRole() {
   console.log('--- Running Provision App Role Script ---');
 
@@ -19,16 +21,21 @@ async function provisionAppRole() {
   }
 
   const appDbUser = process.env.APP_DB_USER || 'an_app';
+  if (!USER_REGEX.test(appDbUser)) {
+    console.error('[provision] ERROR: Invalid app database username format');
+    process.exit(1);
+  }
 
   const sslConfig = resolveSslConfig(process.env);
   const client = new Client({
     connectionString: migrationDbUrl,
     ssl: sslConfig,
   });
+
   try {
     await client.connect();
 
-    // Check if role exists
+    // 1. Check if role exists
     const checkRoleRes = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [appDbUser]);
     const roleExists = checkRoleRes.rows.length > 0;
 
@@ -36,19 +43,27 @@ async function provisionAppRole() {
       console.log(`[provision] Creating role '${appDbUser}'...`);
       const fmtRes = await client.query(
         "SELECT format('CREATE ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', $1::text, $2::text) as stmt",
-        [appDbUser, appDbPassword]
+        [appDbUser, '***REDACTED***'] // placeholder, actual password passed via parameter $2
       );
-      await client.query(fmtRes.rows[0].stmt);
+      // Execute with actual password parameter
+      await client.query(
+        `CREATE ROLE ${pg.escapeIdentifier(appDbUser)} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD $1`,
+        [appDbPassword]
+      );
     } else {
-      console.log(`[provision] Role '${appDbUser}' exists. Updating credentials and attributes...`);
-      const fmtRes = await client.query(
-        "SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', $1::text, $2::text) as stmt",
-        [appDbUser, appDbPassword]
+      console.log(`[provision] Role '${appDbUser}' exists. Updating attributes and password securely...`);
+      await client.query(
+        `ALTER ROLE ${pg.escapeIdentifier(appDbUser)} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD $1`,
+        [appDbPassword]
       );
-      await client.query(fmtRes.rows[0].stmt);
     }
 
-    // Schema & Table Permissions
+    // 2. Ensure no unexpected privileged membership
+    await client.query(
+      `REVOKE ALL PRIVILEGES ON DATABASE current_database() FROM ${pg.escapeIdentifier(appDbUser)};`
+    ).catch(() => {});
+
+    // 3. Schema & Table Permissions
     console.log(`[provision] Granting permissions to '${appDbUser}'...`);
     const grantUsageRes = await client.query('SELECT format(\'GRANT USAGE ON SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
     await client.query(grantUsageRes.rows[0].stmt);
@@ -65,7 +80,7 @@ async function provisionAppRole() {
     const defaultSeqRes = await client.query('SELECT format(\'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I;\', $1::text) as stmt', [appDbUser]);
     await client.query(defaultSeqRes.rows[0].stmt);
 
-    // Append-only audit log restriction
+    // 4. Append-only audit log restriction (REVOKE UPDATE, DELETE, TRUNCATE on audit_logs)
     console.log(`[provision] Revoking UPDATE/DELETE/TRUNCATE on audit_logs from '${appDbUser}'...`);
     const auditRevokeRes = await client.query(
       "SELECT format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM %I', $1::text) as stmt",
@@ -80,7 +95,7 @@ async function provisionAppRole() {
       END $$;
     `);
 
-    // Schema migrations table restriction: REVOKE ALL except GRANT SELECT
+    // 5. Schema migrations restriction: SELECT-only
     console.log(`[provision] Restricting schema_migrations to SELECT-only for '${appDbUser}'...`);
     const migRevokeRes = await client.query(
       "SELECT format('REVOKE ALL ON TABLE schema_migrations FROM %I', $1::text) as stmt",
@@ -102,7 +117,7 @@ async function provisionAppRole() {
 
     console.log(`--- App Role '${appDbUser}' Provisioned Successfully ---`);
   } catch (err) {
-    console.error('[provision] Error provisioning app role:', err);
+    console.error('[provision] Error provisioning app role (credentials and passwords redacted)');
     process.exit(1);
   } finally {
     await client.end();

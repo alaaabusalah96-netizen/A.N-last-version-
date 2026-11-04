@@ -61,8 +61,8 @@ async function runTests() {
     }
   }
 
-  // Test 5: Behavioral SSL Config Resolution
-  await check('resolveSslConfig throws in production when DATABASE_SSL=disable without ALLOW_INSECURE_DB_SSL=1', () => {
+  // Test 5: Behavioral SSL Config Resolution (Strict R3 Production SSL Policy)
+  await check('resolveSslConfig throws in production when DATABASE_SSL=disable', () => {
     try {
       resolveSslConfig({ NODE_ENV: 'production', DATABASE_SSL: 'disable' });
       return false;
@@ -71,9 +71,22 @@ async function runTests() {
     }
   });
 
-  await check('resolveSslConfig allows disable in production when ALLOW_INSECURE_DB_SSL=1', () => {
-    const ssl = resolveSslConfig({ NODE_ENV: 'production', DATABASE_SSL: 'disable', ALLOW_INSECURE_DB_SSL: '1' });
-    return ssl === undefined;
+  await check('resolveSslConfig ALLOW_INSECURE_DB_SSL=1 cannot bypass rejection in production', () => {
+    try {
+      resolveSslConfig({ NODE_ENV: 'production', DATABASE_SSL: 'disable', ALLOW_INSECURE_DB_SSL: '1' });
+      return false;
+    } catch (err) {
+      return String(err).includes('Insecure database connection rejected');
+    }
+  });
+
+  await check('resolveSslConfig throws in production when DATABASE_SSL_REJECT_UNAUTHORIZED=false', () => {
+    try {
+      resolveSslConfig({ NODE_ENV: 'production', DATABASE_SSL_REJECT_UNAUTHORIZED: 'false' });
+      return false;
+    } catch (err) {
+      return String(err).includes('Insecure database connection rejected');
+    }
   });
 
   await check('resolveSslConfig enables rejectUnauthorized by default in production', () => {
