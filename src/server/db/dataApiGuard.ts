@@ -1,29 +1,38 @@
 import { DbExecutor } from './types.js';
 
-/**
- * Validates that the application runtime role (current_user) does not inherit
- * Supabase administrative roles (such as service_role, supabase_admin, postgres)
- * and that Supabase default roles (anon, authenticated, service_role) are preserved
- * without application role interference.
- */
 export async function assertNoDataApiExposure(executor: DbExecutor): Promise<string[]> {
+  const dataApiRoles = ['anon', 'authenticated', 'service_role'];
   const violations: string[] = [];
 
-  try {
-    // 1. Verify current_user is NOT a member of service_role, supabase_admin, or postgres
-    const privMembershipRes = await executor.query<{ has_admin_role: boolean }>(
-      `SELECT EXISTS (
-        SELECT 1 FROM pg_roles r
-        WHERE r.rolname IN ('service_role', 'supabase_admin', 'postgres')
-          AND pg_has_role(current_user, r.oid, 'MEMBER')
-      ) as has_admin_role;`
-    );
+  for (const role of dataApiRoles) {
+    try {
+      // Check if role exists
+      const roleCheck = await executor.query<{ exists: boolean }>(
+        'SELECT to_regrole($1) IS NOT NULL as exists;',
+        [role]
+      );
+      if (!roleCheck.rows[0]?.exists) {
+        continue;
+      }
 
-    if (privMembershipRes.rows[0]?.has_admin_role) {
-      violations.push('Application user has inherited administrative Supabase role membership.');
+      // Check table privileges
+      const tablePrivs = await executor.query<{ tablename: string }>(
+        `SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+         AND (
+           has_table_privilege($1, quote_ident(schemaname) || '.' || quote_ident(tablename), 'SELECT') OR
+           has_table_privilege($1, quote_ident(schemaname) || '.' || quote_ident(tablename), 'INSERT') OR
+           has_table_privilege($1, quote_ident(schemaname) || '.' || quote_ident(tablename), 'UPDATE') OR
+           has_table_privilege($1, quote_ident(schemaname) || '.' || quote_ident(tablename), 'DELETE')
+         );`,
+        [role]
+      );
+
+      if (tablePrivs.rows.length > 0) {
+        violations.push(`Role '${role}' has table privileges on ${tablePrivs.rows.length} public tables.`);
+      }
+    } catch (err) {
+      // Ignore query errors during check if table doesn't exist yet
     }
-  } catch (err) {
-    // Ignore query errors in environments where system roles are not queryable
   }
 
   return violations;

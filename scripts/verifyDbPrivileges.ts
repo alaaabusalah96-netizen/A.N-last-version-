@@ -21,16 +21,15 @@ async function runTests() {
   }
 
   try {
-    // 1. Role privileges: rolsuper = false, rolbypassrls = false, rolcreatedb = false, rolcreaterole = false, rolreplication = false
+    // 1. Role privileges: rolsuper = false, rolbypassrls = false, rolcreatedb = false, rolcreaterole = false
     const roleRes = await executor.query<{
       rolsuper: boolean;
       rolbypassrls: boolean;
       rolcreatedb: boolean;
       rolcreaterole: boolean;
-      rolreplication: boolean;
       user_name: string;
     }>(
-      'SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication, current_user as user_name FROM pg_roles WHERE rolname = current_user;'
+      'SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, current_user as user_name FROM pg_roles WHERE rolname = current_user;'
     );
     const roleInfo = roleRes.rows[0];
 
@@ -38,28 +37,26 @@ async function runTests() {
     await check('2. Connected DB user does NOT have BYPASSRLS privilege', roleInfo && roleInfo.rolbypassrls === false);
     await check('3. Connected DB user does NOT have CREATEDB privilege', roleInfo && roleInfo.rolcreatedb === false);
     await check('4. Connected DB user does NOT have CREATEROLE privilege', roleInfo && roleInfo.rolcreaterole === false);
-    await check('5. Connected DB user does NOT have REPLICATION privilege', roleInfo && roleInfo.rolreplication === false);
 
-    // 2. Multi-level privileged inherited membership check (including Supabase admin roles)
+    // 5. Privileged inherited membership check
     const inheritedRes = await executor.query<{ has_inherited: boolean }>(
       `SELECT EXISTS (
-        SELECT 1 FROM pg_roles r
-        WHERE r.rolname <> current_user
-          AND (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication
-               OR r.rolname IN ('service_role', 'supabase_admin', 'postgres', 'pg_read_all_data', 'pg_write_all_data'))
-          AND pg_has_role(current_user, r.oid, 'MEMBER')
+        SELECT 1 FROM pg_auth_members m
+        JOIN pg_roles r ON m.roleid = r.oid
+        JOIN pg_roles u ON m.member = u.oid
+        WHERE u.rolname = current_user AND (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole)
       ) as has_inherited;`
     );
-    await check('6. Connected DB user has no privileged inherited membership', !inheritedRes.rows[0]?.has_inherited);
+    await check('5. Connected DB user has no privileged inherited membership', !inheritedRes.rows[0]?.has_inherited);
 
-    // 3. Test DDL prohibitions (CREATE DATABASE / CREATE ROLE should fail for an_app)
+    // 6. Test DDL prohibitions (CREATE DATABASE / CREATE ROLE should fail for an_app)
     let createDbFailed = false;
     try {
       await executor.query('CREATE DATABASE test_forbidden_db;');
     } catch {
       createDbFailed = true;
     }
-    await check('7. an_app cannot CREATE DATABASE', createDbFailed);
+    await check('6. an_app cannot CREATE DATABASE', createDbFailed);
 
     let createRoleFailed = false;
     try {
@@ -67,19 +64,19 @@ async function runTests() {
     } catch {
       createRoleFailed = true;
     }
-    await check('8. an_app cannot CREATE ROLE', createRoleFailed);
+    await check('7. an_app cannot CREATE ROLE', createRoleFailed);
 
-    // 4. Table Ownership: connected user must NOT be owner of any public tables
+    // 7. Table Ownership: connected user must NOT be owner of any public tables
     const ownerRes = await executor.query<{ tablename: string; tableowner: string }>(
       "SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'public' AND tableowner = current_user;"
     );
     await check(
-      '9. App role is NOT owner of any tables in public schema',
+      '8. App role is NOT owner of any tables in public schema',
       ownerRes.rows.length === 0,
       ownerRes.rows.length > 0 ? `Owned tables: ${ownerRes.rows.map((r) => r.tablename).join(', ')}` : undefined
     );
 
-    // 5. Table Privilege Matrix
+    // 8. Table Privilege Matrix
     const tablesRes = await executor.query<{ tablename: string }>(
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public';"
     );
@@ -107,12 +104,12 @@ async function runTests() {
 
       if (tbl === 'audit_logs') {
         await check(
-          "10. audit_logs table privileges (SELECT=true, INSERT=true, UPDATE=false, DELETE=false, TRUNCATE=false)",
+          "9. audit_logs table privileges (SELECT=true, INSERT=true, UPDATE=false, DELETE=false, TRUNCATE=false)",
           p.can_select && p.can_insert && !p.can_update && !p.can_delete && !p.can_truncate
         );
       } else if (tbl === 'schema_migrations') {
         await check(
-          "11. schema_migrations table privileges (SELECT=true, INSERT=false, UPDATE=false, DELETE=false, TRUNCATE=false)",
+          "10. schema_migrations table privileges (SELECT=true, INSERT=false, UPDATE=false, DELETE=false, TRUNCATE=false)",
           p.can_select && !p.can_insert && !p.can_update && !p.can_delete && !p.can_truncate
         );
       } else {

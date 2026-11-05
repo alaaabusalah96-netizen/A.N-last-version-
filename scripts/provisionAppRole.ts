@@ -1,7 +1,7 @@
 import pg from 'pg';
-import { buildPgConfig } from '../src/server/db/connection.js';
-import { scramSha256Verifier } from '../src/server/security/scram.js';
-import { assertValidNodeEnv } from '../src/server/config/env.js';
+import { buildPgConfig } from '../src/server/db/connection.ts';
+import { scramSha256Verifier } from '../src/server/security/scram.ts';
+import { assertValidNodeEnv } from '../src/server/config/env.ts';
 
 const { Client } = pg;
 const USER_REGEX = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -11,13 +11,12 @@ function redactSensitive(text: string): string {
   return text
     .replace(/SCRAM-SHA-256\$[^\s]+/g, '***REDACTED_VERIFIER***')
     .replace(/password\s*=\s*'[^']+'/gi, "password='***'")
-    .replace(/password\s*=\s*"[^"]+"/gi, 'password="***"')
-    .replace(/postgresql:\/\/[^@\s]+@[^\s]+/gi, 'postgresql://[REDACTED_AUTH]@[HOST]');
+    .replace(/password\s*=\s*"[^"]+"/gi, 'password="***"');
 }
 
 async function provisionAppRole() {
   assertValidNodeEnv();
-  console.log('--- Running Provision App Role Script ---');
+  console.log('--- Running Provision App Role Script (F3) ---');
 
   const migrationDbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
   if (!migrationDbUrl) {
@@ -69,14 +68,14 @@ async function provisionAppRole() {
     const roleExists = checkRoleRes.rows.length > 0;
     const action = roleExists ? 'ALTER' : 'CREATE';
 
-    // 3. Create or update role with strict least privilege
+    // 3. Create or update role
     const stmtRes = await client.query(
       "SELECT format('%s ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;",
       [action, appDbUser, verifier]
     );
     await client.query(stmtRes.rows[0].stmt);
 
-    // 4. Revoke unexpected memberships from target app user (cannot inherit administrative roles)
+    // 4. Revoke unexpected memberships
     const membershipsRes = await client.query(
       `SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid JOIN pg_roles u ON u.oid=m.member WHERE u.rolname=$1;`,
       [appDbUser]
@@ -89,7 +88,7 @@ async function provisionAppRole() {
       await client.query(revokeStmt.rows[0].stmt);
     }
 
-    // 5. Database & schema privileges for appDbUser
+    // 5. Database & schema privileges
     const grantDbStmt = await client.query(
       "SELECT format('GRANT CONNECT ON DATABASE %I TO %I;', $1::text, $2::text) AS stmt;",
       [dbName, appDbUser]
@@ -102,6 +101,7 @@ async function provisionAppRole() {
     );
     await client.query(revokeCreateDbStmt.rows[0].stmt);
 
+    await client.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC;');
     const revokeSchemaCreateStmt = await client.query(
       "SELECT format('REVOKE CREATE ON SCHEMA public FROM %I;', $1::text) AS stmt;",
       [appDbUser]
@@ -114,7 +114,7 @@ async function provisionAppRole() {
     );
     await client.query(grantUsageStmt.rows[0].stmt);
 
-    // 6. Tables & sequences privileges for appDbUser
+    // 6. Tables & sequences privileges
     const grantTablesStmt = await client.query(
       "SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I;', $1::text) AS stmt;",
       [appDbUser]
@@ -139,7 +139,7 @@ async function provisionAppRole() {
     );
     await client.query(defaultSeqStmt.rows[0].stmt);
 
-    // 7. Audit logs restriction (append-only for appDbUser: cannot UPDATE, DELETE, or TRUNCATE)
+    // 7. Audit logs restriction (append-only)
     const auditCheck = await client.query("SELECT to_regclass('public.audit_logs') IS NOT NULL as exists;");
     if (auditCheck.rows[0].exists) {
       const auditRevokeStmt = await client.query(
@@ -149,7 +149,7 @@ async function provisionAppRole() {
       await client.query(auditRevokeStmt.rows[0].stmt);
     }
 
-    // 8. Schema migrations restriction (SELECT-only for appDbUser: cannot modify migration history)
+    // 8. Schema migrations restriction (SELECT-only)
     const migCheck = await client.query("SELECT to_regclass('public.schema_migrations') IS NOT NULL as exists;");
     if (migCheck.rows[0].exists) {
       const migRevokeStmt = await client.query(
@@ -164,8 +164,19 @@ async function provisionAppRole() {
       await client.query(migGrantStmt.rows[0].stmt);
     }
 
-    // NOTE: Default Supabase roles (anon, authenticated, service_role) are preserved intact
-    // and are NOT modified, revoked, or stripped by this provisioning script.
+    // 9. Block Data API roles if they exist
+    const dataApiRoles = ['anon', 'authenticated', 'service_role'];
+    for (const rName of dataApiRoles) {
+      const regRole = await client.query('SELECT to_regrole($1) IS NOT NULL as exists;', [rName]);
+      if (regRole.rows[0].exists) {
+        const revTbl = await client.query("SELECT format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
+        await client.query(revTbl.rows[0].stmt);
+        const revSeq = await client.query("SELECT format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
+        await client.query(revSeq.rows[0].stmt);
+        const revFunc = await client.query("SELECT format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
+        await client.query(revFunc.rows[0].stmt);
+      }
+    }
 
     await client.query('COMMIT');
     console.log(`--- App Role '${appDbUser}' Provisioned Successfully (Idempotent) ---`);

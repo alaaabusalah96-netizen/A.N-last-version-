@@ -15,7 +15,7 @@
 ## 4. Production Environment Hardening
 - Set `NODE_ENV=production`.
 - Provide explicit `CORS_ORIGINS` for CSRF origin protection.
-- Ensure Data API exposure guard (`dataApiGuard`) verifies that `an_app` does not inherit administrative roles (`service_role`, `supabase_admin`) and preserves Supabase default roles (`anon`, `authenticated`, `service_role`) intact without disruption.
+- Ensure Data API exposure guard (`dataApiGuard`) locks down `anon`, `authenticated`, and `service_role` privileges on public tables/sequences/functions.
 
 ## 5. Test Suite Caveat
 - The foundation test battery and persistent/RLS tests leave test records and audit logs in the database. Do not run the test battery against a live production database.
