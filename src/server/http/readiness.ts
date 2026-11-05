@@ -34,7 +34,14 @@ export async function handleReadiness(_req: Request, res: Response): Promise<voi
 
     // 3. Complete Schema Migrations Verification
     const migrationsDir = path.resolve(process.cwd(), 'database/migrations');
-    if (fs.existsSync(migrationsDir)) {
+    const isProd = process.env.NODE_ENV === 'production';
+    if (!fs.existsSync(migrationsDir)) {
+      if (isProd) {
+        console.error('[readiness] FATAL: database/migrations directory missing in production');
+        res.status(503).json({ ready: false, database: 'migrations_dir_missing' });
+        return;
+      }
+    } else {
       const sqlFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
       const migRes = await executor.query<{ version: string }>('SELECT version FROM schema_migrations;');
       const appliedSet = new Set(migRes.rows.map((r) => r.version));

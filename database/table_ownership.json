@@ -7,8 +7,7 @@
   {
     "table": "platform_users",
     "scope": "global",
-    "reason": "Global user identity catalog; company_id is an optional legacy/default reference while multi-tenant access is strictly enforced via company_memberships",
-    "allowOptionalCompanyId": true
+    "reason": "Global user identity catalog; company memberships strictly managed via company_memberships table"
   },
   {
     "table": "companies",

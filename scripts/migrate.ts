@@ -3,12 +3,14 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import pg from 'pg';
-import { resolveSslConfig } from '../src/server/db/adapters/PostgresqlAdapter.js';
+import { buildPgConfig } from '../src/server/db/connection.js';
+import { assertValidNodeEnv } from '../src/server/config/env.js';
 
 const { Client } = pg;
 
 async function runMigrations() {
-  console.log('--- Running Database Migrations ---');
+  assertValidNodeEnv();
+  console.log('--- Running Database Migrations (F6) ---');
 
   const isProd = process.env.NODE_ENV === 'production';
   const isCi = process.env.CI === 'true';
@@ -35,16 +37,13 @@ async function runMigrations() {
     return;
   }
 
-  const sslConfig = resolveSslConfig(process.env);
-  const client = new Client({
-    connectionString: migrationDbUrl,
-    ssl: sslConfig,
-  });
+  const pgConfig = buildPgConfig(migrationDbUrl, process.env);
+  const client = new Client(pgConfig);
 
   try {
     await client.connect();
   } catch (err) {
-    console.error('[migrate] Failed to connect to database for migration:', err);
+    console.error('[migrate] Failed to connect to database for migration (credentials redacted)');
     if (requireDb || isCi || isProd) {
       process.exit(1);
     } else {
@@ -122,7 +121,7 @@ async function runMigrations() {
         console.log(`[migrate] Successfully applied: ${file}`);
       } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`[migrate] ERROR: Failed to apply migration '${file}':`, err);
+        console.error(`[migrate] ERROR: Failed to apply migration '${file}'`);
         process.exit(1);
       }
     }
@@ -134,6 +133,6 @@ async function runMigrations() {
 }
 
 runMigrations().catch((err) => {
-  console.error('[migrate] Migration script fatal error:', err);
+  console.error('[migrate] Migration script fatal error');
   process.exit(1);
 });

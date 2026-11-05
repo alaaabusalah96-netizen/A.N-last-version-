@@ -5,15 +5,14 @@ export interface User {
   username: string;
   passwordHash: string;
   role: 'platform_admin' | 'user';
-  companyId?: string | null;
   createdAt: string;
+  isActive?: boolean;
 }
 
 export interface CreateUserInput {
   username: string;
   passwordHash: string;
   role: 'platform_admin' | 'user';
-  companyId?: string | null;
 }
 
 /**

@@ -15,16 +15,15 @@ export class UserRepository {
     const normalizedUsername = input.username.trim().toLowerCase();
 
     const sql = `
-      INSERT INTO platform_users (username, password_hash, role, company_id, is_active)
-      VALUES ($1, $2, $3, $4, true)
-      RETURNING id, username, password_hash as "passwordHash", role, company_id as "companyId", created_at as "createdAt";
+      INSERT INTO platform_users (username, password_hash, role, is_active)
+      VALUES ($1, $2, $3, true)
+      RETURNING id, username, password_hash as "passwordHash", role, created_at as "createdAt", is_active as "isActive";
     `;
 
     const res = await executor.query<User>(sql, [
       normalizedUsername,
       input.passwordHash,
       input.role,
-      input.companyId ?? null,
     ]);
 
     return res.rows[0];
@@ -35,7 +34,7 @@ export class UserRepository {
     const normalized = username.trim().toLowerCase();
 
     const sql = `
-      SELECT id, username, password_hash as "passwordHash", role, company_id as "companyId", created_at as "createdAt", is_active as "isActive"
+      SELECT id, username, password_hash as "passwordHash", role, created_at as "createdAt", is_active as "isActive"
       FROM platform_users
       WHERE username = $1 AND is_active = true;
     `;
@@ -48,7 +47,7 @@ export class UserRepository {
     const executor = await this.getExecutor();
 
     const sql = `
-      SELECT id, username, password_hash as "passwordHash", role, company_id as "companyId", created_at as "createdAt", is_active as "isActive"
+      SELECT id, username, password_hash as "passwordHash", role, created_at as "createdAt", is_active as "isActive"
       FROM platform_users
       WHERE id = $1 AND is_active = true;
     `;
@@ -61,7 +60,7 @@ export class UserRepository {
     const executor = await this.getExecutor();
 
     const sql = `
-      SELECT id, username, role, company_id as "companyId", created_at as "createdAt"
+      SELECT id, username, role, created_at as "createdAt", is_active as "isActive"
       FROM platform_users
       WHERE is_active = true
       ORDER BY created_at DESC;

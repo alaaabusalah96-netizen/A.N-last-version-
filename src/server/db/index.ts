@@ -1,9 +1,8 @@
-import { DatabaseEngine } from './DatabaseEngine.js';
 import { ConnectionRegistry, defaultRegistry } from './ConnectionRegistry.js';
 import { TenantDatabaseResolver, defaultResolver } from './TenantDatabaseResolver.js';
 import { PostgresqlAdapter } from './adapters/PostgresqlAdapter.js';
 import { assertSafeDbRole } from './roleGuard.js';
-import { DatabaseMode, DbExecutor, QueryResult, TenantDbRef } from './types.js';
+import { DbExecutor } from './types.js';
 
 export * from './types.js';
 export * from './DatabaseEngine.js';
@@ -12,12 +11,32 @@ export * from './TenantDatabaseResolver.js';
 export * from './tenantContext.js';
 export { PostgresqlAdapter, PostgresExecutor } from './adapters/PostgresqlAdapter.js';
 
-const executorCache: Map<string, DbExecutor> = new Map();
+const executorPromiseCache: Map<string, Promise<DbExecutor>> = new Map();
+
+async function createGuardedExecutor(config: { connectionString: string }): Promise<DbExecutor> {
+  const adapter = new PostgresqlAdapter();
+  const executor = await adapter.connect(config);
+  try {
+    await assertSafeDbRole(executor);
+    const healthResult = await executor.health();
+    if (!healthResult.ok) {
+      throw new Error(`Database health check failed during initialization: ${healthResult.detail || 'unknown error'}`);
+    }
+    return executor;
+  } catch (err) {
+    try {
+      await executor.close();
+    } catch (closeErr) {
+      console.error('[db] Error closing failed executor:', closeErr);
+    }
+    throw err;
+  }
+}
 
 /**
  * Returns the default DbExecutor using PostgreSQL adapter and ConnectionRegistry.
- * Returns null if DATABASE_URL is not configured in development mode.
- * Throws DB_UNAVAILABLE in production if DATABASE_URL is missing or fails to connect.
+ * Returns null if DATABASE_URL is not configured in non-production mode.
+ * Throws DB_UNAVAILABLE in production if DATABASE_URL is missing or fails to connect/guard.
  */
 export async function getDefaultExecutor(): Promise<DbExecutor | null> {
   const isProd = process.env.NODE_ENV === 'production';
@@ -30,29 +49,27 @@ export async function getDefaultExecutor(): Promise<DbExecutor | null> {
     return null;
   }
 
-  if (executorCache.has('default')) {
-    return executorCache.get('default')!;
+  const cacheKey = 'default';
+  if (executorPromiseCache.has(cacheKey)) {
+    return executorPromiseCache.get(cacheKey)!;
   }
 
   if (!defaultRegistry.has('default')) {
     defaultRegistry.register('default', { connectionString: databaseUrl });
   }
 
-  const config = defaultRegistry.get('default') || { connectionString: databaseUrl };
-  const adapter = new PostgresqlAdapter();
+  const rawConfig = defaultRegistry.get('default') || { connectionString: databaseUrl };
+  const config = {
+    connectionString: rawConfig.connectionString || (rawConfig as any).url || databaseUrl,
+  };
 
-  try {
-    const executor = await adapter.connect(config);
-    await assertSafeDbRole(executor);
-    executorCache.set('default', executor);
-    return executor;
-  } catch (err: unknown) {
-    console.error('[db] Failed to initialize default PostgreSQL executor:', err);
-    if (isProd) {
-      throw new Error('DB_UNAVAILABLE: Failed to connect to default PostgreSQL database in production');
-    }
-    return null;
-  }
+  const promise = createGuardedExecutor(config).catch((err) => {
+    executorPromiseCache.delete(cacheKey);
+    throw err;
+  });
+
+  executorPromiseCache.set(cacheKey, promise);
+  return promise;
 }
 
 /**
@@ -72,54 +89,53 @@ export async function getExecutorForCompany(companyId: string): Promise<DbExecut
   const ref = defaultResolver.resolve(normalizedCompanyId);
 
   // 2) Check cache
-  if (executorCache.has(ref.connectionKey)) {
-    return executorCache.get(ref.connectionKey)!;
+  if (executorPromiseCache.has(ref.connectionKey)) {
+    return executorPromiseCache.get(ref.connectionKey)!;
   }
 
   // 3) Resolve config from registry or fallback to central DATABASE_URL
-  let config = defaultRegistry.get(ref.connectionKey);
-  if (!config && ref.connectionKey === 'default') {
+  let rawConfig = defaultRegistry.get(ref.connectionKey);
+  if (!rawConfig && ref.connectionKey === 'default') {
     const databaseUrl = process.env.DATABASE_URL;
     if (databaseUrl && databaseUrl.trim() !== '') {
-      config = { connectionString: databaseUrl };
-      defaultRegistry.register('default', config);
+      rawConfig = { connectionString: databaseUrl };
+      defaultRegistry.register('default', rawConfig);
     }
   }
 
-  if (!config) {
+  if (!rawConfig) {
     throw new Error(`DB_UNAVAILABLE: No database configuration found for tenant connection key '${ref.connectionKey}'`);
   }
 
-  // 4) Connect via adapter, guard role, and cache
-  const adapter = new PostgresqlAdapter();
-  try {
-    const executor = await adapter.connect(config);
-    try {
-      await assertSafeDbRole(executor);
-    } catch (guardErr) {
-      await executor.close();
-      throw guardErr;
-    }
-    executorCache.set(ref.connectionKey, executor);
-    return executor;
-  } catch (err: unknown) {
-    console.error(`[db] Failed to initialize/guard executor for connection key: '${ref.connectionKey}'`, err);
-    throw err instanceof Error && err.message.includes('dbRoleGuard')
-      ? err
-      : new Error(`DB_UNAVAILABLE: Failed to connect to database for tenant key '${ref.connectionKey}'`);
-  }
+  const config = {
+    connectionString: rawConfig.connectionString || (rawConfig as any).url || process.env.DATABASE_URL || '',
+  };
+
+  const cacheKey = ref.connectionKey;
+  const promise = createGuardedExecutor(config).catch((err) => {
+    executorPromiseCache.delete(cacheKey);
+    throw err;
+  });
+
+  executorPromiseCache.set(cacheKey, promise);
+  return promise;
 }
 
 /**
  * Closes all cached database executors and clears the cache
  */
 export async function closeAllExecutors(): Promise<void> {
-  for (const [key, executor] of executorCache.entries()) {
-    try {
-      await executor.close();
-    } catch (err) {
-      console.error(`[db] Error closing executor for key '${key}':`, err);
+  const promises = Array.from(executorPromiseCache.values());
+  executorPromiseCache.clear();
+
+  const executors = await Promise.allSettled(promises);
+  for (const result of executors) {
+    if (result.status === 'fulfilled') {
+      try {
+        await result.value.close();
+      } catch (err) {
+        console.error('[db] Error closing executor during shutdown:', err);
+      }
     }
   }
-  executorCache.clear();
 }

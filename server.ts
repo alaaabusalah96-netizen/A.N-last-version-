@@ -5,12 +5,14 @@ import { defaultSessionRepository } from './src/server/auth/sessionRepository.js
 import { defaultRateLimitStore } from './src/server/security/rateLimitStore.js';
 import { closeAllExecutors, getDefaultExecutor } from './src/server/db/index.js';
 import { assertSafeDbRole } from './src/server/db/roleGuard.js';
+import { assertValidNodeEnv } from './src/server/config/env.js';
 
 const app = createApp();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
 async function startServer() {
+  assertValidNodeEnv();
   // 1. Startup DB Role Safety & Health Check Retry Loop
   try {
     const executor = await getDefaultExecutor();
@@ -69,6 +71,13 @@ async function startServer() {
   // Graceful shutdown handler
   const gracefulShutdown = async (signal: string) => {
     console.log(`[server] Received ${signal}, initiating graceful shutdown...`);
+
+    const timeoutTimer = setTimeout(() => {
+      console.error('[server] Shutdown timeout exceeded (10s), forcing process.exit(1)');
+      process.exit(1);
+    }, 10000);
+    timeoutTimer.unref();
+
     server.close(async () => {
       console.log('[server] Express HTTP server closed.');
       try {

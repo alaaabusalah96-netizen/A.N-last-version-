@@ -4,7 +4,8 @@ import { PermissionCode } from '../rbac/permissions.js';
 import { defaultRbacService, RbacService } from '../rbac/rbacService.js';
 import { tenantContextStorage } from '../db/tenantContext.js';
 import { isUuid } from './validators.js';
-import { ValidationError } from './errors.js';
+import { ValidationError, UnauthorizedError, ForbiddenError } from './errors.js';
+import { wrap } from './asyncHandler.js';
 
 /**
  * Middleware requiring active user access to a specific tenant company.
@@ -15,13 +16,9 @@ export function requireCompanyAccess(
   permission: PermissionCode,
   rbacService: RbacService = defaultRbacService
 ) {
-  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  return wrap(async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Authentication required before accessing tenant resources',
-      });
-      return;
+      throw new UnauthorizedError('Authentication required before accessing tenant resources');
     }
 
     const companyId = req.params.companyId;
@@ -32,11 +29,7 @@ export function requireCompanyAccess(
 
     const allowed = await rbacService.hasPermission(req.user, permission, companyId);
     if (!allowed) {
-      res.status(403).json({
-        error: 'Forbidden',
-        message: `Missing required permission '${permission}' for the requested company`,
-      });
-      return;
+      throw new ForbiddenError(`Missing required permission '${permission}' for the requested company`);
     }
 
     (req as any).companyId = companyId;
@@ -44,5 +37,5 @@ export function requireCompanyAccess(
     tenantContextStorage.run({ companyId, userId: req.user.id }, () => {
       next();
     });
-  };
+  });
 }

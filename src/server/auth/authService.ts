@@ -110,7 +110,6 @@ export class AuthService {
         username: normalizedUsername,
         passwordHash,
         role: 'platform_admin',
-        companyId: null,
       });
 
       console.log(`[auth] Platform admin '${normalizedUsername}' initialized from environment variables.`);

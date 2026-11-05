@@ -53,3 +53,15 @@ export class AuditUnavailableError extends AppError {
     super(503, 'Audit service unavailable', 'AUDIT_UNAVAILABLE', internalDetail);
   }
 }
+
+export class UnauthorizedError extends AppError {
+  constructor(message = 'Authentication required') {
+    super(401, message, 'UNAUTHORIZED');
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message = 'Forbidden') {
+    super(403, message, 'FORBIDDEN');
+  }
+}

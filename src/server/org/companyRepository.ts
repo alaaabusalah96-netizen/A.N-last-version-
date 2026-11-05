@@ -2,6 +2,7 @@ import { getDefaultExecutor } from '../db/index.js';
 import { DbExecutor } from '../db/types.js';
 import { Company, CreateCompanyInput } from './companyTypes.js';
 import { isUuid } from '../http/validators.js';
+import { ValidationError } from '../http/errors.js';
 
 export class CompanyRepository {
   private async getExecutor(customExecutor?: DbExecutor) {
@@ -17,7 +18,10 @@ export class CompanyRepository {
     const executor = await this.getExecutor(customExecutor);
     const normalizedCode = input.code.trim().toUpperCase();
 
-    const createdByUuid = input.createdBy && isUuid(input.createdBy) ? input.createdBy : null;
+    if (input.createdBy !== undefined && input.createdBy !== null && !isUuid(input.createdBy)) {
+      throw new ValidationError('createdBy must be a valid UUID');
+    }
+    const createdByUuid = input.createdBy || null;
 
     const sql = `
       INSERT INTO companies (code, name_ar, name_en, created_by, is_active)

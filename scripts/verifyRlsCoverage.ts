@@ -72,21 +72,7 @@ async function runTests() {
       const companyIdCol = colsRes.rows.find((c) => c.column_name === 'company_id');
 
       if (regItem.scope === 'global') {
-        if (colNames.has('company_id')) {
-          const isAllowedException = regItem.allowOptionalCompanyId === true && regItem.table === 'platform_users';
-          await check(
-            `Global table '${regItem.table}' company_id column is permitted via explicit schema registry exception`,
-            isAllowedException
-          );
-          if (isAllowedException) {
-            await check(
-              `Global table '${regItem.table}' optional company_id column is nullable`,
-              companyIdCol?.is_nullable === 'YES'
-            );
-          }
-        } else {
-          await check(`Global table '${regItem.table}' does NOT contain company_id column`, true);
-        }
+        await check(`Global table '${regItem.table}' does NOT contain company_id column`, !colNames.has('company_id'));
       } else if (regItem.scope === 'tenant') {
         // Rule 3: Tenant scope requirements
         await check(`Tenant table '${regItem.table}' contains company_id column`, Boolean(companyIdCol));

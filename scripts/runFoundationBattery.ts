@@ -23,6 +23,14 @@ const scripts = [
   'scripts/verifyCompanyAtomicity.ts',
   'scripts/verifyTenantHttp.ts',
   'scripts/verifyDbPrivileges.ts',
+  'scripts/verifyForbiddenPatterns.ts',
+  'scripts/verifyBatteryIntegrity.ts',
+  'scripts/verifyDbConfig.ts',
+  'scripts/verifyProvisioning.ts',
+  'scripts/verifyRoleGuard.ts',
+  'scripts/verifyExecutorLifecycle.ts',
+  'scripts/verifyDataApiGuard.ts',
+  'scripts/verifyTenantScopeMiddleware.ts',
 ];
 
 export interface BatteryItemReport {
@@ -81,7 +89,6 @@ for (const script of scripts) {
   const stderr = result.stderr || '';
   const combinedOutput = `${stdout}\n${stderr}`;
 
-  // Stream output to console
   if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
 
@@ -95,13 +102,11 @@ for (const script of scripts) {
   } else if (exitCode === 2) {
     status = 'BLOCKED';
     blockedScripts++;
-    // Extract blocked reason if available
     const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : 'Test prerequisites unfulfilled (BLOCKED)';
   } else {
     status = 'FAIL';
     failedScripts++;
-    // Extract fail reason if available
     const match = combinedOutput.match(/\[FAIL\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : `Script exited with non-zero code ${exitCode}`;
   }
@@ -134,7 +139,6 @@ for (const r of runResults) {
 console.log('======================================================');
 console.log(`Total Scripts: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts}`);
 
-// Write unified artifact files
 const reportData: BatteryReport = {
   timestamp: new Date().toISOString(),
   environment: {
@@ -152,10 +156,15 @@ const reportData: BatteryReport = {
   results: runResults,
 };
 
-const jsonReportPath = path.resolve(process.cwd(), 'foundation-test-report.json');
+const testReportsDir = path.resolve(process.cwd(), '.test-reports');
+if (!fs.existsSync(testReportsDir)) {
+  fs.mkdirSync(testReportsDir, { recursive: true });
+}
+
+const jsonReportPath = path.join(testReportsDir, 'report.json');
 fs.writeFileSync(jsonReportPath, JSON.stringify(reportData, null, 2), 'utf8');
 
-const logReportPath = path.resolve(process.cwd(), 'foundation-battery.log');
+const logReportPath = path.join(testReportsDir, 'battery.log');
 const logContent = [
   '=== FOUNDATION BATTERY TEST EXECUTION LOG ===',
   `Timestamp: ${reportData.timestamp}`,
@@ -166,7 +175,20 @@ const logContent = [
 ].join('\n');
 fs.writeFileSync(logReportPath, logContent, 'utf8');
 
-console.log(`\nArtifact reports generated:\n- ${jsonReportPath}\n- ${logReportPath}`);
+const summaryMdPath = path.join(testReportsDir, 'summary.md');
+const summaryMdContent = [
+  '# Foundation Battery Test Summary',
+  `Timestamp: ${reportData.timestamp}`,
+  '',
+  `Total: ${scripts.length} | Passed: **${passedScripts}** | Failed: **${failedScripts}** | Blocked: **${blockedScripts}**`,
+  '',
+  '| Script | Status | Time | Exit |',
+  '|---|---|---|---|',
+  ...runResults.map((r) => `| \`${r.script}\` | **${r.status}** | ${r.durationMs}ms | ${r.exitCode} |`),
+].join('\n');
+fs.writeFileSync(summaryMdPath, summaryMdContent, 'utf8');
+
+console.log(`\nArtifact reports generated in .test-reports/\n- report.json\n- battery.log\n- summary.md`);
 
 if (failedScripts > 0) {
   console.error('\n[BATTERY ERROR] One or more test scripts FAILED.');

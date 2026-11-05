@@ -15,6 +15,10 @@ export function createCorsMiddleware() {
         .filter(Boolean)
     : [];
 
+  if (isProd && configuredOrigins.length === 0) {
+    throw new Error('CORS_ORIGINS is strictly required and cannot be empty in production mode');
+  }
+
   const localOriginRegex = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
   return cors({

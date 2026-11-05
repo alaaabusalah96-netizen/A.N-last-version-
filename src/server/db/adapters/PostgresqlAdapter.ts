@@ -1,41 +1,11 @@
 import pg from 'pg';
 import { DatabaseEngine } from '../DatabaseEngine.js';
 import { DbExecutor, QueryResult } from '../types.js';
+import { buildPgConfig, resolveSslConfig } from '../connection.js';
+
+export { resolveSslConfig };
 
 const { Pool } = pg;
-
-export function resolveSslConfig(env: Record<string, string | undefined>): pg.ConnectionConfig['ssl'] | undefined {
-  const isProd = env.NODE_ENV === 'production';
-
-  if (env.DATABASE_SSL === 'disable') {
-    if (isProd) {
-      throw new Error(
-        'Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production'
-      );
-    }
-    return undefined;
-  }
-
-  if (isProd) {
-    if (env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') {
-      throw new Error(
-        'Insecure database connection rejected: DATABASE_SSL_REJECT_UNAUTHORIZED=false is strictly forbidden in production'
-      );
-    }
-    return { rejectUnauthorized: true };
-  }
-
-  // Non-production (test/development)
-  if (env.DATABASE_SSL === 'require' || env.DATABASE_SSL === 'true' || env.DATABASE_SSL === 'ssl') {
-    return { rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
-  }
-
-  if (env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false') {
-    return { rejectUnauthorized: false };
-  }
-
-  return undefined;
-}
 
 export class PostgresExecutor implements DbExecutor {
   private pool: pg.Pool;
@@ -126,11 +96,10 @@ export class PostgresqlAdapter implements DatabaseEngine {
       throw new Error('DATABASE_URL or config.connectionString is required to connect to PostgreSQL');
     }
 
-    const sslConfig = resolveSslConfig(process.env);
+    const pgConfig = buildPgConfig(connectionString, process.env);
 
     const poolConfig: pg.PoolConfig = {
-      connectionString,
-      ssl: sslConfig,
+      ...pgConfig,
       max: config.max ? parseInt(config.max, 10) : 10,
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 30000,

@@ -7,3 +7,6 @@ coverage/
 .env*
 !.env.example
 public/assets/aistudio/
+.test-reports/
+foundation-test-report.json
+foundation-battery.log

@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   foundation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     services:
@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
@@ -60,12 +62,19 @@ jobs:
           NODE_ENV: test
           REQUIRE_DB: "1"
 
+      - name: Simulate Managed PG / Data API Guard Prep
+        run: npm run ci:simulate-managed-pg
+        env:
+          MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          NODE_ENV: test
+
       - name: Provision App DB Role
         run: npm run db:provision-app-role
         env:
           MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
           APP_DB_PASSWORD: AppRoleSecurePass123!
           APP_DB_USER: an_app
+          NODE_ENV: test
 
       - name: Run Foundation Test Battery
         id: battery
@@ -84,12 +93,35 @@ jobs:
           SESSION_TTL_HOURS: "12"
           SESSION_COOKIE_NAME: an_session
 
+      - name: Publish Summary to GitHub Step Summary
+        if: always()
+        run: |
+          if [ -f .test-reports/summary.md ]; then
+            cat .test-reports/summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Upload Test Battery Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: foundation-test-results
-          path: |
-            foundation-test-report.json
-            foundation-battery.log
+          path: .test-reports/
           retention-days: 7
+
+  promote-last-green:
+    needs: foundation
+    if: success() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Update last-green tag
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git tag -f last-green
+          git push -f origin last-green

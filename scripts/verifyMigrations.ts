@@ -49,6 +49,12 @@ async function runTests() {
       await check(`Table '${tbl}' exists in database schema`, existingTables.has(tbl));
     }
 
+    // Verify platform_users.company_id was dropped by migration 009
+    const colCheck = await executor.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'platform_users' AND column_name = 'company_id';"
+    );
+    await check('platform_users does NOT have company_id column (migration 009 verified)', colCheck.rows.length === 0);
+
     // 2. R5.2 App Role permissions on schema_migrations (Must be SELECT-only)
     // 2.1 App role CAN SELECT from schema_migrations
     let selectPassed = false;

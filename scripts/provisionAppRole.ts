@@ -1,12 +1,22 @@
 import pg from 'pg';
-import { resolveSslConfig } from '../src/server/db/adapters/PostgresqlAdapter.js';
+import { buildPgConfig } from '../src/server/db/connection.ts';
+import { scramSha256Verifier } from '../src/server/security/scram.ts';
+import { assertValidNodeEnv } from '../src/server/config/env.ts';
 
 const { Client } = pg;
+const USER_REGEX = /^[a-z_][a-z0-9_]{0,62}$/;
 
-const USER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+function redactSensitive(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/SCRAM-SHA-256\$[^\s]+/g, '***REDACTED_VERIFIER***')
+    .replace(/password\s*=\s*'[^']+'/gi, "password='***'")
+    .replace(/password\s*=\s*"[^"]+"/gi, 'password="***"');
+}
 
 async function provisionAppRole() {
-  console.log('--- Running Provision App Role Script ---');
+  assertValidNodeEnv();
+  console.log('--- Running Provision App Role Script (F3) ---');
 
   const migrationDbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
   if (!migrationDbUrl) {
@@ -20,104 +30,165 @@ async function provisionAppRole() {
     process.exit(1);
   }
 
+  // Verify printable ASCII (32-126)
+  for (let i = 0; i < appDbPassword.length; i++) {
+    const code = appDbPassword.charCodeAt(i);
+    if (code < 32 || code > 126) {
+      console.error('[provision] ERROR: APP_DB_PASSWORD contains non-printable ASCII characters');
+      process.exit(1);
+    }
+  }
+
   const appDbUser = process.env.APP_DB_USER || 'an_app';
   if (!USER_REGEX.test(appDbUser)) {
     console.error('[provision] ERROR: Invalid app database username format');
     process.exit(1);
   }
 
-  const sslConfig = resolveSslConfig(process.env);
-  const client = new Client({
-    connectionString: migrationDbUrl,
-    ssl: sslConfig,
-  });
+  const pgConfig = buildPgConfig(migrationDbUrl, process.env);
+  const client = new Client(pgConfig);
 
   try {
     await client.connect();
+    await client.query('BEGIN');
 
-    // 1. Check if role exists
-    const checkRoleRes = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [appDbUser]);
-    const roleExists = checkRoleRes.rows.length > 0;
-
-    if (!roleExists) {
-      console.log(`[provision] Creating role '${appDbUser}'...`);
-      const fmtRes = await client.query(
-        "SELECT format('CREATE ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', $1::text, $2::text) as stmt",
-        [appDbUser, '***REDACTED***'] // placeholder, actual password passed via parameter $2
-      );
-      // Execute with actual password parameter
-      await client.query(
-        `CREATE ROLE ${pg.escapeIdentifier(appDbUser)} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD $1`,
-        [appDbPassword]
-      );
-    } else {
-      console.log(`[provision] Role '${appDbUser}' exists. Updating attributes and password securely...`);
-      await client.query(
-        `ALTER ROLE ${pg.escapeIdentifier(appDbUser)} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD $1`,
-        [appDbPassword]
-      );
+    // 1. Check current_user vs appDbUser
+    const currentUserRes = await client.query('SELECT current_user as cur;');
+    const currentUser = currentUserRes.rows[0].cur;
+    if (currentUser === appDbUser) {
+      throw new Error('Provisioner user cannot be identical to target app user (an_app)');
     }
 
-    // 2. Ensure no unexpected privileged membership
-    await client.query(
-      `REVOKE ALL PRIVILEGES ON DATABASE current_database() FROM ${pg.escapeIdentifier(appDbUser)};`
-    ).catch(() => {});
+    const verifier = scramSha256Verifier(appDbPassword);
+    const dbNameRes = await client.query('SELECT current_database() as db;');
+    const dbName = dbNameRes.rows[0].db;
 
-    // 3. Schema & Table Permissions
-    console.log(`[provision] Granting permissions to '${appDbUser}'...`);
-    const grantUsageRes = await client.query('SELECT format(\'GRANT USAGE ON SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
-    await client.query(grantUsageRes.rows[0].stmt);
+    // 2. Check if role exists
+    const checkRoleRes = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [appDbUser]);
+    const roleExists = checkRoleRes.rows.length > 0;
+    const action = roleExists ? 'ALTER' : 'CREATE';
 
-    const grantTablesRes = await client.query('SELECT format(\'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
-    await client.query(grantTablesRes.rows[0].stmt);
+    // 3. Create or update role
+    const stmtRes = await client.query(
+      "SELECT format('%s ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;",
+      [action, appDbUser, verifier]
+    );
+    await client.query(stmtRes.rows[0].stmt);
 
-    const grantSeqRes = await client.query('SELECT format(\'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I;\', $1::text) as stmt', [appDbUser]);
-    await client.query(grantSeqRes.rows[0].stmt);
-
-    const defaultTablesRes = await client.query('SELECT format(\'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I;\', $1::text) as stmt', [appDbUser]);
-    await client.query(defaultTablesRes.rows[0].stmt);
-
-    const defaultSeqRes = await client.query('SELECT format(\'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I;\', $1::text) as stmt', [appDbUser]);
-    await client.query(defaultSeqRes.rows[0].stmt);
-
-    // 4. Append-only audit log restriction (REVOKE UPDATE, DELETE, TRUNCATE on audit_logs)
-    console.log(`[provision] Revoking UPDATE/DELETE/TRUNCATE on audit_logs from '${appDbUser}'...`);
-    const auditRevokeRes = await client.query(
-      "SELECT format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM %I', $1::text) as stmt",
+    // 4. Revoke unexpected memberships
+    const membershipsRes = await client.query(
+      `SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid JOIN pg_roles u ON u.oid=m.member WHERE u.rolname=$1;`,
       [appDbUser]
     );
-    await client.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'audit_logs') THEN
-          EXECUTE $sql$ ${auditRevokeRes.rows[0].stmt} $sql$;
-        END IF;
-      END $$;
-    `);
+    for (const row of membershipsRes.rows) {
+      const revokeStmt = await client.query(
+        "SELECT format('REVOKE %I FROM %I;', $1::text, $2::text) AS stmt;",
+        [row.rolname, appDbUser]
+      );
+      await client.query(revokeStmt.rows[0].stmt);
+    }
 
-    // 5. Schema migrations restriction: SELECT-only
-    console.log(`[provision] Restricting schema_migrations to SELECT-only for '${appDbUser}'...`);
-    const migRevokeRes = await client.query(
-      "SELECT format('REVOKE ALL ON TABLE schema_migrations FROM %I', $1::text) as stmt",
+    // 5. Database & schema privileges
+    const grantDbStmt = await client.query(
+      "SELECT format('GRANT CONNECT ON DATABASE %I TO %I;', $1::text, $2::text) AS stmt;",
+      [dbName, appDbUser]
+    );
+    await client.query(grantDbStmt.rows[0].stmt);
+
+    const revokeCreateDbStmt = await client.query(
+      "SELECT format('REVOKE CREATE ON DATABASE %I FROM %I;', $1::text, $2::text) AS stmt;",
+      [dbName, appDbUser]
+    );
+    await client.query(revokeCreateDbStmt.rows[0].stmt);
+
+    await client.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC;');
+    const revokeSchemaCreateStmt = await client.query(
+      "SELECT format('REVOKE CREATE ON SCHEMA public FROM %I;', $1::text) AS stmt;",
       [appDbUser]
     );
-    const migGrantRes = await client.query(
-      "SELECT format('GRANT SELECT ON TABLE schema_migrations TO %I', $1::text) as stmt",
+    await client.query(revokeSchemaCreateStmt.rows[0].stmt);
+
+    const grantUsageStmt = await client.query(
+      "SELECT format('GRANT USAGE ON SCHEMA public TO %I;', $1::text) AS stmt;",
       [appDbUser]
     );
-    await client.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations') THEN
-          EXECUTE $sql$ ${migRevokeRes.rows[0].stmt} $sql$;
-          EXECUTE $sql$ ${migGrantRes.rows[0].stmt} $sql$;
-        END IF;
-      END $$;
-    `);
+    await client.query(grantUsageStmt.rows[0].stmt);
 
-    console.log(`--- App Role '${appDbUser}' Provisioned Successfully ---`);
-  } catch (err) {
-    console.error('[provision] Error provisioning app role (credentials and passwords redacted)');
+    // 6. Tables & sequences privileges
+    const grantTablesStmt = await client.query(
+      "SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I;', $1::text) AS stmt;",
+      [appDbUser]
+    );
+    await client.query(grantTablesStmt.rows[0].stmt);
+
+    const grantSeqStmt = await client.query(
+      "SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I;', $1::text) AS stmt;",
+      [appDbUser]
+    );
+    await client.query(grantSeqStmt.rows[0].stmt);
+
+    const defaultTablesStmt = await client.query(
+      "SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I;', $1::text, $2::text) AS stmt;",
+      [currentUser, appDbUser]
+    );
+    await client.query(defaultTablesStmt.rows[0].stmt);
+
+    const defaultSeqStmt = await client.query(
+      "SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I;', $1::text, $2::text) AS stmt;",
+      [currentUser, appDbUser]
+    );
+    await client.query(defaultSeqStmt.rows[0].stmt);
+
+    // 7. Audit logs restriction (append-only)
+    const auditCheck = await client.query("SELECT to_regclass('public.audit_logs') IS NOT NULL as exists;");
+    if (auditCheck.rows[0].exists) {
+      const auditRevokeStmt = await client.query(
+        "SELECT format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM %I;', $1::text) AS stmt;",
+        [appDbUser]
+      );
+      await client.query(auditRevokeStmt.rows[0].stmt);
+    }
+
+    // 8. Schema migrations restriction (SELECT-only)
+    const migCheck = await client.query("SELECT to_regclass('public.schema_migrations') IS NOT NULL as exists;");
+    if (migCheck.rows[0].exists) {
+      const migRevokeStmt = await client.query(
+        "SELECT format('REVOKE ALL ON TABLE schema_migrations FROM %I;', $1::text) AS stmt;",
+        [appDbUser]
+      );
+      await client.query(migRevokeStmt.rows[0].stmt);
+      const migGrantStmt = await client.query(
+        "SELECT format('GRANT SELECT ON TABLE schema_migrations TO %I;', $1::text) AS stmt;",
+        [appDbUser]
+      );
+      await client.query(migGrantStmt.rows[0].stmt);
+    }
+
+    // 9. Block Data API roles if they exist
+    const dataApiRoles = ['anon', 'authenticated', 'service_role'];
+    for (const rName of dataApiRoles) {
+      const regRole = await client.query('SELECT to_regrole($1) IS NOT NULL as exists;', [rName]);
+      if (regRole.rows[0].exists) {
+        const revTbl = await client.query("SELECT format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
+        await client.query(revTbl.rows[0].stmt);
+        const revSeq = await client.query("SELECT format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
+        await client.query(revSeq.rows[0].stmt);
+        const revFunc = await client.query("SELECT format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
+        await client.query(revFunc.rows[0].stmt);
+      }
+    }
+
+    await client.query('COMMIT');
+    console.log(`--- App Role '${appDbUser}' Provisioned Successfully (Idempotent) ---`);
+  } catch (err: any) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rbErr) {
+      console.error('[provision] Notice: rollback failed during error recovery');
+    }
+    const code = err.code || 'UNKNOWN';
+    const message = redactSensitive(err.message || String(err));
+    console.error(`[provision] FAILED code=${code} message=${message}`);
     process.exit(1);
   } finally {
     await client.end();

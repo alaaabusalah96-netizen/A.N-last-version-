@@ -243,9 +243,15 @@ async function runTests() {
         if (opts.queryError) {
           throw new Error('Database connection query failure');
         }
-        if (sql.includes('pg_auth_members')) {
+        if (sql.includes('pg_has_role') || sql.includes('pg_auth_members')) {
           return {
-            rows: [{ has_inherited: opts.hasInherited ?? false }] as unknown as T[],
+            rows: [{ has_priv: opts.hasInherited ?? false }] as unknown as T[],
+            rowCount: 1,
+          };
+        }
+        if (sql.includes('tableowner')) {
+          return {
+            rows: [{ count: '0' }] as unknown as T[],
             rowCount: 1,
           };
         }
@@ -260,6 +266,7 @@ async function runTests() {
               rolbypassrls: opts.rolbypassrls ?? false,
               rolcreatedb: opts.rolcreatedb ?? false,
               rolcreaterole: opts.rolcreaterole ?? false,
+              rolreplication: false,
             },
           ] as unknown as T[],
           rowCount: 1,

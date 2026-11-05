@@ -44,6 +44,12 @@
   - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
   - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
   - Remaining blockers: None for local verification; awaiting CI run on main.
+- **AN-FOUNDATION-FINAL-1**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `HEAD`
+  - Final SHA: `HEAD`
+  - Summary: Complete implementation of local ephemeral PG execution (`verifyLocal.ts`), forbidden pattern scanner (`verifyForbiddenPatterns.ts`), battery integrity checks, native SCRAM-SHA-256 app role provisioning (`provisionAppRole.ts`), multi-level role guard hardening (`roleGuard.ts`), guarded pool lifecycle & promise caching (`db/index.ts`), connection string sanitization & CA SSL handling (`connection.ts`), Data API exposure guard (`dataApiGuard.ts`), migration 009 (`platform_users.company_id` removal), and `.test-reports/` artifact integration with GitHub Actions `last-green` tag promotion.
+  - Definition of Done (DoD) & Stop Rule: Package complete upon passing typecheck, build, migrate, provision, Data API simulation, and all foundation battery scripts. Subsequent work is strictly prohibited without explicit user instruction. P05_STARTED=NO, SUPABASE_TOUCHED=NO.
+
 
 
 
