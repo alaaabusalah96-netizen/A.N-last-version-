@@ -11,12 +11,13 @@ function redactSensitive(text: string): string {
   return text
     .replace(/SCRAM-SHA-256\$[^\s]+/g, '***REDACTED_VERIFIER***')
     .replace(/password\s*=\s*'[^']+'/gi, "password='***'")
-    .replace(/password\s*=\s*"[^"]+"/gi, 'password="***"');
+    .replace(/password\s*=\s*"[^"]+"/gi, 'password="***"')
+    .replace(/postgres(?:ql)?:\/\/[^@\s]+@[^\s]+/gi, 'postgresql://[REDACTED_AUTH]@[HOST]');
 }
 
 async function provisionAppRole() {
   assertValidNodeEnv();
-  console.log('--- Running Provision App Role Script (F3) ---');
+  console.log('--- Running Provision App Role Script ---');
 
   const migrationDbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
   if (!migrationDbUrl) {
@@ -68,14 +69,14 @@ async function provisionAppRole() {
     const roleExists = checkRoleRes.rows.length > 0;
     const action = roleExists ? 'ALTER' : 'CREATE';
 
-    // 3. Create or update role
+    // 3. Create or update role with NOINHERIT and least-privilege attributes
     const stmtRes = await client.query(
-      "SELECT format('%s ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;",
+      "SELECT format('%s ROLE %I WITH LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;",
       [action, appDbUser, verifier]
     );
     await client.query(stmtRes.rows[0].stmt);
 
-    // 4. Revoke unexpected memberships
+    // 4. Revoke unexpected direct memberships
     const membershipsRes = await client.query(
       `SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid JOIN pg_roles u ON u.oid=m.member WHERE u.rolname=$1;`,
       [appDbUser]
@@ -88,12 +89,24 @@ async function provisionAppRole() {
       await client.query(revokeStmt.rows[0].stmt);
     }
 
-    // 5. Database & schema privileges
-    const grantDbStmt = await client.query(
-      "SELECT format('GRANT CONNECT ON DATABASE %I TO %I;', $1::text, $2::text) AS stmt;",
-      [dbName, appDbUser]
+    // 5. Clean up existing permissions of appDbUser prior to granting minimum permissions
+    const revokeTablesStmt = await client.query(
+      "SELECT format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I;', $1::text) AS stmt;",
+      [appDbUser]
     );
-    await client.query(grantDbStmt.rows[0].stmt);
+    await client.query(revokeTablesStmt.rows[0].stmt);
+
+    const revokeSeqStmt = await client.query(
+      "SELECT format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I;', $1::text) AS stmt;",
+      [appDbUser]
+    );
+    await client.query(revokeSeqStmt.rows[0].stmt);
+
+    const revokeSchemaCreateStmt = await client.query(
+      "SELECT format('REVOKE CREATE ON SCHEMA public FROM %I;', $1::text) AS stmt;",
+      [appDbUser]
+    );
+    await client.query(revokeSchemaCreateStmt.rows[0].stmt);
 
     const revokeCreateDbStmt = await client.query(
       "SELECT format('REVOKE CREATE ON DATABASE %I FROM %I;', $1::text, $2::text) AS stmt;",
@@ -101,12 +114,24 @@ async function provisionAppRole() {
     );
     await client.query(revokeCreateDbStmt.rows[0].stmt);
 
-    await client.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC;');
-    const revokeSchemaCreateStmt = await client.query(
-      "SELECT format('REVOKE CREATE ON SCHEMA public FROM %I;', $1::text) AS stmt;",
-      [appDbUser]
+    const revokeDefaultTables = await client.query(
+      "SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES FROM %I;', $1::text, $2::text) AS stmt;",
+      [currentUser, appDbUser]
     );
-    await client.query(revokeSchemaCreateStmt.rows[0].stmt);
+    await client.query(revokeDefaultTables.rows[0].stmt);
+
+    const revokeDefaultSeq = await client.query(
+      "SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I;', $1::text, $2::text) AS stmt;",
+      [currentUser, appDbUser]
+    );
+    await client.query(revokeDefaultSeq.rows[0].stmt);
+
+    // 6. Grant intended minimum permissions on database & schema
+    const grantDbStmt = await client.query(
+      "SELECT format('GRANT CONNECT ON DATABASE %I TO %I;', $1::text, $2::text) AS stmt;",
+      [dbName, appDbUser]
+    );
+    await client.query(grantDbStmt.rows[0].stmt);
 
     const grantUsageStmt = await client.query(
       "SELECT format('GRANT USAGE ON SCHEMA public TO %I;', $1::text) AS stmt;",
@@ -114,7 +139,7 @@ async function provisionAppRole() {
     );
     await client.query(grantUsageStmt.rows[0].stmt);
 
-    // 6. Tables & sequences privileges
+    // 7. Grant public tables & sequences privileges
     const grantTablesStmt = await client.query(
       "SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I;', $1::text) AS stmt;",
       [appDbUser]
@@ -139,7 +164,7 @@ async function provisionAppRole() {
     );
     await client.query(defaultSeqStmt.rows[0].stmt);
 
-    // 7. Audit logs restriction (append-only)
+    // 8. Audit logs restriction (append-only: SELECT, INSERT only)
     const auditCheck = await client.query("SELECT to_regclass('public.audit_logs') IS NOT NULL as exists;");
     if (auditCheck.rows[0].exists) {
       const auditRevokeStmt = await client.query(
@@ -149,7 +174,7 @@ async function provisionAppRole() {
       await client.query(auditRevokeStmt.rows[0].stmt);
     }
 
-    // 8. Schema migrations restriction (SELECT-only)
+    // 9. Schema migrations restriction (SELECT-only)
     const migCheck = await client.query("SELECT to_regclass('public.schema_migrations') IS NOT NULL as exists;");
     if (migCheck.rows[0].exists) {
       const migRevokeStmt = await client.query(
@@ -162,20 +187,6 @@ async function provisionAppRole() {
         [appDbUser]
       );
       await client.query(migGrantStmt.rows[0].stmt);
-    }
-
-    // 9. Block Data API roles if they exist
-    const dataApiRoles = ['anon', 'authenticated', 'service_role'];
-    for (const rName of dataApiRoles) {
-      const regRole = await client.query('SELECT to_regrole($1) IS NOT NULL as exists;', [rName]);
-      if (regRole.rows[0].exists) {
-        const revTbl = await client.query("SELECT format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
-        await client.query(revTbl.rows[0].stmt);
-        const revSeq = await client.query("SELECT format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
-        await client.query(revSeq.rows[0].stmt);
-        const revFunc = await client.query("SELECT format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM %I;', $1::text) AS stmt;", [rName]);
-        await client.query(revFunc.rows[0].stmt);
-      }
     }
 
     await client.query('COMMIT');

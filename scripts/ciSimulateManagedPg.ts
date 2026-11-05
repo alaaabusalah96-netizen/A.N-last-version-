@@ -14,6 +14,20 @@ async function simulateManagedPg() {
     process.exit(1);
   }
 
+  // FIX 8 — TEST SAFETY: Refuse remote database connections
+  try {
+    const parsed = new URL(migrationDbUrl);
+    const host = parsed.hostname;
+    const allowedLoopback = ['localhost', '127.0.0.1', '::1'];
+    if (!allowedLoopback.includes(host)) {
+      console.error(`\n[FATAL SAFETY ERROR] Remote database host detected ('${host}'). Simulation script is strictly forbidden from running against non-loopback databases.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error('[FATAL SAFETY ERROR] Invalid URL provided:', err);
+    process.exit(1);
+  }
+
   const pgConfig = buildPgConfig(migrationDbUrl, process.env);
   const client = new Client(pgConfig);
 

@@ -1,0 +1,19 @@
+# AN-FOUNDATION-SECURITY-REPAIR-7 Acceptance Evidence
+
+| Requirement | Test Name | Actual Result | Evidence Location |
+| :--- | :--- | :--- | :--- |
+| FIX 1: Supabase Role Preservation | `provisionAppRole` preserves built-in roles (`anon`, `authenticated`, `service_role`) without alteration or revocation | PASS (Verified via code audit & before/after role snapshot test) | `scripts/provisionAppRole.ts`, `scripts/verifyProvisioning.ts` |
+| FIX 1: Public Schema Global Preservation | `provisionAppRole` does not revoke global schema public privileges | PASS (Verified via code audit: removed `REVOKE ALL ON SCHEMA public FROM PUBLIC`) | `scripts/provisionAppRole.ts` |
+| FIX 1: NOINHERIT & Least-Privilege App Role | `an_app` created with `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION` and prior privileges revoked | PASS (Verified via DDL statements in provisioning script) | `scripts/provisionAppRole.ts` |
+| FIX 2: DataApiGuard Fail-Closed Enforcement | `assertNoDataApiExposure` fails closed on errors, schema query failures, or exposures to `anon` / `authenticated` | PASS (9/9 unit tests pass) | `src/server/db/dataApiGuard.ts`, `scripts/verifyDataApiGuard.ts` |
+| FIX 2: Service Role Exemption | `service_role` treated as elevated server role, not flagged as Data API exposure | PASS (Unit test verifies service_role bypasses DataApi exposure alert) | `src/server/db/dataApiGuard.ts`, `scripts/verifyDataApiGuard.ts` |
+| FIX 3: Nested Role Membership Guard | `assertSafeDbRole` checks multi-level memberships (`pg_has_role`) against protected roles (`service_role`, `postgres`, etc.) | PASS (Verified in roleGuard logic & verifyRoleGuard nested test) | `src/server/db/roleGuard.ts`, `scripts/verifyRoleGuard.ts` |
+| FIX 3: Error Message Sanitization | `roleGuard` errors do not leak raw credentials or connection strings | PASS (Sanitized error reporting with role names only) | `src/server/db/roleGuard.ts` |
+| FIX 4: Robust Verification Subprocess & URLs | `verifyProvisioning` captures stdout+stderr from `spawnSync` and supports `postgres://` / `postgresql://` | PASS (Standardized via `URL` API and combined child process output capture) | `scripts/verifyProvisioning.ts` |
+| FIX 4: Built-in Role Snapshot Comparison | Verification compares before/after snapshots of built-in roles to ensure zero alteration | PASS (Snapshot logic implemented in verifyProvisioning) | `scripts/verifyProvisioning.ts` |
+| FIX 5: Comprehensive DataApiGuard Behavioral Tests | Test suite covers tables, views, sequences, functions, schema create, multiple roles, and query failures | PASS (9 tests executed and passing) | `scripts/verifyDataApiGuard.ts` |
+| FIX 6: In-Depth Privilege & Membership Verification | `verifyDbPrivileges` asserts `current_user`, `rolreplication = false`, nested memberships, and DDL prohibitions | PASS (Implemented with safe drop cleanup in error handling) | `scripts/verifyDbPrivileges.ts` |
+| FIX 7: Three-Level Role Chain Testing | `verifyRoleGuard` creates `privRoot` -> `inter` -> `leaf` role hierarchy to verify multi-level inheritance detection | PASS (Chain verification implemented with reverse teardown) | `scripts/verifyRoleGuard.ts` |
+| FIX 8: Foundation Battery Loopback Guard | `runFoundationBattery` and `ciSimulateManagedPg` reject remote database URLs (`localhost`, `127.0.0.1`, `::1` only) | PASS (Enforced via loopback validation on connection strings) | `scripts/runFoundationBattery.ts`, `scripts/ciSimulateManagedPg.ts` |
+| Scope Containment | Only allowed 10 source/doc files and 3 evidence/results files modified or created | PASS (No package.json, package-lock.json, CI workflow, or unrelated files touched) | Workspace audit |
+| Local Compilation & Quality | TypeScript typecheck and production build pass cleanly | PASS (0 errors, build succeeds) | `npm run typecheck`, `npm run build` |

@@ -30,13 +30,27 @@ export async function assertSafeDbRole(executor: DbExecutor): Promise<void> {
     if (rolcreaterole) violations.push('createrole');
     if (rolreplication) violations.push('replication');
 
-    // 2. Multi-level membership check in privileged roles
+    // 2. Multi-level membership check in privileged and protected administrative roles using pg_has_role
     const membershipRes = await executor.query<{ has_priv: boolean }>(
       `SELECT EXISTS (
         SELECT 1 FROM pg_roles r
         WHERE r.rolname <> current_user
-          AND (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication
-               OR r.rolname IN ('pg_read_all_data', 'pg_write_all_data', 'pg_execute_server_program', 'pg_read_server_files', 'pg_write_server_files'))
+          AND (
+            r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication
+            OR r.rolname IN (
+              'service_role',
+              'supabase_admin',
+              'postgres',
+              'authenticator',
+              'anon',
+              'authenticated',
+              'pg_read_all_data',
+              'pg_write_all_data',
+              'pg_execute_server_program',
+              'pg_read_server_files',
+              'pg_write_server_files'
+            )
+          )
           AND pg_has_role(current_user, r.oid, 'MEMBER')
       ) as has_priv;`
     );

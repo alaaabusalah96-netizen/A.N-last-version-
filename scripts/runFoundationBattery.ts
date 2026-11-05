@@ -6,6 +6,26 @@ console.log('========================================');
 console.log('=== RUNNING FOUNDATION TEST BATTERY ===');
 console.log('========================================');
 
+// FIX 8 — TEST SAFETY: Refuse remote database connections in test battery
+function assertLoopbackHost(urlStr: string | undefined, varName: string) {
+  if (!urlStr || urlStr.trim() === '') return;
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname;
+    const allowedLoopback = ['localhost', '127.0.0.1', '::1'];
+    if (!allowedLoopback.includes(host)) {
+      console.error(`\n[FATAL SAFETY ERROR] Remote database host detected in ${varName} ('${host}'). Foundation test battery runs destructively and is strictly forbidden from executing against non-loopback databases.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`[FATAL SAFETY ERROR] Invalid URL provided in ${varName}:`, err);
+    process.exit(1);
+  }
+}
+
+assertLoopbackHost(process.env.DATABASE_URL, 'DATABASE_URL');
+assertLoopbackHost(process.env.MIGRATION_DATABASE_URL, 'MIGRATION_DATABASE_URL');
+
 const scripts = [
   'scripts/verifyPublicAssets.ts',
   'scripts/verifyExecutorImports.ts',

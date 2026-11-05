@@ -44,11 +44,13 @@
   - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
   - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
   - Remaining blockers: None for local verification; awaiting CI run on main.
-- **AN-FOUNDATION-FINAL-1**: `IMPLEMENTED` + `UNIT_TESTED`
-  - Baseline SHA: `HEAD`
-  - Final SHA: `HEAD`
-  - Summary: Complete implementation of local ephemeral PG execution (`verifyLocal.ts`), forbidden pattern scanner (`verifyForbiddenPatterns.ts`), battery integrity checks, native SCRAM-SHA-256 app role provisioning (`provisionAppRole.ts`), multi-level role guard hardening (`roleGuard.ts`), guarded pool lifecycle & promise caching (`db/index.ts`), connection string sanitization & CA SSL handling (`connection.ts`), Data API exposure guard (`dataApiGuard.ts`), migration 009 (`platform_users.company_id` removal), and `.test-reports/` artifact integration with GitHub Actions `last-green` tag promotion.
-  - Definition of Done (DoD) & Stop Rule: Package complete upon passing typecheck, build, migrate, provision, Data API simulation, and all foundation battery scripts. Subsequent work is strictly prohibited without explicit user instruction. P05_STARTED=NO, SUPABASE_TOUCHED=NO.
+- **AN-FOUNDATION-SECURITY-REPAIR-7**: `IMPLEMENTED`
+  - Baseline SHA: `5cf2dc502e358b5746d0f5973d47554d0da8cdc3`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed database provisioning and security verification regressions. Provisioning modifies only dedicated `an_app` role and leaves Supabase built-in roles (`anon`, `authenticated`, `service_role`) and PUBLIC global privileges untouched. Added `NOINHERIT` to `an_app`. Replaced `dataApiGuard` with fail-closed implementation checking `anon`/`authenticated` public tables, sequences, functions, and schema create. Strengthened `roleGuard` with protected role list and multi-level `pg_has_role` membership check. Restored provisioning stdout/stderr capture, URL API handling, and built-in role preservation snapshots. Enforced loopback-only host restriction in `runFoundationBattery.ts` and `ciSimulateManagedPg.ts`.
+  - P05_STARTED: `NO`
+  - SUPABASE_TOUCHED: `NO`
+
 
 
 

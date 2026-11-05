@@ -3,7 +3,7 @@ import pg from 'pg';
 import { assertSafeDbRole } from '../src/server/db/roleGuard.js';
 import crypto from 'crypto';
 
-console.log('--- Running Role Guard Verification (F10-3) ---');
+console.log('--- Running Role Guard Verification (F10-3 / REPAIR-7) ---');
 
 async function runTests() {
   const migrationUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
@@ -20,22 +20,48 @@ async function runTests() {
   const suffix = crypto.randomBytes(4).toString('hex');
   const normalRole = `an_norm_${suffix}`;
   const superRole = `an_super_${suffix}`;
-  const inheritRole = `an_inherit_${suffix}`;
+  const privRootRole = `an_privroot_${suffix}`;
+  const interRole = `an_inter_${suffix}`;
+  const leafRole = `an_leaf_${suffix}`;
+
+  let createdRoles: string[] = [];
 
   try {
-    // 1. Create normal role
+    // 1. Normal unprivileged role
     await adminClient.query(`CREATE ROLE ${pg.escapeIdentifier(normalRole)} LOGIN PASSWORD 'Pass123456789!';`);
-    // 2. Create super role
+    createdRoles.push(normalRole);
+
+    // 2. Direct superuser role
     await adminClient.query(`CREATE ROLE ${pg.escapeIdentifier(superRole)} SUPERUSER LOGIN PASSWORD 'Pass123456789!';`);
-    // 3. Create inherit role chain
-    await adminClient.query(`CREATE ROLE ${pg.escapeIdentifier(inheritRole)} LOGIN PASSWORD 'Pass123456789!';`);
-    await adminClient.query(`GRANT ${pg.escapeIdentifier(superRole)} TO ${pg.escapeIdentifier(inheritRole)};`);
+    createdRoles.push(superRole);
 
-    const normalUrl = migrationUrl.replace(/\/[^/]+$/, `/${new URL(migrationUrl).pathname.slice(1)}`).replace(/^postgres:\/\/([^:@]+(:[^@]+)?@)?/, `postgres://${normalRole}:Pass123456789!@`);
-    const superUrl = migrationUrl.replace(/\/[^/]+$/, `/${new URL(migrationUrl).pathname.slice(1)}`).replace(/^postgres:\/\/([^:@]+(:[^@]+)?@)?/, `postgres://${superRole}:Pass123456789!@`);
-    const inheritUrl = migrationUrl.replace(/\/[^/]+$/, `/${new URL(migrationUrl).pathname.slice(1)}`).replace(/^postgres:\/\/([^:@]+(:[^@]+)?@)?/, `postgres://${inheritRole}:Pass123456789!@`);
+    // 3. Three-level nested membership chain:
+    // privileged_root (SUPERUSER, NOLOGIN) -> intermediate_role (NOLOGIN) -> application_leaf (LOGIN)
+    await adminClient.query(`CREATE ROLE ${pg.escapeIdentifier(privRootRole)} SUPERUSER NOLOGIN;`);
+    createdRoles.push(privRootRole);
 
-    // Test normal role -> passes assertSafeDbRole
+    await adminClient.query(`CREATE ROLE ${pg.escapeIdentifier(interRole)} NOLOGIN;`);
+    createdRoles.push(interRole);
+
+    await adminClient.query(`CREATE ROLE ${pg.escapeIdentifier(leafRole)} LOGIN PASSWORD 'Pass123456789!';`);
+    createdRoles.push(leafRole);
+
+    await adminClient.query(`GRANT ${pg.escapeIdentifier(privRootRole)} TO ${pg.escapeIdentifier(interRole)};`);
+    await adminClient.query(`GRANT ${pg.escapeIdentifier(interRole)} TO ${pg.escapeIdentifier(leafRole)};`);
+
+    // Build URLs using URL API
+    function buildUserUrl(user: string, pass: string): string {
+      const u = new URL(migrationUrl!);
+      u.username = user;
+      u.password = pass;
+      return u.toString();
+    }
+
+    const normalUrl = buildUserUrl(normalRole, 'Pass123456789!');
+    const superUrl = buildUserUrl(superRole, 'Pass123456789!');
+    const leafUrl = buildUserUrl(leafRole, 'Pass123456789!');
+
+    // Test 1: Normal unprivileged role passes
     const normClient = new pg.Client({ connectionString: normalUrl });
     await normClient.connect();
     let normPassed = false;
@@ -44,39 +70,67 @@ async function runTests() {
       normPassed = true;
     } catch {}
     await normClient.end();
-    await check('Normal unprivileged role passes assertSafeDbRole', normPassed);
+    await check('1. Normal role passes', normPassed);
 
-    // Test super role -> throws
+    // Test 2: Direct superuser role is rejected without leaking role name
     const supClient = new pg.Client({ connectionString: superUrl });
     await supClient.connect();
     let supThrew = false;
+    let supLeaked = true;
     try {
       await assertSafeDbRole(supClient as any);
     } catch (err: any) {
-      supThrew = err.message.includes('[dbRoleGuard]') && !err.message.includes(superRole);
+      supThrew = err.message.includes('[dbRoleGuard]');
+      supLeaked = err.message.includes(superRole) || err.message.includes('Pass123456789!');
     }
     await supClient.end();
-    await check('Superuser role is rejected by assertSafeDbRole without leaking role name', supThrew);
+    await check('2. Direct superuser role is rejected', supThrew);
+    await check('No sensitive role names or credentials leak in errors', !supLeaked);
 
-    // Test inherited privileged role -> throws
-    const inhClient = new pg.Client({ connectionString: inheritUrl });
-    await inhClient.connect();
-    let inhThrew = false;
+    // Test 3: Three-level nested privileged membership chain is rejected
+    const leafClient = new pg.Client({ connectionString: leafUrl });
+    await leafClient.connect();
+    let leafThrew = false;
     try {
-      await assertSafeDbRole(inhClient as any);
+      await assertSafeDbRole(leafClient as any);
     } catch (err: any) {
-      inhThrew = err.message.includes('[dbRoleGuard]');
+      leafThrew = err.message.includes('[dbRoleGuard]');
     }
-    await inhClient.end();
-    await check('Role with inherited privileged membership is rejected by assertSafeDbRole', inhThrew);
+    await leafClient.end();
+    await check('3. Nested privileged membership is rejected', leafThrew);
+
+    // Test 4: Query failure is rejected fail-closed
+    let queryFailRejected = false;
+    try {
+      await assertSafeDbRole({
+        query: async () => {
+          throw new Error('Connection abruptly terminated');
+        },
+      } as any);
+    } catch (err: any) {
+      queryFailRejected = err.message.includes('[dbRoleGuard] FATAL: Role verification query failed (fail-closed)');
+    }
+    await check('4. Query failure is rejected', queryFailRejected);
 
   } finally {
-    try {
-      await adminClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(inheritRole)};`);
-      await adminClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(superRole)};`);
-      await adminClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(normalRole)};`);
-    } catch {}
+    // Clean up created roles in dependency-safe reverse order
+    const rolesToDrop = [leafRole, interRole, privRootRole, superRole, normalRole];
+    let cleanupFailed = false;
+    let cleanupErrorMsg = '';
+
+    for (const r of rolesToDrop) {
+      try {
+        await adminClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(r)};`);
+      } catch (dropErr) {
+        cleanupFailed = true;
+        cleanupErrorMsg += `${r}: ${dropErr}; `;
+      }
+    }
     await adminClient.end();
+
+    if (createdRoles.length > 0) {
+      await check('Role cleanup executed cleanly', !cleanupFailed, cleanupFailed ? cleanupErrorMsg : undefined);
+    }
   }
 
   const { exitCode } = summary();
