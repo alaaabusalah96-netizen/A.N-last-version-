@@ -1,13 +1,22 @@
 -- ==============================================================================
 -- Migration 010: Security & RLS Baseline
--- Package: AN-FOUNDATION-SECURITY-BASELINE-2
+-- Package: AN-FOUNDATION-SECURITY-BASELINE-3B
 -- 
 -- 1. Enforces Row Level Security (RLS) across all application tables.
 -- 2. Defines explicit least-privilege policies for role 'an_app'.
 -- 3. Revokes unauthorized access from Data API roles 'anon' and 'authenticated'.
--- 4. Revokes public execution privileges on all existing routines in schema public.
--- 5. Enforces secure default privileges for objects created in schema public.
+-- 4. Revokes execution privileges on sensitive routines from PUBLIC, anon, and authenticated.
+-- 5. Pin search_path on audit trigger function.
+-- 6. Enforces secure default privileges for objects created in schema public.
 -- ==============================================================================
+
+-- SECURITY CONTRACT BOUNDARY:
+-- 1. an_app is a shared trusted backend database identity.
+-- 2. Global/shared table policies using true permit row-wide access to that backend identity.
+-- 3. These policies do NOT independently enforce per-user or per-company authorization.
+-- 4. The server must enforce authentication, authorization, and company-membership checks before database operations.
+-- 5. an_app credentials must never be exposed to browsers or client-side code.
+-- 6. Tenant-specific tables must retain tenant isolation through their tenant policies.
 
 -- 1. Ensure target application role exists idempotently for policy binding
 DO $$
@@ -97,10 +106,16 @@ REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM an_app;
 REVOKE ALL ON TABLE schema_migrations FROM an_app;
 GRANT SELECT ON TABLE schema_migrations TO an_app;
 
--- 5. Revoke existing PUBLIC routine execution privileges in schema public
-REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
+-- 5. Revoke execution privileges on sensitive routines from PUBLIC, anon, and authenticated
+REVOKE EXECUTE ON FUNCTION public.audit_logs_block_mutation() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.audit_logs_block_mutation() FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon, authenticated;
 
--- 6. Revoke unnecessary application-table privileges from anon and authenticated
+-- 6. Pin search_path on audit trigger function
+ALTER FUNCTION public.audit_logs_block_mutation() SET search_path = pg_catalog;
+
+-- 7. Revoke unnecessary application-table privileges from anon and authenticated
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
@@ -118,7 +133,7 @@ BEGIN
   END IF;
 END $$;
 
--- 7. Configure default privileges for objects created by migration owner
+-- 8. Configure default privileges for objects created by migration owner
 DO $$
 BEGIN
   -- Prevent future application tables, sequences, and routines from exposing to anon & authenticated
@@ -134,7 +149,4 @@ BEGIN
   -- Ensure future tables and sequences created by migration owner grant required least-privilege to an_app
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO an_app;', CURRENT_USER);
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO an_app;', CURRENT_USER);
-EXCEPTION
-  WHEN undefined_object THEN
-    NULL;
 END $$;

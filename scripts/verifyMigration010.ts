@@ -141,11 +141,34 @@ async function runTests() {
   );
   await check('10. table ownership scopes match catalog in database/table_ownership.json', allScopesMatch);
 
-  // 11. PUBLIC routine execution revocation
-  const hasPublicRoutineRevoke = /REVOKE\s+EXECUTE\s+ON\s+ALL\s+ROUTINES\s+IN\s+SCHEMA\s+public\s+FROM\s+PUBLIC;/i.test(content);
-  await check('11. explicit revocation of EXECUTE on ALL routines in schema public from PUBLIC', hasPublicRoutineRevoke);
+  // 11. Targeted routine revokes for audit_logs_block_mutation
+  const auditPublicRevoke = /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.audit_logs_block_mutation\(\)\s+FROM\s+PUBLIC;/i.test(content);
+  await check('11. targeted PUBLIC revoke on audit_logs_block_mutation()', auditPublicRevoke);
 
-  // 12. Untrusted Data API role revokes (anon & authenticated)
+  const auditDataApiRevoke = /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.audit_logs_block_mutation\(\)\s+FROM\s+anon,\s*authenticated;/i.test(content);
+  await check('12. targeted anon,authenticated revoke on audit_logs_block_mutation()', auditDataApiRevoke);
+
+  // 12. Pin search_path on audit_logs_block_mutation
+  const auditSearchPath = /ALTER\s+FUNCTION\s+public\.audit_logs_block_mutation\(\)\s+SET\s+search_path\s*=\s*pg_catalog;/i.test(content);
+  await check('13. search_path pinned to pg_catalog on audit_logs_block_mutation()', auditSearchPath);
+
+  // 13. Targeted routine revokes for rls_auto_enable
+  const rlsPublicRevoke = /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+PUBLIC;/i.test(content);
+  await check('14. targeted PUBLIC revoke on rls_auto_enable()', rlsPublicRevoke);
+
+  const rlsDataApiRevoke = /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+anon,\s*authenticated;/i.test(content);
+  await check('15. targeted anon,authenticated revoke on rls_auto_enable()', rlsDataApiRevoke);
+
+  // 14. Preserve rls_auto_enable definition (no DROP)
+  const preservesRlsAutoEnable = !/DROP\s+FUNCTION[^\n]*rls_auto_enable/i.test(content) &&
+    !/DROP\s+EVENT\s+TRIGGER/i.test(content);
+  await check('16. rls_auto_enable definition preserved without DROP or replacement', preservesRlsAutoEnable);
+
+  // 15. Ensure NO broad REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC
+  const hasBroadRevoke = /REVOKE\s+EXECUTE\s+ON\s+ALL\s+ROUTINES\s+IN\s+SCHEMA\s+public\s+FROM\s+PUBLIC;/i.test(content);
+  await check('17. no broad REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC', !hasBroadRevoke);
+
+  // 16. Untrusted Data API role revokes (anon & authenticated)
   const hasAnonRevokes = content.includes("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;") &&
     content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;") &&
     content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon;") &&
@@ -154,16 +177,23 @@ async function runTests() {
     content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated;") &&
     content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM authenticated;") &&
     content.includes("REVOKE CREATE ON SCHEMA public FROM authenticated;");
-  await check('12. Data API roles (anon, authenticated) have tables, sequences, routines, and CREATE revoked', hasAnonRevokes && hasAuthRevokes);
+  await check('18. Data API roles (anon, authenticated) have tables, sequences, routines, and CREATE revoked', hasAnonRevokes && hasAuthRevokes);
 
-  // 13. Default privileges configured
+  // 17. Default privileges configured fail-closed (no undefined_object exception swallowing or WHEN OTHERS)
   const hasDefaultPrivileges = content.includes('ALTER DEFAULT PRIVILEGES FOR ROLE') &&
     content.includes('REVOKE EXECUTE ON ROUTINES FROM PUBLIC');
-  await check('13. secure default privileges configured for future objects', hasDefaultPrivileges);
+  const noSwallowedExceptions = !content.includes('undefined_object') && !content.includes('WHEN OTHERS');
+  await check('19. default privileges configured fail-closed without exception swallowing', hasDefaultPrivileges && noSwallowedExceptions);
 
-  // 14. service_role preservation
+  // 18. service_role preservation
   const touchesServiceRole = /service_role/i.test(content);
-  await check('14. service_role untouched and preserved without modification', !touchesServiceRole);
+  await check('20. service_role untouched and preserved without modification', !touchesServiceRole);
+
+  // 19. Security contract comments present
+  const hasSecurityContract = content.includes('an_app is a shared trusted backend database identity') &&
+    content.includes('Global/shared table policies using true') &&
+    content.includes('Tenant-specific tables must retain tenant isolation');
+  await check('21. security contract comments present in Migration 010', hasSecurityContract);
 
   const { exitCode } = summary();
   process.exit(exitCode);
