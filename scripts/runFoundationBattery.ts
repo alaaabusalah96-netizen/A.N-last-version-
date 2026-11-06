@@ -51,6 +51,7 @@ const scripts = [
   'scripts/verifyExecutorLifecycle.ts',
   'scripts/verifyDataApiGuard.ts',
   'scripts/verifyTenantScopeMiddleware.ts',
+  'scripts/verifyMigration010.ts',
 ];
 
 export interface BatteryItemReport {

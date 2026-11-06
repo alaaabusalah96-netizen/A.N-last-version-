@@ -54,6 +54,17 @@
   - Summary: Applied repository-only security and RLS baseline repair. Created migration 010_security_rls_baseline.sql with idempotent RLS policies for an_app, strict revocation on anon/authenticated, and default privileges. Enhanced dataApiGuard to exclude trigger and event_trigger functions while retaining fail-closed validation on callable RPCs. Extended verifyRlsCoverage.ts with full table_ownership catalog validation, an_app target policy checks, and append-only/select-only privilege verification. Strengthened provisionAppRole.ts with post-provision attribute/membership/ownership assertions. Hardened bootstrapPlatformAdminFromEnv with strict credential pairing, role conflict detection, and fail-closed startup halt. Added robust frontend Content-Type handling for intercepted HTML proxy responses.
   - P05_STARTED: `NO`
   - SUPABASE_TOUCHED: `NO` (disposable/local CI testing only)
+- **AN-FOUNDATION-SECURITY-BASELINE-2**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `49d3e8ef40f523d71329f724b6bb1599e8d1e8dd`
+  - Final SHA: `HEAD` (local working tree verified)
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed security and startup regressions identified during read-only inspection of the live AN-ERP-MAIN Supabase database.
+    1. Migration 010: Added explicit `REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;` to close public EXECUTE exposure on existing routines (including `public.audit_logs_block_mutation` and `public.rls_auto_enable`), while preserving service_role attributes and untrusted Data API revocations.
+    2. Data API Guard: Hardened `assertNoDataApiExposure` in `src/server/db/dataApiGuard.ts` by removing trigger/event_trigger exclusions to scan all routines in schema public for unauthorized EXECUTE exposure.
+    3. Test Suite: Updated `scripts/verifyDataApiGuard.ts` tests 6 and 7 to assert detection of trigger and event-trigger routines. Created `scripts/verifyMigration010.ts` for static verification of RLS and routine revocations.
+    4. Dev Preview Startup: Hardened `server.ts` to skip platform administrator bootstrap with a clear warning in development/preview when `DATABASE_URL` is unconfigured, while retaining fatal fail-closed behavior for mispaired admin credentials and production startup.
+  - P05_STARTED: `NO`
+  - SUPABASE_TOUCHED: `NO` (repository repair only; remote database untouched)
 
 ---
 

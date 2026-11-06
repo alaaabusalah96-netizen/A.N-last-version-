@@ -1,0 +1,128 @@
+--- a/server.ts
++++ b/server.ts
+@@ FILE CONTENT @@
+import 'dotenv/config';
+import { createApp } from './src/server/app.js';
+import { defaultAuthService } from './src/server/auth/authService.js';
+import { defaultSessionRepository } from './src/server/auth/sessionRepository.js';
+import { defaultRateLimitStore } from './src/server/security/rateLimitStore.js';
+import { closeAllExecutors, getDefaultExecutor } from './src/server/db/index.js';
+import { assertSafeDbRole } from './src/server/db/roleGuard.js';
+import { assertValidNodeEnv } from './src/server/config/env.js';
+
+const app = createApp();
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const isProd = process.env.NODE_ENV === 'production';
+
+async function startServer() {
+  assertValidNodeEnv();
+  // 1. Startup DB Role Safety & Health Check Retry Loop
+  try {
+    const executor = await getDefaultExecutor();
+    if (executor) {
+      await assertSafeDbRole(executor);
+
+      let healthOk = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const health = await executor.health();
+        if (health.ok) {
+          healthOk = true;
+          break;
+        }
+        console.warn(`[server] DB health check attempt ${attempt}/3 failed. Retrying in 2 seconds...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      if (!healthOk && isProd) {
+        console.error('[server] FATAL: Database health check failed after 3 attempts in production.');
+        process.exit(1);
+      }
+    } else if (isProd) {
+      console.error('[server] FATAL: DATABASE_URL missing or unable to connect in production');
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error('[server] Startup guard failure:', err);
+    if (isProd) {
+      process.exit(1);
+    }
+  }
+
+  // 2. Startup Purge of Expired Records & Sessions
+  try {
+    await defaultRateLimitStore.purgeOld();
+    await defaultSessionRepository.purgeExpired();
+  } catch (err) {
+    console.warn('[server] Non-fatal error during startup purge:', err);
+  }
+
+  // 3. Initialize platform admin from environment variables
+  const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
+  const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+  const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
+  const hasPassword = Boolean(rawPassword && rawPassword.trim() !== '');
+
+  // Requirement: If only one credential is configured, fail immediately in all environments
+  if ((hasUsername && !hasPassword) || (!hasUsername && hasPassword)) {
+    console.error('[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured together');
+    process.exit(1);
+  }
+
+  if (hasUsername && hasPassword) {
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl || dbUrl.trim() === '') {
+      if (isProd) {
+        console.error('[auth] FATAL: DATABASE_URL is strictly required for platform admin bootstrap in production');
+        process.exit(1);
+      } else {
+        console.warn('[auth] WARNING: DATABASE_URL is not configured. Skipping platform admin bootstrap in development/preview.');
+      }
+    } else {
+      try {
+        await defaultAuthService.bootstrapPlatformAdminFromEnv();
+      } catch (err) {
+        console.error('[auth] Bootstrap platform admin error:', err instanceof Error ? err.message : err);
+        process.exit(1);
+      }
+    }
+  }
+
+  // 4. Start Express server
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[an-erp-platform] Server running on http://0.0.0.0:${PORT}`);
+  });
+
+  // Graceful shutdown handler
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`[server] Received ${signal}, initiating graceful shutdown...`);
+
+    const timeoutTimer = setTimeout(() => {
+      console.error('[server] Shutdown timeout exceeded (10s), forcing process.exit(1)');
+      process.exit(1);
+    }, 10000);
+    timeoutTimer.unref();
+
+    server.close(async () => {
+      console.log('[server] Express HTTP server closed.');
+      try {
+        await closeAllExecutors();
+        console.log('[server] Database connections closed.');
+      } catch (err) {
+        console.error('[server] Error closing database connections:', err);
+      }
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[server] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+startServer();
+
+export default app;

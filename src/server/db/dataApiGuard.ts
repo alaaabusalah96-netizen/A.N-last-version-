@@ -80,20 +80,19 @@ export async function assertNoDataApiExposure(
         violations.push(`Role '${role}' has unauthorized ${row.priv} privilege on sequence '${row.seqname}'.`);
       }
 
-      // 5. Public callable functions privilege check (EXECUTE)
-      // Exclude trigger-returning functions from callable RPC check
+      // 5. Public routines privilege check (EXECUTE)
+      // Check ALL routines in schema public (including trigger and event-trigger functions)
       const funcPrivs = await executor.query<{ proname: string }>(
         `SELECT p.proname
          FROM pg_proc p
          JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'public'
-           AND p.prorettype NOT IN ('trigger'::regtype, 'event_trigger'::regtype)
            AND has_function_privilege($1, p.oid, 'EXECUTE');`,
         [role]
       );
 
       for (const row of funcPrivs.rows) {
-        violations.push(`Role '${role}' has unauthorized EXECUTE privilege on callable function '${row.proname}'.`);
+        violations.push(`Role '${role}' has unauthorized EXECUTE privilege on routine '${row.proname}'.`);
       }
     }
 

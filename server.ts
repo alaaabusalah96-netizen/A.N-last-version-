@@ -54,11 +54,34 @@ async function startServer() {
   }
 
   // 3. Initialize platform admin from environment variables
-  try {
-    await defaultAuthService.bootstrapPlatformAdminFromEnv();
-  } catch (err) {
-    console.error('[auth] Bootstrap platform admin error:', err instanceof Error ? err.message : err);
+  const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
+  const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+  const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
+  const hasPassword = Boolean(rawPassword && rawPassword.trim() !== '');
+
+  // Requirement: If only one credential is configured, fail immediately in all environments
+  if ((hasUsername && !hasPassword) || (!hasUsername && hasPassword)) {
+    console.error('[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured together');
     process.exit(1);
+  }
+
+  if (hasUsername && hasPassword) {
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl || dbUrl.trim() === '') {
+      if (isProd) {
+        console.error('[auth] FATAL: DATABASE_URL is strictly required for platform admin bootstrap in production');
+        process.exit(1);
+      } else {
+        console.warn('[auth] WARNING: DATABASE_URL is not configured. Skipping platform admin bootstrap in development/preview.');
+      }
+    } else {
+      try {
+        await defaultAuthService.bootstrapPlatformAdminFromEnv();
+      } catch (err) {
+        console.error('[auth] Bootstrap platform admin error:', err instanceof Error ? err.message : err);
+        process.exit(1);
+      }
+    }
   }
 
   // 4. Start Express server

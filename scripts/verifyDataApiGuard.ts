@@ -127,46 +127,52 @@ async function runTests() {
     await check('5. SECURITY DEFINER callable function exposure', hasSecDef);
   }
 
-  // Test 6: trigger function exclusion
+  // Test 6: trigger routine EXECUTE detection (e.g. audit_logs_block_mutation)
   {
-    let excludedTriggerInSql = false;
-    const ex = createMockExecutor((sql) => {
+    const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
       if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
       if (sql.includes('has_table_privilege')) return [];
       if (sql.includes('has_sequence_privilege')) return [];
       if (sql.includes('has_function_privilege')) {
-        if (sql.includes("'trigger'::regtype")) {
-          excludedTriggerInSql = true;
+        const role = params?.[0];
+        if (role === 'anon') {
+          return [{ proname: 'audit_logs_block_mutation' }];
         }
         return [];
       }
       return [];
     });
 
-    await assertNoDataApiExposure(ex);
-    await check('6. trigger function exclusion', excludedTriggerInSql);
+    const violations = await assertNoDataApiExposure(ex);
+    const hasTriggerRoutine = violations.some(
+      (v) => v.includes("Role 'anon'") && v.includes('EXECUTE') && v.includes('audit_logs_block_mutation')
+    );
+    await check('6. trigger routine EXECUTE detection', hasTriggerRoutine);
   }
 
-  // Test 7: event trigger function exclusion
+  // Test 7: event trigger routine EXECUTE detection (e.g. rls_auto_enable)
   {
-    let excludedEventTriggerInSql = false;
-    const ex = createMockExecutor((sql) => {
+    const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
       if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
       if (sql.includes('has_table_privilege')) return [];
       if (sql.includes('has_sequence_privilege')) return [];
       if (sql.includes('has_function_privilege')) {
-        if (sql.includes("'event_trigger'::regtype")) {
-          excludedEventTriggerInSql = true;
+        const role = params?.[0];
+        if (role === 'authenticated') {
+          return [{ proname: 'rls_auto_enable' }];
         }
         return [];
       }
       return [];
     });
 
-    await assertNoDataApiExposure(ex);
-    await check('7. event trigger function exclusion', excludedEventTriggerInSql);
+    const violations = await assertNoDataApiExposure(ex);
+    const hasEventTriggerRoutine = violations.some(
+      (v) => v.includes("Role 'authenticated'") && v.includes('EXECUTE') && v.includes('rls_auto_enable')
+    );
+    await check('7. event trigger routine EXECUTE detection', hasEventTriggerRoutine);
   }
 
   // Test 8: missing required roles

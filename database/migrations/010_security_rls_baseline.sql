@@ -1,11 +1,12 @@
 -- ==============================================================================
 -- Migration 010: Security & RLS Baseline
--- Package: AN-FOUNDATION-SECURITY-BASELINE-1
+-- Package: AN-FOUNDATION-SECURITY-BASELINE-2
 -- 
 -- 1. Enforces Row Level Security (RLS) across all application tables.
 -- 2. Defines explicit least-privilege policies for role 'an_app'.
 -- 3. Revokes unauthorized access from Data API roles 'anon' and 'authenticated'.
--- 4. Enforces secure default privileges for objects created in schema public.
+-- 4. Revokes public execution privileges on all existing routines in schema public.
+-- 5. Enforces secure default privileges for objects created in schema public.
 -- ==============================================================================
 
 -- 1. Ensure target application role exists idempotently for policy binding
@@ -96,7 +97,10 @@ REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM an_app;
 REVOKE ALL ON TABLE schema_migrations FROM an_app;
 GRANT SELECT ON TABLE schema_migrations TO an_app;
 
--- 5. Revoke unnecessary application-table privileges from anon and authenticated
+-- 5. Revoke existing PUBLIC routine execution privileges in schema public
+REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
+
+-- 6. Revoke unnecessary application-table privileges from anon and authenticated
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
@@ -114,7 +118,7 @@ BEGIN
   END IF;
 END $$;
 
--- 6. Configure default privileges for objects created by migration owner
+-- 7. Configure default privileges for objects created by migration owner
 DO $$
 BEGIN
   -- Prevent future application tables, sequences, and routines from exposing to anon & authenticated

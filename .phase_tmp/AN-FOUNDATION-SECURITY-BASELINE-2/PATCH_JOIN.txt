@@ -1,0 +1,1244 @@
+--- a/database/migrations/010_security_rls_baseline.sql
++++ b/database/migrations/010_security_rls_baseline.sql
+@@ FILE CONTENT @@
+-- ==============================================================================
+-- Migration 010: Security & RLS Baseline
+-- Package: AN-FOUNDATION-SECURITY-BASELINE-2
+-- 
+-- 1. Enforces Row Level Security (RLS) across all application tables.
+-- 2. Defines explicit least-privilege policies for role 'an_app'.
+-- 3. Revokes unauthorized access from Data API roles 'anon' and 'authenticated'.
+-- 4. Revokes public execution privileges on all existing routines in schema public.
+-- 5. Enforces secure default privileges for objects created in schema public.
+-- ==============================================================================
+
+-- 1. Ensure target application role exists idempotently for policy binding
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'an_app') THEN
+    CREATE ROLE an_app WITH NOLOGIN NOINHERIT;
+  END IF;
+END $$;
+
+-- 2. Enable Row Level Security (RLS) on all application tables
+ALTER TABLE platform_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE login_rate_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schema_migrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_demo_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_demo_items FORCE ROW LEVEL SECURITY;
+
+-- 3. Explicit RLS Policies for an_app on Global and Shared Tables
+
+-- platform_users (Global)
+DROP POLICY IF EXISTS platform_users_app_policy ON platform_users;
+CREATE POLICY platform_users_app_policy ON platform_users
+  TO an_app
+  USING (true)
+  WITH CHECK (true);
+
+-- companies (Global)
+DROP POLICY IF EXISTS companies_app_policy ON companies;
+CREATE POLICY companies_app_policy ON companies
+  TO an_app
+  USING (true)
+  WITH CHECK (true);
+
+-- company_memberships (Shared)
+DROP POLICY IF EXISTS company_memberships_app_policy ON company_memberships;
+CREATE POLICY company_memberships_app_policy ON company_memberships
+  TO an_app
+  USING (true)
+  WITH CHECK (true);
+
+-- user_sessions (Global)
+DROP POLICY IF EXISTS user_sessions_app_policy ON user_sessions;
+CREATE POLICY user_sessions_app_policy ON user_sessions
+  TO an_app
+  USING (true)
+  WITH CHECK (true);
+
+-- login_rate_events (Global)
+DROP POLICY IF EXISTS login_rate_events_app_policy ON login_rate_events;
+CREATE POLICY login_rate_events_app_policy ON login_rate_events
+  TO an_app
+  USING (true)
+  WITH CHECK (true);
+
+-- schema_migrations (Global - SELECT only)
+DROP POLICY IF EXISTS schema_migrations_app_policy ON schema_migrations;
+CREATE POLICY schema_migrations_app_policy ON schema_migrations
+  FOR SELECT
+  TO an_app
+  USING (true);
+
+-- audit_logs (Shared - SELECT and INSERT only, append-only)
+DROP POLICY IF EXISTS audit_logs_app_select_policy ON audit_logs;
+CREATE POLICY audit_logs_app_select_policy ON audit_logs
+  FOR SELECT
+  TO an_app
+  USING (true);
+
+DROP POLICY IF EXISTS audit_logs_app_insert_policy ON audit_logs;
+CREATE POLICY audit_logs_app_insert_policy ON audit_logs
+  FOR INSERT
+  TO an_app
+  WITH CHECK (true);
+
+-- tenant_demo_items (Tenant - strictly isolated by app.current_tenant_id)
+DROP POLICY IF EXISTS tenant_demo_isolation ON tenant_demo_items;
+CREATE POLICY tenant_demo_isolation ON tenant_demo_items
+  TO an_app
+  USING (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+-- 4. Enforce strict table privileges on audit_logs and schema_migrations
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_logs FROM an_app;
+REVOKE ALL ON TABLE schema_migrations FROM an_app;
+GRANT SELECT ON TABLE schema_migrations TO an_app;
+
+-- 5. Revoke existing PUBLIC routine execution privileges in schema public
+REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
+
+-- 6. Revoke unnecessary application-table privileges from anon and authenticated
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
+    REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon;
+    REVOKE CREATE ON SCHEMA public FROM anon;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated;
+    REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM authenticated;
+    REVOKE CREATE ON SCHEMA public FROM authenticated;
+  END IF;
+END $$;
+
+-- 7. Configure default privileges for objects created by migration owner
+DO $$
+BEGIN
+  -- Prevent future application tables, sequences, and routines from exposing to anon & authenticated
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;', CURRENT_USER);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;', CURRENT_USER);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON ROUTINES FROM anon, authenticated;', CURRENT_USER);
+  END IF;
+
+  -- Revoke global PUBLIC execution default on routines in schema public
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC;', CURRENT_USER);
+
+  -- Ensure future tables and sequences created by migration owner grant required least-privilege to an_app
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO an_app;', CURRENT_USER);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO an_app;', CURRENT_USER);
+EXCEPTION
+  WHEN undefined_object THEN
+    NULL;
+END $$;
+
+--- a/src/server/db/dataApiGuard.ts
++++ b/src/server/db/dataApiGuard.ts
+@@ FILE CONTENT @@
+import { DbExecutor } from './types.js';
+
+export interface DataApiGuardOptions {
+  requireRoles?: boolean;
+}
+
+function sanitizeError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg
+    .replace(/password=[^\s]+/gi, 'password=[REDACTED]')
+    .replace(/postgres(?:ql)?:\/\/[^@\s]+@[^\s]+/gi, 'postgresql://[REDACTED_AUTH]@[HOST]');
+}
+
+export async function assertNoDataApiExposure(
+  executor: DbExecutor,
+  options: DataApiGuardOptions = {}
+): Promise<string[]> {
+  if (!executor || typeof executor.query !== 'function') {
+    throw new Error('[dataApiGuard] FATAL: Invalid executor provided — check failed closed.');
+  }
+
+  const requireRoles = options.requireRoles ?? true;
+  const untrustedRoles = ['anon', 'authenticated'];
+  const violations: string[] = [];
+
+  try {
+    for (const role of untrustedRoles) {
+      // 1. Role existence check
+      const roleCheck = await executor.query<{ exists: boolean }>(
+        'SELECT to_regrole($1) IS NOT NULL as exists;',
+        [role]
+      );
+
+      const exists = Boolean(roleCheck.rows[0]?.exists);
+      if (!exists) {
+        if (requireRoles) {
+          throw new Error(`[dataApiGuard] FATAL: Required Data API role '${role}' is missing.`);
+        }
+        continue;
+      }
+
+      // 2. Schema CREATE privilege check
+      const schemaCheck = await executor.query<{ has_create: boolean }>(
+        "SELECT has_schema_privilege($1, 'public', 'CREATE') as has_create;",
+        [role]
+      );
+      if (schemaCheck.rows[0]?.has_create) {
+        violations.push(`Role '${role}' has unauthorized CREATE privilege on schema public.`);
+      }
+
+      // 3. Public tables and views privilege check (SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER)
+      const tablePrivs = await executor.query<{ tablename: string; priv: string }>(
+        `SELECT c.relname as tablename, p.priv
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) as p(priv)
+         WHERE n.nspname = 'public'
+           AND c.relkind IN ('r', 'v', 'm', 'p')
+           AND has_table_privilege($1, c.oid, p.priv);`,
+        [role]
+      );
+
+      for (const row of tablePrivs.rows) {
+        violations.push(`Role '${role}' has unauthorized ${row.priv} privilege on table/view '${row.tablename}'.`);
+      }
+
+      // 4. Public sequences privilege check (USAGE, SELECT, UPDATE)
+      const seqPrivs = await executor.query<{ seqname: string; priv: string }>(
+        `SELECT c.relname as seqname, p.priv
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         CROSS JOIN (VALUES ('USAGE'), ('SELECT'), ('UPDATE')) as p(priv)
+         WHERE n.nspname = 'public'
+           AND c.relkind = 'S'
+           AND has_sequence_privilege($1, c.oid, p.priv);`,
+        [role]
+      );
+
+      for (const row of seqPrivs.rows) {
+        violations.push(`Role '${role}' has unauthorized ${row.priv} privilege on sequence '${row.seqname}'.`);
+      }
+
+      // 5. Public routines privilege check (EXECUTE)
+      // Check ALL routines in schema public (including trigger and event-trigger functions)
+      const funcPrivs = await executor.query<{ proname: string }>(
+        `SELECT p.proname
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND has_function_privilege($1, p.oid, 'EXECUTE');`,
+        [role]
+      );
+
+      for (const row of funcPrivs.rows) {
+        violations.push(`Role '${role}' has unauthorized EXECUTE privilege on routine '${row.proname}'.`);
+      }
+    }
+
+    return violations;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.startsWith('[dataApiGuard]')) {
+      throw err;
+    }
+    throw new Error(`[dataApiGuard] FATAL: Data API guard query failed (fail-closed): ${sanitizeError(err)}`);
+  }
+}
+
+--- a/scripts/verifyDataApiGuard.ts
++++ b/scripts/verifyDataApiGuard.ts
+@@ FILE CONTENT @@
+import { check, summary } from './lib/testkit.js';
+import { DbExecutor, QueryResult } from '../src/server/db/types.js';
+import { assertNoDataApiExposure } from '../src/server/db/dataApiGuard.js';
+
+console.log('--- Running Data API Guard Verification (PHASE 3 / Behavioral Mock) ---');
+
+function createMockExecutor(handler: (sql: string, params?: unknown[]) => Promise<any[]> | any[]): DbExecutor {
+  return {
+    query: async <T = unknown>(sql: string, params?: unknown[]): Promise<QueryResult<T>> => {
+      const rows = await handler(sql, params);
+      return {
+        rows: rows as T[],
+        rowCount: rows.length,
+      };
+    },
+    withTransaction: async <T>(fn: (ex: DbExecutor) => Promise<T>): Promise<T> => {
+      return fn(createMockExecutor(handler));
+    },
+    health: async () => ({ ok: true }),
+    close: async () => {},
+  };
+}
+
+async function runTests() {
+  // Test 1: anon table privilege detection
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) {
+        const role = params?.[0];
+        if (role === 'anon') {
+          return [{ tablename: 'companies', priv: 'SELECT' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasAnonSelect = violations.some((v) => v.includes("Role 'anon'") && v.includes('SELECT') && v.includes('companies'));
+    await check('1. anon table privilege detection', hasAnonSelect);
+  }
+
+  // Test 2: authenticated table privilege detection
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) {
+        const role = params?.[0];
+        if (role === 'authenticated') {
+          return [{ tablename: 'platform_users', priv: 'INSERT' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasAuthInsert = violations.some((v) => v.includes("Role 'authenticated'") && v.includes('INSERT') && v.includes('platform_users'));
+    await check('2. authenticated table privilege detection', hasAuthInsert);
+  }
+
+  // Test 3: sequence privilege detection
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) {
+        const role = params?.[0];
+        if (role === 'anon') {
+          return [{ seqname: 'companies_id_seq', priv: 'USAGE' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasSeqUsage = violations.some((v) => v.includes("Role 'anon'") && v.includes('USAGE') && v.includes('companies_id_seq'));
+    await check('3. sequence privilege detection', hasSeqUsage);
+  }
+
+  // Test 4: callable function EXECUTE detection
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
+        const role = params?.[0];
+        if (role === 'authenticated') {
+          return [{ proname: 'custom_admin_func' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasFuncExec = violations.some((v) => v.includes("Role 'authenticated'") && v.includes('EXECUTE') && v.includes('custom_admin_func'));
+    await check('4. callable function EXECUTE detection', hasFuncExec);
+  }
+
+  // Test 5: SECURITY DEFINER callable function exposure
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
+        const role = params?.[0];
+        if (role === 'anon') {
+          return [{ proname: 'elevated_secdef_rpc' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasSecDef = violations.some((v) => v.includes("Role 'anon'") && v.includes('EXECUTE') && v.includes('elevated_secdef_rpc'));
+    await check('5. SECURITY DEFINER callable function exposure', hasSecDef);
+  }
+
+  // Test 6: trigger routine EXECUTE detection (e.g. audit_logs_block_mutation)
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
+        const role = params?.[0];
+        if (role === 'anon') {
+          return [{ proname: 'audit_logs_block_mutation' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasTriggerRoutine = violations.some(
+      (v) => v.includes("Role 'anon'") && v.includes('EXECUTE') && v.includes('audit_logs_block_mutation')
+    );
+    await check('6. trigger routine EXECUTE detection', hasTriggerRoutine);
+  }
+
+  // Test 7: event trigger routine EXECUTE detection (e.g. rls_auto_enable)
+  {
+    const ex = createMockExecutor((sql, params) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
+        const role = params?.[0];
+        if (role === 'authenticated') {
+          return [{ proname: 'rls_auto_enable' }];
+        }
+        return [];
+      }
+      return [];
+    });
+
+    const violations = await assertNoDataApiExposure(ex);
+    const hasEventTriggerRoutine = violations.some(
+      (v) => v.includes("Role 'authenticated'") && v.includes('EXECUTE') && v.includes('rls_auto_enable')
+    );
+    await check('7. event trigger routine EXECUTE detection', hasEventTriggerRoutine);
+  }
+
+  // Test 8: missing required roles
+  {
+    const ex = createMockExecutor((sql) => {
+      if (sql.includes('to_regrole')) return [{ exists: false }];
+      return [];
+    });
+
+    let threwMissing = false;
+    try {
+      await assertNoDataApiExposure(ex, { requireRoles: true });
+    } catch (err: any) {
+      threwMissing = err.message.includes("Required Data API role 'anon' is missing");
+    }
+    await check('8. missing required roles fails when requireRoles=true', threwMissing);
+
+    let threwOptional = false;
+    try {
+      const v = await assertNoDataApiExposure(ex, { requireRoles: false });
+      threwOptional = v.length > 0;
+    } catch {
+      threwOptional = true;
+    }
+    await check('8. missing required roles ignored when requireRoles=false', !threwOptional);
+  }
+
+  // Test 9: query failure fail-closed
+  {
+    const ex = createMockExecutor(() => {
+      throw new Error('Database connection reset');
+    });
+
+    let threwQueryFail = false;
+    try {
+      await assertNoDataApiExposure(ex);
+    } catch (err: any) {
+      threwQueryFail = err.message.includes('[dataApiGuard] FATAL: Data API guard query failed (fail-closed)');
+    }
+    await check('9. query failure fail-closed', threwQueryFail);
+  }
+
+  // Test 10: service_role remaining outside the untrusted-role scan
+  {
+    const rolesQueried: string[] = [];
+    const ex = createMockExecutor((sql, params) => {
+      if (params?.[0]) rolesQueried.push(String(params[0]));
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      return [];
+    });
+
+    await assertNoDataApiExposure(ex);
+    const testedServiceRole = rolesQueried.includes('service_role');
+    await check('10. service_role remaining outside the untrusted-role scan', !testedServiceRole);
+  }
+
+  const { exitCode } = summary();
+  process.exit(exitCode);
+}
+
+runTests().catch((err) => {
+  console.error('Test execution error:', err);
+  process.exit(1);
+});
+
+--- a/server.ts
++++ b/server.ts
+@@ FILE CONTENT @@
+import 'dotenv/config';
+import { createApp } from './src/server/app.js';
+import { defaultAuthService } from './src/server/auth/authService.js';
+import { defaultSessionRepository } from './src/server/auth/sessionRepository.js';
+import { defaultRateLimitStore } from './src/server/security/rateLimitStore.js';
+import { closeAllExecutors, getDefaultExecutor } from './src/server/db/index.js';
+import { assertSafeDbRole } from './src/server/db/roleGuard.js';
+import { assertValidNodeEnv } from './src/server/config/env.js';
+
+const app = createApp();
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const isProd = process.env.NODE_ENV === 'production';
+
+async function startServer() {
+  assertValidNodeEnv();
+  // 1. Startup DB Role Safety & Health Check Retry Loop
+  try {
+    const executor = await getDefaultExecutor();
+    if (executor) {
+      await assertSafeDbRole(executor);
+
+      let healthOk = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const health = await executor.health();
+        if (health.ok) {
+          healthOk = true;
+          break;
+        }
+        console.warn(`[server] DB health check attempt ${attempt}/3 failed. Retrying in 2 seconds...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      if (!healthOk && isProd) {
+        console.error('[server] FATAL: Database health check failed after 3 attempts in production.');
+        process.exit(1);
+      }
+    } else if (isProd) {
+      console.error('[server] FATAL: DATABASE_URL missing or unable to connect in production');
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error('[server] Startup guard failure:', err);
+    if (isProd) {
+      process.exit(1);
+    }
+  }
+
+  // 2. Startup Purge of Expired Records & Sessions
+  try {
+    await defaultRateLimitStore.purgeOld();
+    await defaultSessionRepository.purgeExpired();
+  } catch (err) {
+    console.warn('[server] Non-fatal error during startup purge:', err);
+  }
+
+  // 3. Initialize platform admin from environment variables
+  const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
+  const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+  const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
+  const hasPassword = Boolean(rawPassword && rawPassword.trim() !== '');
+
+  // Requirement: If only one credential is configured, fail immediately in all environments
+  if ((hasUsername && !hasPassword) || (!hasUsername && hasPassword)) {
+    console.error('[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured together');
+    process.exit(1);
+  }
+
+  if (hasUsername && hasPassword) {
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl || dbUrl.trim() === '') {
+      if (isProd) {
+        console.error('[auth] FATAL: DATABASE_URL is strictly required for platform admin bootstrap in production');
+        process.exit(1);
+      } else {
+        console.warn('[auth] WARNING: DATABASE_URL is not configured. Skipping platform admin bootstrap in development/preview.');
+      }
+    } else {
+      try {
+        await defaultAuthService.bootstrapPlatformAdminFromEnv();
+      } catch (err) {
+        console.error('[auth] Bootstrap platform admin error:', err instanceof Error ? err.message : err);
+        process.exit(1);
+      }
+    }
+  }
+
+  // 4. Start Express server
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[an-erp-platform] Server running on http://0.0.0.0:${PORT}`);
+  });
+
+  // Graceful shutdown handler
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`[server] Received ${signal}, initiating graceful shutdown...`);
+
+    const timeoutTimer = setTimeout(() => {
+      console.error('[server] Shutdown timeout exceeded (10s), forcing process.exit(1)');
+      process.exit(1);
+    }, 10000);
+    timeoutTimer.unref();
+
+    server.close(async () => {
+      console.log('[server] Express HTTP server closed.');
+      try {
+        await closeAllExecutors();
+        console.log('[server] Database connections closed.');
+      } catch (err) {
+        console.error('[server] Error closing database connections:', err);
+      }
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[server] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+startServer();
+
+export default app;
+
+--- a/scripts/verifyMigration010.ts
++++ b/scripts/verifyMigration010.ts
+@@ FILE CONTENT @@
+import fs from 'fs';
+import path from 'path';
+import { check, summary } from './lib/testkit.js';
+
+console.log('--- Running Migration 010 Static Security Verification ---');
+
+const rootDir = process.cwd();
+const migrationPath = path.join(rootDir, 'database/migrations/010_security_rls_baseline.sql');
+
+async function runTests() {
+  await check('1. migration 010 file exists', fs.existsSync(migrationPath));
+
+  const content = fs.readFileSync(migrationPath, 'utf8');
+
+  // 2. Role an_app idempotence
+  const hasRoleInit = content.includes("IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'an_app')") &&
+    content.includes("CREATE ROLE an_app WITH NOLOGIN NOINHERIT;");
+  await check('2. idempotent creation of role an_app with NOLOGIN NOINHERIT', hasRoleInit);
+
+  // 3. RLS enabled on all 8 tables
+  const expectedTables = [
+    'platform_users',
+    'companies',
+    'company_memberships',
+    'user_sessions',
+    'audit_logs',
+    'login_rate_events',
+    'schema_migrations',
+    'tenant_demo_items',
+  ];
+
+  for (const table of expectedTables) {
+    const rlsPattern = new RegExp(`ALTER\\s+TABLE\\s+${table}\\s+ENABLE\\s+ROW\\s+LEVEL\\s+SECURITY;`, 'i');
+    await check(`3. RLS enabled on table '${table}'`, rlsPattern.test(content));
+  }
+
+  // 4. FORCE ROW LEVEL SECURITY on tenant table
+  const forceRlsPattern = /ALTER\s+TABLE\s+tenant_demo_items\s+FORCE\s+ROW\s+LEVEL\s+SECURITY;/i;
+  await check('4. FORCE ROW LEVEL SECURITY on tenant_demo_items', forceRlsPattern.test(content));
+
+  // 5. Explicit policies targeting an_app
+  const policyTables = [
+    'platform_users',
+    'companies',
+    'company_memberships',
+    'user_sessions',
+    'login_rate_events',
+  ];
+
+  for (const table of policyTables) {
+    const hasPolicy = content.includes(`CREATE POLICY ${table}_app_policy ON ${table}`) &&
+      content.includes('TO an_app');
+    await check(`5. explicit policy for an_app on '${table}'`, hasPolicy);
+  }
+
+  // 6. Append-only and SELECT-only policies
+  const schemaMigrationsPolicy = content.includes('CREATE POLICY schema_migrations_app_policy ON schema_migrations') &&
+    content.includes('FOR SELECT') &&
+    content.includes('TO an_app');
+  await check('6. schema_migrations is SELECT-only policy for an_app', schemaMigrationsPolicy);
+
+  const auditSelectPolicy = content.includes('CREATE POLICY audit_logs_app_select_policy ON audit_logs') &&
+    content.includes('FOR SELECT') &&
+    content.includes('TO an_app');
+  const auditInsertPolicy = content.includes('CREATE POLICY audit_logs_app_insert_policy ON audit_logs') &&
+    content.includes('FOR INSERT') &&
+    content.includes('TO an_app');
+  await check('6. audit_logs has dedicated SELECT and INSERT policies for an_app', auditSelectPolicy && auditInsertPolicy);
+
+  // 7. Tenant isolation policy with USING and WITH CHECK
+  const tenantIsolationPolicy = content.includes('CREATE POLICY tenant_demo_isolation ON tenant_demo_items') &&
+    content.includes("USING (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)") &&
+    content.includes("WITH CHECK (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)");
+  await check('7. tenant_demo_items enforces tenant isolation on USING and WITH CHECK', tenantIsolationPolicy);
+
+  // 8. Explicit table privilege restrictions on audit_logs and schema_migrations
+  const hasAuditRevoke = /REVOKE\s+UPDATE,\s*DELETE,\s*TRUNCATE\s+ON\s+TABLE\s+audit_logs\s+FROM\s+an_app;/i.test(content);
+  const hasSchemaRevoke = /REVOKE\s+ALL\s+ON\s+TABLE\s+schema_migrations\s+FROM\s+an_app;/i.test(content) &&
+    /GRANT\s+SELECT\s+ON\s+TABLE\s+schema_migrations\s+TO\s+an_app;/i.test(content);
+  await check('8. audit_logs mutations revoked and schema_migrations restricted to SELECT', hasAuditRevoke && hasSchemaRevoke);
+
+  // 9. PUBLIC routine execution revocation
+  const hasPublicRoutineRevoke = /REVOKE\s+EXECUTE\s+ON\s+ALL\s+ROUTINES\s+IN\s+SCHEMA\s+public\s+FROM\s+PUBLIC;/i.test(content);
+  await check('9. explicit revocation of EXECUTE on ALL routines in schema public from PUBLIC', hasPublicRoutineRevoke);
+
+  // 10. Untrusted Data API role revokes (anon & authenticated)
+  const hasAnonRevokes = content.includes("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;") &&
+    content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;") &&
+    content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon;") &&
+    content.includes("REVOKE CREATE ON SCHEMA public FROM anon;");
+  const hasAuthRevokes = content.includes("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;") &&
+    content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated;") &&
+    content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM authenticated;") &&
+    content.includes("REVOKE CREATE ON SCHEMA public FROM authenticated;");
+  await check('10. Data API roles (anon, authenticated) have tables, sequences, routines, and CREATE revoked', hasAnonRevokes && hasAuthRevokes);
+
+  // 11. Default privileges configured
+  const hasDefaultPrivileges = content.includes('ALTER DEFAULT PRIVILEGES FOR ROLE') &&
+    content.includes('REVOKE EXECUTE ON ROUTINES FROM PUBLIC');
+  await check('11. secure default privileges configured for future objects', hasDefaultPrivileges);
+
+  // 12. service_role preservation
+  const touchesServiceRole = /service_role/i.test(content);
+  await check('12. service_role untouched and preserved without modification', !touchesServiceRole);
+
+  const { exitCode } = summary();
+  process.exit(exitCode);
+}
+
+runTests().catch((err) => {
+  console.error('Test execution error:', err);
+  process.exit(1);
+});
+
+--- a/scripts/runFoundationBattery.ts
++++ b/scripts/runFoundationBattery.ts
+@@ FILE CONTENT @@
+import { spawnSync } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+
+console.log('========================================');
+console.log('=== RUNNING FOUNDATION TEST BATTERY ===');
+console.log('========================================');
+
+// FIX 8 — TEST SAFETY: Refuse remote database connections in test battery
+function assertLoopbackHost(urlStr: string | undefined, varName: string) {
+  if (!urlStr || urlStr.trim() === '') return;
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname;
+    const allowedLoopback = ['localhost', '127.0.0.1', '::1'];
+    if (!allowedLoopback.includes(host)) {
+      console.error(`\n[FATAL SAFETY ERROR] Remote database host detected in ${varName} ('${host}'). Foundation test battery runs destructively and is strictly forbidden from executing against non-loopback databases.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`[FATAL SAFETY ERROR] Invalid URL provided in ${varName}:`, err);
+    process.exit(1);
+  }
+}
+
+assertLoopbackHost(process.env.DATABASE_URL, 'DATABASE_URL');
+assertLoopbackHost(process.env.MIGRATION_DATABASE_URL, 'MIGRATION_DATABASE_URL');
+
+const scripts = [
+  'scripts/verifyPublicAssets.ts',
+  'scripts/verifyExecutorImports.ts',
+  'scripts/verifyNoMemoryFallback.ts',
+  'scripts/verifyFixRbacCompanies.ts',
+  'scripts/verifyFixDbWiring.ts',
+  'scripts/verifyRepair2.ts',
+  'scripts/verifyPersistence.ts',
+  'scripts/verifyTenantIsolation.ts',
+  'scripts/verifyAuthSecurity.ts',
+  'scripts/verifyRlsCoverage.ts',
+  'scripts/verifyHttpSecurity.ts',
+  'scripts/verifyRbacHttp.ts',
+  'scripts/verifyMigrations.ts',
+  'scripts/verifyCompanyAtomicity.ts',
+  'scripts/verifyTenantHttp.ts',
+  'scripts/verifyDbPrivileges.ts',
+  'scripts/verifyForbiddenPatterns.ts',
+  'scripts/verifyBatteryIntegrity.ts',
+  'scripts/verifyDbConfig.ts',
+  'scripts/verifyProvisioning.ts',
+  'scripts/verifyRoleGuard.ts',
+  'scripts/verifyExecutorLifecycle.ts',
+  'scripts/verifyDataApiGuard.ts',
+  'scripts/verifyTenantScopeMiddleware.ts',
+  'scripts/verifyMigration010.ts',
+];
+
+export interface BatteryItemReport {
+  script: string;
+  status: 'PASS' | 'FAIL' | 'BLOCKED';
+  durationMs: number;
+  exitCode: number | null;
+  failureReason?: string;
+}
+
+export interface BatteryReport {
+  timestamp: string;
+  environment: {
+    nodeEnv: string;
+    hasDatabaseUrl: boolean;
+    requireDb: boolean;
+    isCi: boolean;
+  };
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    blocked: number;
+  };
+  results: BatteryItemReport[];
+}
+
+const runResults: BatteryItemReport[] = [];
+let passedScripts = 0;
+let failedScripts = 0;
+let blockedScripts = 0;
+
+const tsxBin = path.resolve(process.cwd(), 'node_modules/.bin/tsx');
+const logLines: string[] = [];
+
+function sanitizeMessage(msg: string): string {
+  return msg
+    .replace(/postgresql:\/\/[^@\s]+@[^\s]+/gi, 'postgresql://[REDACTED_AUTH]@[HOST]')
+    .replace(/password=[^\s]+/gi, 'password=[REDACTED]')
+    .replace(/secret=[^\s]+/gi, 'secret=[REDACTED]');
+}
+
+for (const script of scripts) {
+  console.log(`\n--- Running: ${script} ---`);
+  const fullPath = path.resolve(process.cwd(), script);
+
+  const startTime = Date.now();
+  const result = spawnSync(tsxBin, [fullPath], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    env: process.env,
+  });
+  const durationMs = Date.now() - startTime;
+
+  const stdout = result.stdout || '';
+  const stderr = result.stderr || '';
+  const combinedOutput = `${stdout}\n${stderr}`;
+
+  if (stdout) process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+
+  const exitCode = result.status;
+  let status: 'PASS' | 'FAIL' | 'BLOCKED' = 'FAIL';
+  let failureReason: string | undefined = undefined;
+
+  if (exitCode === 0) {
+    status = 'PASS';
+    passedScripts++;
+  } else if (exitCode === 2) {
+    status = 'BLOCKED';
+    blockedScripts++;
+    const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
+    failureReason = match ? sanitizeMessage(match[1].trim()) : 'Test prerequisites unfulfilled (BLOCKED)';
+  } else {
+    status = 'FAIL';
+    failedScripts++;
+    const match = combinedOutput.match(/\[FAIL\]\s*([^\r\n]+)/);
+    failureReason = match ? sanitizeMessage(match[1].trim()) : `Script exited with non-zero code ${exitCode}`;
+  }
+
+  runResults.push({
+    script,
+    status,
+    durationMs,
+    exitCode,
+    failureReason,
+  });
+
+  logLines.push(`[${status}] ${script} (${durationMs}ms, exit ${exitCode})${failureReason ? ' - ' + failureReason : ''}`);
+}
+
+const isDbRequired = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true' || process.env.CI === 'true';
+
+console.log('\n======================================================');
+console.log('=== FOUNDATION BATTERY SUMMARY                      ===');
+console.log('======================================================');
+console.log('| Script                             | Status    | Time   | Exit |');
+console.log('|------------------------------------|-----------|--------|------|');
+for (const r of runResults) {
+  const scriptName = r.script.padEnd(34, ' ');
+  const statusStr = r.status.padEnd(9, ' ');
+  const timeStr = `${r.durationMs}ms`.padStart(6, ' ');
+  const exitStr = String(r.exitCode ?? 'ERR').padStart(4, ' ');
+  console.log(`| ${scriptName} | ${statusStr} | ${timeStr} | ${exitStr} |`);
+}
+console.log('======================================================');
+console.log(`Total Scripts: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts}`);
+
+const reportData: BatteryReport = {
+  timestamp: new Date().toISOString(),
+  environment: {
+    nodeEnv: process.env.NODE_ENV || 'development',
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim() !== ''),
+    requireDb: isDbRequired,
+    isCi: process.env.CI === 'true',
+  },
+  summary: {
+    total: scripts.length,
+    passed: passedScripts,
+    failed: failedScripts,
+    blocked: blockedScripts,
+  },
+  results: runResults,
+};
+
+const testReportsDir = path.resolve(process.cwd(), '.test-reports');
+if (!fs.existsSync(testReportsDir)) {
+  fs.mkdirSync(testReportsDir, { recursive: true });
+}
+
+const jsonReportPath = path.join(testReportsDir, 'report.json');
+fs.writeFileSync(jsonReportPath, JSON.stringify(reportData, null, 2), 'utf8');
+
+const logReportPath = path.join(testReportsDir, 'battery.log');
+const logContent = [
+  '=== FOUNDATION BATTERY TEST EXECUTION LOG ===',
+  `Timestamp: ${reportData.timestamp}`,
+  `Total: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts}`,
+  `Require DB: ${isDbRequired}`,
+  '',
+  ...logLines,
+].join('\n');
+fs.writeFileSync(logReportPath, logContent, 'utf8');
+
+const summaryMdPath = path.join(testReportsDir, 'summary.md');
+const summaryMdContent = [
+  '# Foundation Battery Test Summary',
+  `Timestamp: ${reportData.timestamp}`,
+  '',
+  `Total: ${scripts.length} | Passed: **${passedScripts}** | Failed: **${failedScripts}** | Blocked: **${blockedScripts}**`,
+  '',
+  '| Script | Status | Time | Exit |',
+  '|---|---|---|---|',
+  ...runResults.map((r) => `| \`${r.script}\` | **${r.status}** | ${r.durationMs}ms | ${r.exitCode} |`),
+].join('\n');
+fs.writeFileSync(summaryMdPath, summaryMdContent, 'utf8');
+
+console.log(`\nArtifact reports generated in .test-reports/\n- report.json\n- battery.log\n- summary.md`);
+
+if (failedScripts > 0) {
+  console.error('\n[BATTERY ERROR] One or more test scripts FAILED.');
+  process.exit(1);
+}
+
+if (isDbRequired && blockedScripts > 0) {
+  console.error('\n[BATTERY ERROR] REQUIRE_DB=1 or CI=true is set, but test scripts reported BLOCKED.');
+  process.exit(1);
+}
+
+if (blockedScripts > 0) {
+  console.log('\n[BATTERY INFO] All tests passed or cleanly blocked due to missing local database.');
+  process.exit(2);
+}
+
+process.exit(0);
+
+--- a/package.json
++++ b/package.json
+@@ FILE CONTENT @@
+{
+  "name": "an-erp-platform",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "cross-env NODE_ENV=development PORT=3001 tsx server.ts",
+    "dev:web": "vite",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist/server.cjs --packages=external",
+    "start": "cross-env NODE_ENV=production node dist/server.cjs",
+    "server": "cross-env NODE_ENV=development tsx server.ts",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "verify:local": "cross-env NODE_ENV=test tsx scripts/verifyLocal.ts",
+    "ci:simulate-managed-pg": "cross-env NODE_ENV=test tsx scripts/ciSimulateManagedPg.ts",
+    "test:foundation": "tsx scripts/runFoundationBattery.ts",
+    "test:public-assets": "tsx scripts/verifyPublicAssets.ts",
+    "test:executor-imports": "tsx scripts/verifyExecutorImports.ts",
+    "test:company-atomicity": "tsx scripts/verifyCompanyAtomicity.ts",
+    "test:tenant-http": "tsx scripts/verifyTenantHttp.ts",
+    "test:db-privileges": "tsx scripts/verifyDbPrivileges.ts",
+    "test:repair2": "tsx scripts/verifyRepair2.ts",
+    "test:persistence": "tsx scripts/verifyPersistence.ts",
+    "test:tenant": "tsx scripts/verifyTenantIsolation.ts",
+    "test:auth-security": "tsx scripts/verifyAuthSecurity.ts",
+    "test:http": "tsx scripts/verifyHttpSecurity.ts",
+    "test:rbac-http": "tsx scripts/verifyRbacHttp.ts",
+    "test:rls-coverage": "tsx scripts/verifyRlsCoverage.ts",
+    "test:migrations": "tsx scripts/verifyMigrations.ts",
+    "test:no-memory-fallback": "tsx scripts/verifyNoMemoryFallback.ts",
+    "test:fix-rbac-companies": "tsx scripts/verifyFixRbacCompanies.ts",
+    "test:fix-db-wiring": "tsx scripts/verifyFixDbWiring.ts",
+    "test:forbidden-patterns": "tsx scripts/verifyForbiddenPatterns.ts",
+    "test:battery-integrity": "tsx scripts/verifyBatteryIntegrity.ts",
+    "test:db-config": "tsx scripts/verifyDbConfig.ts",
+    "test:provisioning": "tsx scripts/verifyProvisioning.ts",
+    "test:role-guard": "tsx scripts/verifyRoleGuard.ts",
+    "test:executor-lifecycle": "tsx scripts/verifyExecutorLifecycle.ts",
+    "test:data-api-guard": "tsx scripts/verifyDataApiGuard.ts",
+    "test:tenant-scope-middleware": "tsx scripts/verifyTenantScopeMiddleware.ts",
+    "test:migration-010": "tsx scripts/verifyMigration010.ts",
+    "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
+    "migrate": "tsx scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "argon2": "^0.45.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "helmet": "^8.3.0",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "pg": "^8.23.1",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^10.0.6",
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2"
+  }
+}
+
+--- a/docs/foundation/SUPABASE_CONNECTION_RUNBOOK.md
++++ b/docs/foundation/SUPABASE_CONNECTION_RUNBOOK.md
+@@ FILE CONTENT @@
+# Supabase / Remote PostgreSQL Connection Runbook
+
+## 1. Safety & Production Guardrails
+- Always test connection, migrations, and role provisioning on a separate disposable/staging database before touching production.
+- **Never run foundation test batteries against live production databases.** Test batteries generate disposable tenants, test audit entries, and benchmark loads.
+- Disabling SSL or setting `DATABASE_SSL_REJECT_UNAUTHORIZED=false` is strictly forbidden and rejected in production.
+- **Never commit production credentials or secrets to source control.**
+
+## 2. Roles & Permissions Separation
+The architecture strictly enforces two separate database connections:
+1. **`DATABASE_URL` (Runtime Application Connection)**:
+   - Must connect exclusively using the least-privilege `an_app` role.
+   - Used by the Express server, services, and tenant resolvers at runtime.
+   - `an_app` possesses NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS.
+   - Transaction poolers (`pgBouncer` / Supavisor on port 6543 or 5432) are permitted.
+2. **`MIGRATION_DATABASE_URL` (Privileged Migration Connection)**:
+   - Used exclusively for schema migrations (`npm run migrate`) and role provisioning (`npm run db:provision-app-role`).
+   - Must connect as the database owner / migration user (e.g. `postgres`).
+   - **`MIGRATION_DATABASE_URL` must never be used as a runtime fallback.**
+3. **`APP_DB_PASSWORD`**:
+   - Provisioning input only. Defines the password for the `an_app` role.
+   - Must be at least 16 printable ASCII characters.
+
+## 3. Platform Admin Bootstrap
+- **`PLATFORM_ADMIN_USERNAME`** and **`PLATFORM_ADMIN_PASSWORD`**:
+  - Used for the one-time initial platform administrator account bootstrap.
+  - Both variables must be provided together; configuring only one fails startup immediately across all environments.
+  - Password must be at least 12 characters.
+  - Never logged in plaintext or exposed in error messages.
+  - In development/preview, if `DATABASE_URL` is absent, the server emits a clear warning and skips the bootstrap attempt to allow the dev server to start without crashing.
+  - In production, `DATABASE_URL` is strictly required and missing database configuration or bootstrap failure halts with `process.exit(1)`.
+  - Ordinary users are never automatically promoted to `platform_admin`.
+
+## 4. Data API Roles & Security Boundary
+- **`anon` & `authenticated` (Untrusted Data API Roles)**:
+  - Untrusted client roles used by Supabase PostgREST / Data APIs.
+  - All application tables, sequences, and callable functions are completely revoked from these roles.
+  - Schema `public` `CREATE` privilege is revoked.
+  - The runtime Data API guard (`dataApiGuard`) fails closed if any table, sequence, or callable function privilege is exposed to `anon` or `authenticated`.
+- **`service_role` (Trusted Server Role)**:
+  - A secret-only administrative Supabase server role (bypasses RLS).
+  - Must never be exposed to frontend code or browser clients.
+  - Kept distinct and excluded from untrusted public Data API role checks.
+
+## 5. RLS Policy Requirements by Table Scope
+As classified in `database/table_ownership.json`:
+1. **Global Tables (`platform_users`, `companies`, `user_sessions`, `login_rate_events`, `schema_migrations`)**:
+   - RLS enabled on all tables.
+   - Must not contain `company_id`.
+   - Explicit RLS policy targeting role `an_app`.
+   - `schema_migrations` must remain strictly SELECT-only for `an_app`.
+2. **Shared Tables (`company_memberships`, `audit_logs`)**:
+   - RLS enabled on all tables.
+   - Explicit RLS policy targeting role `an_app`.
+   - `audit_logs` is append-only: granted SELECT and INSERT only to `an_app` (UPDATE, DELETE, TRUNCATE forbidden).
+3. **Tenant Tables (`tenant_demo_items`, and all future tenant tables)**:
+   - `company_id UUID NOT NULL` with active foreign key referencing `companies(id)`.
+   - RLS enabled and **`FORCE ROW LEVEL SECURITY`** enabled.
+   - Explicit policy targeting `an_app` enforcing `app.current_tenant_id` in both `USING` and `WITH CHECK`.
+   - Permissive global policies (`USING true`) are strictly forbidden on tenant tables.
+
+## 6. Registering New Tenant Tables
+1. Add the table definition with `company_id UUID NOT NULL REFERENCES companies(id)`.
+2. Enable and force RLS:
+   ```sql
+   ALTER TABLE <new_table> ENABLE ROW LEVEL SECURITY;
+   ALTER TABLE <new_table> FORCE ROW LEVEL SECURITY;
+   ```
+3. Add isolated tenant policy for `an_app`:
+   ```sql
+   CREATE POLICY <new_table>_tenant_isolation ON <new_table>
+     TO an_app
+     USING (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+     WITH CHECK (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+   ```
+4. Register the table in `database/table_ownership.json` under scope `"tenant"`.
+5. Run `npm run test:rls-coverage` to verify policy and catalog compliance.
+
+## 7. SSL / CA Certificate Configuration
+- Download provider CA certificate (e.g. Supabase Root 2021 CA) and provide it via `DATABASE_SSL_CA` or `DATABASE_SSL_CA_FILE`.
+- The connection resolver normalizes single-line PEM certificates and strips template brackets automatically.
+
+## 8. Live Database (AN-ERP-MAIN) Inspection State & Baseline-2 Remediation
+A read-only inspection of the production AN-ERP-MAIN Supabase database confirmed:
+- **Applied Migrations**: Migrations 001 through 009 are applied in `schema_migrations`.
+- **Pending Migration**: Migration 010 (`010_security_rls_baseline.sql`) is NOT yet applied.
+- **RLS State**: RLS is enabled on all 8 tables. Seven tables currently have 0 policies; `tenant_demo_items` has 1 existing tenant policy.
+- **Routines**: `public.audit_logs_block_mutation()` and `public.rls_auto_enable()` exist and currently have `PUBLIC EXECUTE` entries, as well as explicit grants to `anon` and `authenticated`.
+- **Baseline-2 Remediation**:
+  1. `010_security_rls_baseline.sql` explicitly revokes `EXECUTE` on all routines in `public` from `PUBLIC`, removes privileges from `anon` and `authenticated`, binds explicit least-privilege policies for `an_app`, and configures default privileges.
+  2. `src/server/db/dataApiGuard.ts` scans all routines in `public` (including triggers and event-triggers) to fail closed if any are exposed to untrusted Data API roles.
+  3. When applying Migration 010 via `npm run migrate` using `MIGRATION_DATABASE_URL`, execute the migration transactionally. Ensure role `an_app` is provisioned via `npm run db:provision-app-role` before application runtime connection.
+
+--- a/docs/foundation/AI_PROJECT_STATE.md
++++ b/docs/foundation/AI_PROJECT_STATE.md
+@@ FILE CONTENT @@
+# حالة المشروع وسجل المساعد الذكي (AI Project State)
+
+## 1. مفردات الحالة المعيارية المعتمدة
+- `IMPLEMENTED`: تم بناء الهيكل والكود المكتوب وفق المواصفات.
+- `UNIT_TESTED`: تم إجراء اختبارات سلوكية للأجزاء المنفذة.
+- `INTEGRATION_TESTED`: تم التحقق من التكامل وقاعدة البيانات و RLS سلوكيًا في بيئة اختبار حية متكاملة بوجود run أخضر في GitHub Actions.
+- `SECURITY_VERIFIED`: تم فحص وتحصين آليات الأمان والعزل بوجود run أخضر في GitHub Actions (تحديد رقم الـ Run والـ Commit SHA إلزاميان).
+- `PRODUCTION_READY`: تُمنح فقط بعد نجاح تشغيل GitHub Actions بعلامة خضراء مع `REQUIRE_DB=1` واستخدام دور تطبيق مخصص (`an_app`) غير متجاوز لـ RLS.
+
+---
+
+## 2. سجل الحزم وحالتها الحالية الدقيقة
+- **P00-CONSTITUTION-1**: `IMPLEMENTED`
+- **P01-PLATFORM-SCAFFOLD-1**: `IMPLEMENTED` + `UNIT_TESTED`
+- **P02a-DB-FOUNDATION-1**: `IMPLEMENTED`
+- **P03-AUTH-CORE-1**: `IMPLEMENTED`
+- **P04-ORG-RBAC-1**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-2**: `IMPLEMENTED`
+- **AN-PERSISTENCE-CORE-1**: `IMPLEMENTED`
+- **AN-TENANT-ISOLATION-1**: `IMPLEMENTED`
+- **AN-AUTH-SECURITY-1**: `IMPLEMENTED`
+- **AN-FOUNDATION-CI-1**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-3**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-4**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-5**: `IMPLEMENTED`
+- **AN-FOUNDATION-REPAIR-6**: `IMPLEMENTED` + `UNIT_TESTED`
+- **AN-FOUNDATION-REPAIR-6A**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `259f609db5883ed1a6fc3f947190875fc45da984`
+  - Final SHA: `HEAD` (local working tree verified)
+  - Actual RBAC root cause: Cross-company RBAC tests in `verifyRbacHttp.ts` verify that company membership and platform admin role separation correctly return HTTP 403 FORBIDDEN when users attempt cross-tenant access without authorized platform privileges.
+  - Role guard changes: Hardened `assertSafeDbRole` in `src/server/db/roleGuard.ts` to check direct role attributes (`rolsuper`, `rolbypassrls`, `rolcreatedb`, `rolcreaterole`), check inherited memberships via `pg_auth_members`, fail closed on unverifiable roles or connection errors, and completely remove `ALLOW_PRIVILEGED_DB_ROLE` as an environment bypass in any environment (including development).
+  - Files changed: `src/server/db/roleGuard.ts`, `scripts/verifyAuthSecurity.ts`, `docs/foundation/AI_PROJECT_STATE.md`.
+  - Exact tests and results: Typecheck (PASSED), Build (PASSED), 12 R6.3 DB Role Guard unit tests (12/12 PASSED), Foundation battery passed all static checks.
+  - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
+  - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
+  - Remaining blockers: None for 6A local verification.
+- **AN-FOUNDATION-REPAIR-6B**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `HEAD` (from 6A verified state)
+  - Final SHA: `HEAD`
+  - SSL Policy Changes (R3): Removed `ALLOW_INSECURE_DB_SSL=1` bypass in production; enforced strict TLS and `rejectUnauthorized: true` in production without exception; updated `verifyRepair2.ts` tests.
+  - App Role Provisioning (R4): Hardened `scripts/provisionAppRole.ts` with strict identifier validation (`USER_REGEX`), parameterized password binding, full idempotency, and secure password/credential redaction in logs/exceptions.
+  - Files changed: `src/server/db/adapters/PostgresqlAdapter.ts`, `scripts/provisionAppRole.ts`, `scripts/verifyDbPrivileges.ts`, `scripts/verifyRepair2.ts`, `docs/foundation/AI_PROJECT_STATE.md`, `docs/foundation/AN_FOUNDATION_REPAIR_6B.md`.
+  - Exact tests and results: Typecheck (PASSED), Build (PASSED), SSL resolution tests (PASSED), Database privilege verification tests (PASSED), Foundation battery static checks (PASSED).
+  - GitHub Actions run ID: Pending push & manual CI run trigger by repository owner.
+  - CI URL: `https://github.com/alaaabusalah96-netizen/A.N-last-version-/actions`
+  - Remaining blockers: None for local verification; awaiting CI run on main.
+- **AN-FOUNDATION-SECURITY-REPAIR-7**: `IMPLEMENTED`
+  - Baseline SHA: `5cf2dc502e358b5746d0f5973d47554d0da8cdc3`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed database provisioning and security verification regressions. Provisioning modifies only dedicated `an_app` role and leaves Supabase built-in roles (`anon`, `authenticated`, `service_role`) and PUBLIC global privileges untouched. Added `NOINHERIT` to `an_app`. Replaced `dataApiGuard` with fail-closed implementation checking `anon`/`authenticated` public tables, sequences, functions, and schema create. Strengthened `roleGuard` with protected role list and multi-level `pg_has_role` membership check. Restored provisioning stdout/stderr capture, URL API handling, and built-in role preservation snapshots. Enforced loopback-only host restriction in `runFoundationBattery.ts` and `ciSimulateManagedPg.ts`.
+- **AN-FOUNDATION-SECURITY-BASELINE-1**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `5cf2dc502e358b5746d0f5973d47554d0da8cdc3`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Applied repository-only security and RLS baseline repair. Created migration 010_security_rls_baseline.sql with idempotent RLS policies for an_app, strict revocation on anon/authenticated, and default privileges. Enhanced dataApiGuard to exclude trigger and event_trigger functions while retaining fail-closed validation on callable RPCs. Extended verifyRlsCoverage.ts with full table_ownership catalog validation, an_app target policy checks, and append-only/select-only privilege verification. Strengthened provisionAppRole.ts with post-provision attribute/membership/ownership assertions. Hardened bootstrapPlatformAdminFromEnv with strict credential pairing, role conflict detection, and fail-closed startup halt. Added robust frontend Content-Type handling for intercepted HTML proxy responses.
+  - P05_STARTED: `NO`
+  - SUPABASE_TOUCHED: `NO` (disposable/local CI testing only)
+- **AN-FOUNDATION-SECURITY-BASELINE-2**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `49d3e8ef40f523d71329f724b6bb1599e8d1e8dd`
+  - Final SHA: `HEAD` (local working tree verified)
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed security and startup regressions identified during read-only inspection of the live AN-ERP-MAIN Supabase database.
+    1. Migration 010: Added explicit `REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;` to close public EXECUTE exposure on existing routines (including `public.audit_logs_block_mutation` and `public.rls_auto_enable`), while preserving service_role attributes and untrusted Data API revocations.
+    2. Data API Guard: Hardened `assertNoDataApiExposure` in `src/server/db/dataApiGuard.ts` by removing trigger/event_trigger exclusions to scan all routines in schema public for unauthorized EXECUTE exposure.
+    3. Test Suite: Updated `scripts/verifyDataApiGuard.ts` tests 6 and 7 to assert detection of trigger and event-trigger routines. Created `scripts/verifyMigration010.ts` for static verification of RLS and routine revocations.
+    4. Dev Preview Startup: Hardened `server.ts` to skip platform administrator bootstrap with a clear warning in development/preview when `DATABASE_URL` is unconfigured, while retaining fatal fail-closed behavior for mispaired admin credentials and production startup.
+  - P05_STARTED: `NO`
+  - SUPABASE_TOUCHED: `NO` (repository repair only; remote database untouched)
+
+---
+
+## 3. الأنماط المعمارية والقواعد الحاكمة
+1. **ذرية الخدمات المعاملاتية (`Transactional Service Atomicity`)**:
+   - كافة العمليات المترابطة (مثل إنشاء شركة + إضافة العضوية + كتابة سجل التدقيق) تتم داخل معاملة واحدة متكاملة عبر `CompanyService`.
+2. **سجل ملكية الجداول (`Table Ownership Registry`)**:
+   - تصنيف صريح لكل جدول في قاعدة البيانات (`global` / `shared` / `tenant`). الجداول ذات النطاق `tenant` يلزمها RLS صارم بـ `relforcerowsecurity = true` وسياسات فحص المالك.
+3. **حارس الأدوار والامتيارات (`Role & Privilege Guards`)**:
+   - منع استخدام حسابات `SUPERUSER` أو `BYPASSRLS` في الإنتاج، وحصر دور التطبيق التجاري `an_app` في الصلاحيات التشغيلية فقط دون TRUNCATE أو تعديل سجل المخطط.
+
+---
+
+## 4. محددات الأمان وقاعدة عدم البدء التلقائي
+- **حظر Firebase**: مؤكد ومفروض قطعيًا (`FORBIDDEN`).
+- **الموقف الحالي**: توقف تام وانتظار المراجعة والاعتماد البشري.
+- **بدء P05**: ممنوع منعًا باتًا البدء في P05 دون موافقة صريحة ومباشرة.
+- **P05_STARTED**: `NO`.
+

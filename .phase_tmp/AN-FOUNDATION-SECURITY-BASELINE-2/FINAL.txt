@@ -1,0 +1,33 @@
+AN-FOUNDATION-SECURITY-BASELINE-2
+=================================
+Package: AN-FOUNDATION-SECURITY-BASELINE-2
+Repository: alaaabusalah96-netizen/A.N-last-version-
+Branch: main
+Baseline SHA: 49d3e8ef40f523d71329f724b6bb1599e8d1e8dd
+Execution Status: IMPLEMENTED & UNIT_TESTED
+CI Status: PENDING (Actions run required on main)
+P05_STARTED: NO
+SUPABASE_TOUCHED: NO (Zero remote migrations/connections made)
+
+1. FILES ADDED:
+- scripts/verifyMigration010.ts
+
+2. FILES CHANGED:
+- database/migrations/010_security_rls_baseline.sql
+- src/server/db/dataApiGuard.ts
+- scripts/verifyDataApiGuard.ts
+- server.ts
+- scripts/runFoundationBattery.ts
+- package.json
+- docs/foundation/SUPABASE_CONNECTION_RUNBOOK.md
+- docs/foundation/AI_PROJECT_STATE.md
+
+3. VERIFICATION SUMMARY:
+- TypeScript typecheck: 0 errors (PASS)
+- Production build: PASS
+- test:data-api-guard: 11/11 passed (PASS)
+- test:migration-010: 24/24 passed (PASS)
+- test:battery-integrity: PASS
+- test:forbidden-patterns: PASS
+- test:db-config: 7/7 passed (PASS)
+- test:auth-security: 30/30 passed (PASS)

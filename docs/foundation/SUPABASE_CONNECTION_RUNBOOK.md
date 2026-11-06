@@ -24,10 +24,11 @@ The architecture strictly enforces two separate database connections:
 ## 3. Platform Admin Bootstrap
 - **`PLATFORM_ADMIN_USERNAME`** and **`PLATFORM_ADMIN_PASSWORD`**:
   - Used for the one-time initial platform administrator account bootstrap.
-  - Both variables must be provided together; configuring only one fails startup immediately.
+  - Both variables must be provided together; configuring only one fails startup immediately across all environments.
   - Password must be at least 12 characters.
   - Never logged in plaintext or exposed in error messages.
-  - If bootstrap fails (due to database unavailability or conflict), the server halts with `process.exit(1)` and refuses to listen on HTTP.
+  - In development/preview, if `DATABASE_URL` is absent, the server emits a clear warning and skips the bootstrap attempt to allow the dev server to start without crashing.
+  - In production, `DATABASE_URL` is strictly required and missing database configuration or bootstrap failure halts with `process.exit(1)`.
   - Ordinary users are never automatically promoted to `platform_admin`.
 
 ## 4. Data API Roles & Security Boundary
@@ -78,3 +79,14 @@ As classified in `database/table_ownership.json`:
 ## 7. SSL / CA Certificate Configuration
 - Download provider CA certificate (e.g. Supabase Root 2021 CA) and provide it via `DATABASE_SSL_CA` or `DATABASE_SSL_CA_FILE`.
 - The connection resolver normalizes single-line PEM certificates and strips template brackets automatically.
+
+## 8. Live Database (AN-ERP-MAIN) Inspection State & Baseline-2 Remediation
+A read-only inspection of the production AN-ERP-MAIN Supabase database confirmed:
+- **Applied Migrations**: Migrations 001 through 009 are applied in `schema_migrations`.
+- **Pending Migration**: Migration 010 (`010_security_rls_baseline.sql`) is NOT yet applied.
+- **RLS State**: RLS is enabled on all 8 tables. Seven tables currently have 0 policies; `tenant_demo_items` has 1 existing tenant policy.
+- **Routines**: `public.audit_logs_block_mutation()` and `public.rls_auto_enable()` exist and currently have `PUBLIC EXECUTE` entries, as well as explicit grants to `anon` and `authenticated`.
+- **Baseline-2 Remediation**:
+  1. `010_security_rls_baseline.sql` explicitly revokes `EXECUTE` on all routines in `public` from `PUBLIC`, removes privileges from `anon` and `authenticated`, binds explicit least-privilege policies for `an_app`, and configures default privileges.
+  2. `src/server/db/dataApiGuard.ts` scans all routines in `public` (including triggers and event-triggers) to fail closed if any are exposed to untrusted Data API roles.
+  3. When applying Migration 010 via `npm run migrate` using `MIGRATION_DATABASE_URL`, execute the migration transactionally. Ensure role `an_app` is provisioned via `npm run db:provision-app-role` before application runtime connection.

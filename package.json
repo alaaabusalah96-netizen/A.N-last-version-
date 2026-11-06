@@ -39,6 +39,7 @@
     "test:executor-lifecycle": "tsx scripts/verifyExecutorLifecycle.ts",
     "test:data-api-guard": "tsx scripts/verifyDataApiGuard.ts",
     "test:tenant-scope-middleware": "tsx scripts/verifyTenantScopeMiddleware.ts",
+    "test:migration-010": "tsx scripts/verifyMigration010.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts"
   },

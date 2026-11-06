@@ -1,0 +1,9 @@
+01_010_security_rls_baseline.sql.patch
+02_dataApiGuard.ts.patch
+03_verifyDataApiGuard.ts.patch
+04_server.ts.patch
+05_verifyMigration010.ts.patch
+06_runFoundationBattery.ts.patch
+07_package.json.patch
+08_SUPABASE_CONNECTION_RUNBOOK.md.patch
+09_AI_PROJECT_STATE.md.patch

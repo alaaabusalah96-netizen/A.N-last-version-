@@ -1,0 +1,113 @@
+import fs from 'fs';
+import path from 'path';
+import { check, summary } from './lib/testkit.js';
+
+console.log('--- Running Migration 010 Static Security Verification ---');
+
+const rootDir = process.cwd();
+const migrationPath = path.join(rootDir, 'database/migrations/010_security_rls_baseline.sql');
+
+async function runTests() {
+  await check('1. migration 010 file exists', fs.existsSync(migrationPath));
+
+  const content = fs.readFileSync(migrationPath, 'utf8');
+
+  // 2. Role an_app idempotence
+  const hasRoleInit = content.includes("IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'an_app')") &&
+    content.includes("CREATE ROLE an_app WITH NOLOGIN NOINHERIT;");
+  await check('2. idempotent creation of role an_app with NOLOGIN NOINHERIT', hasRoleInit);
+
+  // 3. RLS enabled on all 8 tables
+  const expectedTables = [
+    'platform_users',
+    'companies',
+    'company_memberships',
+    'user_sessions',
+    'audit_logs',
+    'login_rate_events',
+    'schema_migrations',
+    'tenant_demo_items',
+  ];
+
+  for (const table of expectedTables) {
+    const rlsPattern = new RegExp(`ALTER\\s+TABLE\\s+${table}\\s+ENABLE\\s+ROW\\s+LEVEL\\s+SECURITY;`, 'i');
+    await check(`3. RLS enabled on table '${table}'`, rlsPattern.test(content));
+  }
+
+  // 4. FORCE ROW LEVEL SECURITY on tenant table
+  const forceRlsPattern = /ALTER\s+TABLE\s+tenant_demo_items\s+FORCE\s+ROW\s+LEVEL\s+SECURITY;/i;
+  await check('4. FORCE ROW LEVEL SECURITY on tenant_demo_items', forceRlsPattern.test(content));
+
+  // 5. Explicit policies targeting an_app
+  const policyTables = [
+    'platform_users',
+    'companies',
+    'company_memberships',
+    'user_sessions',
+    'login_rate_events',
+  ];
+
+  for (const table of policyTables) {
+    const hasPolicy = content.includes(`CREATE POLICY ${table}_app_policy ON ${table}`) &&
+      content.includes('TO an_app');
+    await check(`5. explicit policy for an_app on '${table}'`, hasPolicy);
+  }
+
+  // 6. Append-only and SELECT-only policies
+  const schemaMigrationsPolicy = content.includes('CREATE POLICY schema_migrations_app_policy ON schema_migrations') &&
+    content.includes('FOR SELECT') &&
+    content.includes('TO an_app');
+  await check('6. schema_migrations is SELECT-only policy for an_app', schemaMigrationsPolicy);
+
+  const auditSelectPolicy = content.includes('CREATE POLICY audit_logs_app_select_policy ON audit_logs') &&
+    content.includes('FOR SELECT') &&
+    content.includes('TO an_app');
+  const auditInsertPolicy = content.includes('CREATE POLICY audit_logs_app_insert_policy ON audit_logs') &&
+    content.includes('FOR INSERT') &&
+    content.includes('TO an_app');
+  await check('6. audit_logs has dedicated SELECT and INSERT policies for an_app', auditSelectPolicy && auditInsertPolicy);
+
+  // 7. Tenant isolation policy with USING and WITH CHECK
+  const tenantIsolationPolicy = content.includes('CREATE POLICY tenant_demo_isolation ON tenant_demo_items') &&
+    content.includes("USING (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)") &&
+    content.includes("WITH CHECK (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)");
+  await check('7. tenant_demo_items enforces tenant isolation on USING and WITH CHECK', tenantIsolationPolicy);
+
+  // 8. Explicit table privilege restrictions on audit_logs and schema_migrations
+  const hasAuditRevoke = /REVOKE\s+UPDATE,\s*DELETE,\s*TRUNCATE\s+ON\s+TABLE\s+audit_logs\s+FROM\s+an_app;/i.test(content);
+  const hasSchemaRevoke = /REVOKE\s+ALL\s+ON\s+TABLE\s+schema_migrations\s+FROM\s+an_app;/i.test(content) &&
+    /GRANT\s+SELECT\s+ON\s+TABLE\s+schema_migrations\s+TO\s+an_app;/i.test(content);
+  await check('8. audit_logs mutations revoked and schema_migrations restricted to SELECT', hasAuditRevoke && hasSchemaRevoke);
+
+  // 9. PUBLIC routine execution revocation
+  const hasPublicRoutineRevoke = /REVOKE\s+EXECUTE\s+ON\s+ALL\s+ROUTINES\s+IN\s+SCHEMA\s+public\s+FROM\s+PUBLIC;/i.test(content);
+  await check('9. explicit revocation of EXECUTE on ALL routines in schema public from PUBLIC', hasPublicRoutineRevoke);
+
+  // 10. Untrusted Data API role revokes (anon & authenticated)
+  const hasAnonRevokes = content.includes("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;") &&
+    content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;") &&
+    content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon;") &&
+    content.includes("REVOKE CREATE ON SCHEMA public FROM anon;");
+  const hasAuthRevokes = content.includes("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;") &&
+    content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated;") &&
+    content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM authenticated;") &&
+    content.includes("REVOKE CREATE ON SCHEMA public FROM authenticated;");
+  await check('10. Data API roles (anon, authenticated) have tables, sequences, routines, and CREATE revoked', hasAnonRevokes && hasAuthRevokes);
+
+  // 11. Default privileges configured
+  const hasDefaultPrivileges = content.includes('ALTER DEFAULT PRIVILEGES FOR ROLE') &&
+    content.includes('REVOKE EXECUTE ON ROUTINES FROM PUBLIC');
+  await check('11. secure default privileges configured for future objects', hasDefaultPrivileges);
+
+  // 12. service_role preservation
+  const touchesServiceRole = /service_role/i.test(content);
+  await check('12. service_role untouched and preserved without modification', !touchesServiceRole);
+
+  const { exitCode } = summary();
+  process.exit(exitCode);
+}
+
+runTests().catch((err) => {
+  console.error('Test execution error:', err);
+  process.exit(1);
+});
