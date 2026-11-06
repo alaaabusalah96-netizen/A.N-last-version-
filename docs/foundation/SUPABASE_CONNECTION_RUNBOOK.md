@@ -80,13 +80,61 @@ As classified in `database/table_ownership.json`:
 - Download provider CA certificate (e.g. Supabase Root 2021 CA) and provide it via `DATABASE_SSL_CA` or `DATABASE_SSL_CA_FILE`.
 - The connection resolver normalizes single-line PEM certificates and strips template brackets automatically.
 
-## 8. Live Database (AN-ERP-MAIN) Inspection State & Baseline-2 Remediation
-A read-only inspection of the production AN-ERP-MAIN Supabase database confirmed:
-- **Applied Migrations**: Migrations 001 through 009 are applied in `schema_migrations`.
-- **Pending Migration**: Migration 010 (`010_security_rls_baseline.sql`) is NOT yet applied.
-- **RLS State**: RLS is enabled on all 8 tables. Seven tables currently have 0 policies; `tenant_demo_items` has 1 existing tenant policy.
-- **Routines**: `public.audit_logs_block_mutation()` and `public.rls_auto_enable()` exist and currently have `PUBLIC EXECUTE` entries, as well as explicit grants to `anon` and `authenticated`.
-- **Baseline-2 Remediation**:
-  1. `010_security_rls_baseline.sql` explicitly revokes `EXECUTE` on all routines in `public` from `PUBLIC`, removes privileges from `anon` and `authenticated`, binds explicit least-privilege policies for `an_app`, and configures default privileges.
-  2. `src/server/db/dataApiGuard.ts` scans all routines in `public` (including triggers and event-triggers) to fail closed if any are exposed to untrusted Data API roles.
-  3. When applying Migration 010 via `npm run migrate` using `MIGRATION_DATABASE_URL`, execute the migration transactionally. Ensure role `an_app` is provisioned via `npm run db:provision-app-role` before application runtime connection.
+## 8. Trusted Backend Security Boundary
+- **Role `an_app` Identity**: `an_app` is a shared trusted backend database identity used by the application server.
+- **Row-Wide Policies**: Global and shared table policies using `USING (true)` and `WITH CHECK (true)` permit row-wide access to that trusted backend identity.
+- **Server Enforcement Mandatory**: These policies do **NOT** independently enforce per-user or per-company authorization at the database layer.
+- **Authentication & Authorization**: Server-side authentication, role-based access control (RBAC), and company-membership authorization checks are strictly mandatory before executing database operations.
+- **Credential Protection**: `an_app` credentials must **never** be exposed to browsers or client-side code.
+- **Tenant Table Isolation**: Tenant-specific tables must enforce strict tenant isolation via `company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid` on both `USING` and `WITH CHECK`.
+
+## 9. Dated Database & Routine Inspection Snapshot (as of 2026-11-06)
+*(Note: This section documents a dated read-only snapshot from 2026-11-06, not a active live database state.)*
+
+- **Database Inspection Snapshot (2026-11-06)**:
+  - **Applied Migrations**: Migrations 001 through 009 were recorded as applied in `schema_migrations`.
+  - **Pending Migration**: Migration 010 (`010_security_rls_baseline.sql`) was pending and has **NOT** been applied to the live database.
+  - **RLS State**: RLS was enabled on all 8 inspected tables. Seven tables had 0 policies at inspection time; `tenant_demo_items` had 1 existing tenant policy.
+- **Routine Security Snapshot (2026-11-06)**:
+  - Inspected routines `public.audit_logs_block_mutation()` and `public.rls_auto_enable()` were observed to have `PUBLIC`, `anon`, and `authenticated` `EXECUTE` grants.
+  - Intended Migration 010 hardening includes targeted `EXECUTE` revocations for `public.audit_logs_block_mutation()` and `public.rls_auto_enable()`.
+  - `public.audit_logs_block_mutation()` `search_path` is pinned to `pg_catalog`.
+  - `public.rls_auto_enable()` event-trigger definition and behavior are preserved without `DROP` or replacement (its `search_path` was already `pg_catalog`).
+  - *These routine revocations are present in the pending migration file only and are NOT active in Supabase until Migration 010 is safely validated and applied.*
+
+## 10. Default Privileges & Data API Guard
+- **Default Privileges Ownership Scope**:
+  - `ALTER DEFAULT PRIVILEGES` applies to objects created by the specified owner role (e.g. `CURRENT_USER`).
+  - It does not automatically cover objects created by every possible database owner.
+  - Migration 010 default privileges must be tested against the actual intended migration/provisioning owner.
+  - Failure to apply required default privileges must fail visibly (fail-closed, without broad `undefined_object` or `WHEN OTHERS` exception swallowing).
+- **Data API Guard Boundary**:
+  - The application-side `dataApiGuard` dynamically checks routines in schema `public` for unauthorized `anon` and `authenticated` `EXECUTE` exposure.
+  - This application runtime guard provides fail-closed defence-in-depth, but does **NOT** replace database-level ACL verification and policy enforcement.
+
+## 11. Pre-Deployment Validation Gate & Known Blockers
+
+### Required Validation Gate (Disposable PostgreSQL)
+Before applying Migration 010 to the production Supabase project:
+1. Obtain an isolated, disposable PostgreSQL environment.
+2. Reproduce the relevant existing schema, tables, and roles.
+3. Test Migration 010 from a clean state.
+4. Verify idempotency by re-running Migration 010.
+5. Verify `an_app` role attributes (`NOLOGIN`, `NOINHERIT`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOBYPASSRLS`).
+6. Verify exact table grants and RLS policies for `an_app`.
+7. Verify tenant isolation on `tenant_demo_items`.
+8. Verify `audit_logs` append-only behavior (`SELECT` + `INSERT` only, `UPDATE`/`DELETE`/`TRUNCATE` revoked).
+9. Verify `schema_migrations` `SELECT`-only behavior for `an_app`.
+10. Verify routine ACLs for `PUBLIC`, `anon`, `authenticated`, `an_app`, and `service_role`.
+11. Verify the `rls_auto_enable` event trigger remains installed and operational.
+12. Verify default privileges for each intended object-creating role.
+13. Capture actual SQL test outputs for audit logs.
+
+*Production application of Migration 010 MUST remain blocked until disposable PostgreSQL validation passes and explicit human approval is obtained.*
+
+### Known Blockers
+- **Migration Unapplied**: No proof yet that Migration 010 has been applied to the production Supabase project.
+- **Provisioning Unverified**: No proof yet that `an_app` provisioning has been executed on the production project.
+- **Runtime Connection Unverified**: No proof yet that the live application runtime is connected via `DATABASE_URL` using `an_app`.
+- **Integration Test Unverified**: No proof yet of successful isolated PostgreSQL integration testing.
+- **Absent Scripts**: `scripts/runReconcileAuditB.ts` is absent and must not be invented or referenced.
