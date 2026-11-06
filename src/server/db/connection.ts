@@ -12,9 +12,16 @@ export function resolveSslConfig(env: Record<string, string | undefined>): pg.Co
 
   let ca: Buffer | string | undefined = undefined;
   if (caText) {
-    const unescaped = caText.replace(/\\n/g, '\n');
+    let unescaped = caText.replace(/\\n/g, '\n');
     if (!unescaped.includes('BEGIN CERTIFICATE')) {
       throw new Error('Database SSL configuration error: DATABASE_SSL_CA does not contain a valid PEM certificate');
+    }
+    if (!unescaped.includes('\n') && unescaped.includes('-----END CERTIFICATE-----')) {
+      const match = unescaped.match(/-----BEGIN CERTIFICATE-----(.+?)-----END CERTIFICATE-----/);
+      if (match) {
+        const base64Body = match[1].replace(/\s+/g, '');
+        unescaped = `-----BEGIN CERTIFICATE-----\n${base64Body.match(/.{1,64}/g)?.join('\n') || base64Body}\n-----END CERTIFICATE-----\n`;
+      }
     }
     ca = unescaped;
   } else if (caFile) {
@@ -78,6 +85,13 @@ export function sanitizeConnectionString(connectionString: string): string {
 
   try {
     const url = new URL(connectionString);
+    if (url.password) {
+      let pwd = decodeURIComponent(url.password);
+      if (pwd.startsWith('[') && pwd.endsWith(']')) {
+        pwd = pwd.slice(1, -1);
+        url.password = encodeURIComponent(pwd);
+      }
+    }
     const paramsToRemove = ['sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'ssl'];
     let removed = false;
     for (const param of paramsToRemove) {

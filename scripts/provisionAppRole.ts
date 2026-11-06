@@ -69,11 +69,15 @@ async function provisionAppRole() {
     const roleExists = checkRoleRes.rows.length > 0;
     const action = roleExists ? 'ALTER' : 'CREATE';
 
+    const isSuperRes = await client.query('SELECT rolsuper FROM pg_roles WHERE rolname = current_user;');
+    const isSuper = isSuperRes.rows[0]?.rolsuper === true;
+
     // 3. Create or update role with NOINHERIT and least-privilege attributes
-    const stmtRes = await client.query(
-      "SELECT format('%s ROLE %I WITH LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;",
-      [action, appDbUser, verifier]
-    );
+    const formatSql = action === 'ALTER' && !isSuper
+      ? "SELECT format('%s ROLE %I WITH LOGIN NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;"
+      : "SELECT format('%s ROLE %I WITH LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', $1::text, $2::text, $3::text) AS stmt;";
+
+    const stmtRes = await client.query(formatSql, [action, appDbUser, verifier]);
     await client.query(stmtRes.rows[0].stmt);
 
     // 4. Revoke unexpected direct memberships
