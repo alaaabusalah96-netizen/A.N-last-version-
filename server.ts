@@ -57,10 +57,8 @@ async function startServer() {
   try {
     await defaultAuthService.bootstrapPlatformAdminFromEnv();
   } catch (err) {
-    console.error('[auth] Bootstrap platform admin error:', err);
-    if (isProd) {
-      process.exit(1);
-    }
+    console.error('[auth] Bootstrap platform admin error:', err instanceof Error ? err.message : err);
+    process.exit(1);
   }
 
   // 4. Start Express server

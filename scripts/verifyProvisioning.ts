@@ -243,6 +243,52 @@ async function runTests() {
     );
     await check('14. Provisioning does not modify built-in role object privileges', privsEqual);
 
+    // 15. Safe existing app role rerun succeeds
+    const safeRerunResult = spawnSync('npx', ['tsx', 'scripts/provisionAppRole.ts'], {
+      env: childEnv,
+      encoding: 'utf8',
+    });
+    await check('15. Safe existing app role rerun succeeds', safeRerunResult.status === 0);
+
+    // 16. Existing unsafe app role with CREATEROLE fails closed
+    const unsafeUser = `an_unsafe_${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      await client.query(`CREATE ROLE ${pg.escapeIdentifier(unsafeUser)} WITH LOGIN CREATEROLE PASSWORD 'Pass_1234567890123!';`);
+      const unsafeProv = spawnSync('npx', ['tsx', 'scripts/provisionAppRole.ts'], {
+        env: { ...childEnv, APP_DB_USER: unsafeUser, APP_DB_PASSWORD: 'Pass_1234567890123!' },
+        encoding: 'utf8',
+      });
+      await check('16. Existing unsafe app role with CREATEROLE fails closed', unsafeProv.status === 1);
+    } finally {
+      await client.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(unsafeUser)};`).catch(() => {});
+    }
+
+    // 17. Unexpected direct membership is revoked or handled safely
+    const memberUser = `an_mem_${crypto.randomBytes(4).toString('hex')}`;
+    const dummyGroup = `an_grp_${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      await client.query(`CREATE ROLE ${pg.escapeIdentifier(dummyGroup)} NOLOGIN;`);
+      await client.query(`CREATE ROLE ${pg.escapeIdentifier(memberUser)} WITH LOGIN NOINHERIT PASSWORD 'Pass_1234567890123!';`);
+      await client.query(`GRANT ${pg.escapeIdentifier(dummyGroup)} TO ${pg.escapeIdentifier(memberUser)};`);
+
+      const memProv = spawnSync('npx', ['tsx', 'scripts/provisionAppRole.ts'], {
+        env: { ...childEnv, APP_DB_USER: memberUser, APP_DB_PASSWORD: 'Pass_1234567890123!' },
+        encoding: 'utf8',
+      });
+      await check('17. Provisioning handles existing role with unexpected membership', memProv.status === 0);
+
+      // Verify dummyGroup membership was revoked
+      const memCheck = await client.query(
+        `SELECT pg_has_role($1, $2, 'MEMBER') as has_mem;`,
+        [memberUser, dummyGroup]
+      );
+      await check('Direct unexpected membership revoked by provisioning', memCheck.rows[0]?.has_mem === false);
+    } finally {
+      await client.query(`DROP OWNED BY ${pg.escapeIdentifier(memberUser)};`).catch(() => {});
+      await client.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(memberUser)};`).catch(() => {});
+      await client.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(dummyGroup)};`).catch(() => {});
+    }
+
   } finally {
     // Cleanup test user and report if cleanup fails
     if (testRoleCreated) {

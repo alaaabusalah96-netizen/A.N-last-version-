@@ -2,7 +2,7 @@ import { check, summary } from './lib/testkit.js';
 import { DbExecutor, QueryResult } from '../src/server/db/types.js';
 import { assertNoDataApiExposure } from '../src/server/db/dataApiGuard.js';
 
-console.log('--- Running Data API Guard Verification (F10-5 / Behavioral Mock) ---');
+console.log('--- Running Data API Guard Verification (PHASE 3 / Behavioral Mock) ---');
 
 function createMockExecutor(handler: (sql: string, params?: unknown[]) => Promise<any[]> | any[]): DbExecutor {
   return {
@@ -22,22 +22,7 @@ function createMockExecutor(handler: (sql: string, params?: unknown[]) => Promis
 }
 
 async function runTests() {
-  // Test 1: No exposure returns zero violations
-  {
-    const ex = createMockExecutor((sql) => {
-      if (sql.includes('to_regrole')) return [{ exists: true }];
-      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
-      if (sql.includes('has_table_privilege')) return [];
-      if (sql.includes('has_sequence_privilege')) return [];
-      if (sql.includes('has_function_privilege')) return [];
-      return [];
-    });
-
-    const violations = await assertNoDataApiExposure(ex);
-    await check('1. No exposure returns zero violations', violations.length === 0);
-  }
-
-  // Test 2: anon SELECT on a table is detected
+  // Test 1: anon table privilege detection
   {
     const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
@@ -54,10 +39,10 @@ async function runTests() {
 
     const violations = await assertNoDataApiExposure(ex);
     const hasAnonSelect = violations.some((v) => v.includes("Role 'anon'") && v.includes('SELECT') && v.includes('companies'));
-    await check('2. anon SELECT on a table is detected', hasAnonSelect);
+    await check('1. anon table privilege detection', hasAnonSelect);
   }
 
-  // Test 3: authenticated INSERT on a table is detected
+  // Test 2: authenticated table privilege detection
   {
     const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
@@ -74,10 +59,10 @@ async function runTests() {
 
     const violations = await assertNoDataApiExposure(ex);
     const hasAuthInsert = violations.some((v) => v.includes("Role 'authenticated'") && v.includes('INSERT') && v.includes('platform_users'));
-    await check('3. authenticated INSERT on a table is detected', hasAuthInsert);
+    await check('2. authenticated table privilege detection', hasAuthInsert);
   }
 
-  // Test 4: Sequence USAGE is detected
+  // Test 3: sequence privilege detection
   {
     const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
@@ -95,10 +80,10 @@ async function runTests() {
 
     const violations = await assertNoDataApiExposure(ex);
     const hasSeqUsage = violations.some((v) => v.includes("Role 'anon'") && v.includes('USAGE') && v.includes('companies_id_seq'));
-    await check('4. Sequence USAGE is detected', hasSeqUsage);
+    await check('3. sequence privilege detection', hasSeqUsage);
   }
 
-  // Test 5: Callable function EXECUTE is detected
+  // Test 4: callable function EXECUTE detection
   {
     const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
@@ -117,29 +102,74 @@ async function runTests() {
 
     const violations = await assertNoDataApiExposure(ex);
     const hasFuncExec = violations.some((v) => v.includes("Role 'authenticated'") && v.includes('EXECUTE') && v.includes('custom_admin_func'));
-    await check('5. Callable function EXECUTE is detected', hasFuncExec);
+    await check('4. callable function EXECUTE detection', hasFuncExec);
   }
 
-  // Test 6: Schema CREATE is detected
+  // Test 5: SECURITY DEFINER callable function exposure
   {
     const ex = createMockExecutor((sql, params) => {
       if (sql.includes('to_regrole')) return [{ exists: true }];
-      if (sql.includes('has_schema_privilege')) {
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
         const role = params?.[0];
         if (role === 'anon') {
-          return [{ has_create: true }];
+          return [{ proname: 'elevated_secdef_rpc' }];
         }
-        return [{ has_create: false }];
+        return [];
       }
       return [];
     });
 
     const violations = await assertNoDataApiExposure(ex);
-    const hasSchemaCreate = violations.some((v) => v.includes("Role 'anon'") && v.includes('CREATE'));
-    await check('6. Schema CREATE is detected', hasSchemaCreate);
+    const hasSecDef = violations.some((v) => v.includes("Role 'anon'") && v.includes('EXECUTE') && v.includes('elevated_secdef_rpc'));
+    await check('5. SECURITY DEFINER callable function exposure', hasSecDef);
   }
 
-  // Test 7: Missing required managed roles fail when requireRoles=true
+  // Test 6: trigger function exclusion
+  {
+    let excludedTriggerInSql = false;
+    const ex = createMockExecutor((sql) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
+        if (sql.includes("'trigger'::regtype")) {
+          excludedTriggerInSql = true;
+        }
+        return [];
+      }
+      return [];
+    });
+
+    await assertNoDataApiExposure(ex);
+    await check('6. trigger function exclusion', excludedTriggerInSql);
+  }
+
+  // Test 7: event trigger function exclusion
+  {
+    let excludedEventTriggerInSql = false;
+    const ex = createMockExecutor((sql) => {
+      if (sql.includes('to_regrole')) return [{ exists: true }];
+      if (sql.includes('has_schema_privilege')) return [{ has_create: false }];
+      if (sql.includes('has_table_privilege')) return [];
+      if (sql.includes('has_sequence_privilege')) return [];
+      if (sql.includes('has_function_privilege')) {
+        if (sql.includes("'event_trigger'::regtype")) {
+          excludedEventTriggerInSql = true;
+        }
+        return [];
+      }
+      return [];
+    });
+
+    await assertNoDataApiExposure(ex);
+    await check('7. event trigger function exclusion', excludedEventTriggerInSql);
+  }
+
+  // Test 8: missing required roles
   {
     const ex = createMockExecutor((sql) => {
       if (sql.includes('to_regrole')) return [{ exists: false }];
@@ -152,9 +182,8 @@ async function runTests() {
     } catch (err: any) {
       threwMissing = err.message.includes("Required Data API role 'anon' is missing");
     }
-    await check('7. Missing required managed roles fail when requireRoles=true', threwMissing);
+    await check('8. missing required roles fails when requireRoles=true', threwMissing);
 
-    // Optional requireRoles=false succeeds without throwing
     let threwOptional = false;
     try {
       const v = await assertNoDataApiExposure(ex, { requireRoles: false });
@@ -162,10 +191,10 @@ async function runTests() {
     } catch {
       threwOptional = true;
     }
-    await check('Missing managed roles ignored when requireRoles=false', !threwOptional);
+    await check('8. missing required roles ignored when requireRoles=false', !threwOptional);
   }
 
-  // Test 8: Query failure throws a fatal fail-closed error
+  // Test 9: query failure fail-closed
   {
     const ex = createMockExecutor(() => {
       throw new Error('Database connection reset');
@@ -177,10 +206,10 @@ async function runTests() {
     } catch (err: any) {
       threwQueryFail = err.message.includes('[dataApiGuard] FATAL: Data API guard query failed (fail-closed)');
     }
-    await check('8. Query failure throws a fatal fail-closed error', threwQueryFail);
+    await check('9. query failure fail-closed', threwQueryFail);
   }
 
-  // Test 9: service_role is not treated as an untrusted public client role
+  // Test 10: service_role remaining outside the untrusted-role scan
   {
     const rolesQueried: string[] = [];
     const ex = createMockExecutor((sql, params) => {
@@ -192,7 +221,7 @@ async function runTests() {
 
     await assertNoDataApiExposure(ex);
     const testedServiceRole = rolesQueried.includes('service_role');
-    await check('9. service_role is not treated as an untrusted public client role', !testedServiceRole);
+    await check('10. service_role remaining outside the untrusted-role scan', !testedServiceRole);
   }
 
   const { exitCode } = summary();

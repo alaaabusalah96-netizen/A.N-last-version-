@@ -80,46 +80,54 @@ export class AuthService {
    * Requires password length >= 12 characters.
    */
   async bootstrapPlatformAdminFromEnv(): Promise<boolean> {
-    const isProd = process.env.NODE_ENV === 'production';
-    const username = process.env.PLATFORM_ADMIN_USERNAME;
-    const password = process.env.PLATFORM_ADMIN_PASSWORD;
+    const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
+    const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
 
-    if (!username || !password || username.trim() === '' || password.trim() === '') {
-      return false;
+    const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
+    const hasPassword = Boolean(rawPassword && rawPassword.trim() !== '');
+
+    // Requirement 4: If only one administrator credential is configured, fail clearly
+    if ((hasUsername && !hasPassword) || (!hasUsername && hasPassword)) {
+      throw new Error('[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured together for administrator bootstrap');
     }
 
+    if (!hasUsername || !hasPassword) {
+      return false; // Neither configured; bootstrap not requested
+    }
+
+    const username = rawUsername!.trim().toLowerCase();
+    const password = rawPassword!;
+
+    // Requirement 5: Minimum 12-character administrator password requirement
     if (password.length < 12) {
-      const msg = '[auth] FATAL: PLATFORM_ADMIN_PASSWORD must be at least 12 characters long';
-      if (isProd) {
-        throw new Error(msg);
-      }
-      console.warn(msg);
-      return false;
+      throw new Error('[auth] FATAL: PLATFORM_ADMIN_PASSWORD must be at least 12 characters long');
     }
-
-    const normalizedUsername = username.trim().toLowerCase();
 
     try {
-      const existing = await this.userStore.findByUsername(normalizedUsername);
+      const existing = await this.userStore.findByUsername(username);
       if (existing) {
-        return false;
+        // Requirement 7 & 8: If the username already exists with a different role, report an explicit conflict
+        if (existing.role !== 'platform_admin') {
+          throw new Error(`[auth] FATAL: Bootstrap conflict — user '${username}' already exists with role '${existing.role}', not 'platform_admin'`);
+        }
+        return true; // Already exists as platform_admin
       }
 
       const passwordHash = await hashPassword(password);
       await this.userStore.createUser({
-        username: normalizedUsername,
+        username,
         passwordHash,
         role: 'platform_admin',
       });
 
-      console.log(`[auth] Platform admin '${normalizedUsername}' initialized from environment variables.`);
+      console.log(`[auth] Platform admin '${username}' initialized from environment variables.`);
       return true;
     } catch (err: unknown) {
-      console.error('[auth] Bootstrap platform admin error:', err);
-      if (isProd) {
+      if (err instanceof Error && err.message.startsWith('[auth] FATAL:')) {
         throw err;
       }
-      return false;
+      const sanitizedMsg = err instanceof Error ? err.message : String(err);
+      throw new Error(`[auth] FATAL: Failed to bootstrap platform admin '${username}': ${sanitizedMsg}`);
     }
   }
 }

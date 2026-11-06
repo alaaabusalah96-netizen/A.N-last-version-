@@ -87,7 +87,7 @@ export async function assertNoDataApiExposure(
          FROM pg_proc p
          JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'public'
-           AND p.prorettype <> 'trigger'::regtype
+           AND p.prorettype NOT IN ('trigger'::regtype, 'event_trigger'::regtype)
            AND has_function_privilege($1, p.oid, 'EXECUTE');`,
         [role]
       );

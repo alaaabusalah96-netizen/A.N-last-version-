@@ -48,12 +48,12 @@
   - Baseline SHA: `5cf2dc502e358b5746d0f5973d47554d0da8cdc3`
   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
   - Summary: Fixed database provisioning and security verification regressions. Provisioning modifies only dedicated `an_app` role and leaves Supabase built-in roles (`anon`, `authenticated`, `service_role`) and PUBLIC global privileges untouched. Added `NOINHERIT` to `an_app`. Replaced `dataApiGuard` with fail-closed implementation checking `anon`/`authenticated` public tables, sequences, functions, and schema create. Strengthened `roleGuard` with protected role list and multi-level `pg_has_role` membership check. Restored provisioning stdout/stderr capture, URL API handling, and built-in role preservation snapshots. Enforced loopback-only host restriction in `runFoundationBattery.ts` and `ciSimulateManagedPg.ts`.
+- **AN-FOUNDATION-SECURITY-BASELINE-1**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Baseline SHA: `5cf2dc502e358b5746d0f5973d47554d0da8cdc3`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Applied repository-only security and RLS baseline repair. Created migration 010_security_rls_baseline.sql with idempotent RLS policies for an_app, strict revocation on anon/authenticated, and default privileges. Enhanced dataApiGuard to exclude trigger and event_trigger functions while retaining fail-closed validation on callable RPCs. Extended verifyRlsCoverage.ts with full table_ownership catalog validation, an_app target policy checks, and append-only/select-only privilege verification. Strengthened provisionAppRole.ts with post-provision attribute/membership/ownership assertions. Hardened bootstrapPlatformAdminFromEnv with strict credential pairing, role conflict detection, and fail-closed startup halt. Added robust frontend Content-Type handling for intercepted HTML proxy responses.
   - P05_STARTED: `NO`
-  - SUPABASE_TOUCHED: `NO`
-
-
-
-
+  - SUPABASE_TOUCHED: `NO` (disposable/local CI testing only)
 
 ---
 

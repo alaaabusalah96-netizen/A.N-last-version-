@@ -1,0 +1,12 @@
+01_010_security_rls_baseline.sql.patch
+02_dataApiGuard.ts.patch
+03_verifyDataApiGuard.ts.patch
+04_verifyRlsCoverage.ts.patch
+05_provisionAppRole.ts.patch
+06_verifyProvisioning.ts.patch
+07_authService.ts.patch
+08_server.ts.patch
+09_apiClient.ts.patch
+10_LoginForm.tsx.patch
+11_SUPABASE_CONNECTION_RUNBOOK.md.patch
+12_AI_PROJECT_STATE.md.patch

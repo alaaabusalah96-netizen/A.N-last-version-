@@ -14,8 +14,11 @@ export async function refreshCsrfToken(): Promise<string | null> {
   try {
     const res = await fetch('/api/auth/csrf', { credentials: 'include' });
     if (res.ok) {
-      const data = await res.json();
-      return data.csrfToken || getCookie('an_csrf');
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        return data.csrfToken || getCookie('an_csrf');
+      }
     }
   } catch (err) {
     console.error('[apiClient] Failed to refresh CSRF token:', err);
@@ -53,13 +56,16 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   if (res.status === 403 && isMutating) {
     const clone = res.clone();
     try {
-      const errorData = await clone.json();
-      if (errorData.code === 'CSRF_INVALID') {
-        console.warn('[apiClient] CSRF token invalid. Refreshing token and retrying request...');
-        const newCsrfToken = await refreshCsrfToken();
-        if (newCsrfToken) {
-          headers.set('x-csrf-token', newCsrfToken);
-          res = await fetch(path, { ...reqInit, headers });
+      const contentType = clone.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errorData = await clone.json();
+        if (errorData.code === 'CSRF_INVALID') {
+          console.warn('[apiClient] CSRF token invalid. Refreshing token and retrying request...');
+          const newCsrfToken = await refreshCsrfToken();
+          if (newCsrfToken) {
+            headers.set('x-csrf-token', newCsrfToken);
+            res = await fetch(path, { ...reqInit, headers });
+          }
         }
       }
     } catch {

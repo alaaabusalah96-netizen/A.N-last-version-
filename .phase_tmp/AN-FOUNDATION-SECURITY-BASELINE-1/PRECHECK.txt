@@ -1,0 +1,27 @@
+PRECHECK REPORT
+================
+Package: AN-FOUNDATION-SECURITY-BASELINE-1
+Repository: alaaabusalah96-netizen/A.N-last-version-
+Branch: main
+Expected Baseline SHA: 5cf2dc502e358b5746d0f5973d47554d0da8cdc3
+Working Tree: Clean, no uncommitted foreign changes
+TypeScript Errors Before: 0
+
+Files Inspected:
+- docs/foundation/AI_PROJECT_STATE.md (Verified)
+- docs/foundation/SUPABASE_CONNECTION_RUNBOOK.md (Verified)
+- database/table_ownership.json (Verified: 8 registered tables)
+- database/migrations/001_platform_users.sql through 009_drop_platform_users_company_id.sql (Verified)
+- src/server/auth/authService.ts (Verified)
+- src/server/auth/userRepository.ts (Verified)
+- src/server/db/dataApiGuard.ts (Verified)
+- src/server/db/roleGuard.ts (Verified)
+- scripts/provisionAppRole.ts (Verified)
+- scripts/verifyRlsCoverage.ts (Verified)
+- scripts/verifyDataApiGuard.ts (Verified)
+- scripts/verifyDbPrivileges.ts (Verified)
+- server.ts (Verified)
+- src/lib/apiClient.ts (Verified)
+- src/components/LoginForm.tsx (Verified)
+
+Result: PRECHECK PASSED. Proceeding to Phase 1-7 implementations.

@@ -23,7 +23,20 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
         body: JSON.stringify({ username, password }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error('خدمة قاعدة البيانات أو خادم التطبيق غير متاحين حالياً (503 Service Unavailable)');
+        }
+        throw new Error(`استجابة غير متوقعة من الخادم (${res.status})`);
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('تعذر معالجة استجابة الخادم');
+      }
 
       if (!res.ok) {
         throw new Error(data.message || data.error || 'فشل تسجيل الدخول');

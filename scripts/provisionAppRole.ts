@@ -69,6 +69,16 @@ async function provisionAppRole() {
     const roleExists = checkRoleRes.rows.length > 0;
     const action = roleExists ? 'ALTER' : 'CREATE';
 
+    if (roleExists) {
+      const existingAttrs = await client.query<{ rolsuper: boolean; rolcreaterole: boolean; rolbypassrls: boolean }>(
+        'SELECT rolsuper, rolcreaterole, rolbypassrls FROM pg_roles WHERE rolname = $1;',
+        [appDbUser]
+      );
+      if (existingAttrs.rows[0]?.rolsuper || existingAttrs.rows[0]?.rolcreaterole || existingAttrs.rows[0]?.rolbypassrls) {
+        throw new Error(`[provision] FATAL: Existing role '${appDbUser}' has dangerous elevated privileges and cannot be safely used as app role.`);
+      }
+    }
+
     const isSuperRes = await client.query('SELECT rolsuper FROM pg_roles WHERE rolname = current_user;');
     const isSuper = isSuperRes.rows[0]?.rolsuper === true;
 
@@ -191,6 +201,78 @@ async function provisionAppRole() {
         [appDbUser]
       );
       await client.query(migGrantStmt.rows[0].stmt);
+    }
+
+    // 10. Post-provision Verification
+    const verifyRoleRes = await client.query<{
+      rolsuper: boolean;
+      rolbypassrls: boolean;
+      rolcreatedb: boolean;
+      rolcreaterole: boolean;
+      rolreplication: boolean;
+      rolcanlogin: boolean;
+    }>(
+      `SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication, rolcanlogin
+       FROM pg_roles WHERE rolname = $1;`,
+      [appDbUser]
+    );
+
+    const roleAttrs = verifyRoleRes.rows[0];
+    if (!roleAttrs) {
+      throw new Error(`[provision] Verification failed: Role '${appDbUser}' does not exist after provisioning.`);
+    }
+
+    if (roleAttrs.rolsuper) throw new Error(`[provision] Verification failed: '${appDbUser}' has rolsuper=true`);
+    if (roleAttrs.rolbypassrls) throw new Error(`[provision] Verification failed: '${appDbUser}' has rolbypassrls=true`);
+    if (roleAttrs.rolcreatedb) throw new Error(`[provision] Verification failed: '${appDbUser}' has rolcreatedb=true`);
+    if (roleAttrs.rolcreaterole) throw new Error(`[provision] Verification failed: '${appDbUser}' has rolcreaterole=true`);
+    if (roleAttrs.rolreplication) throw new Error(`[provision] Verification failed: '${appDbUser}' has rolreplication=true`);
+    if (!roleAttrs.rolcanlogin) throw new Error(`[provision] Verification failed: '${appDbUser}' has rolcanlogin=false`);
+
+    // Verify no direct or nested membership in protected roles
+    const protectedRoles = ['postgres', 'supabase_admin', 'service_role', 'authenticator', 'anon', 'authenticated'];
+    for (const protRole of protectedRoles) {
+      const hasProt = await client.query<{ has_role: boolean }>(
+        'SELECT pg_has_role($1, $2, $3) as has_role;',
+        [appDbUser, protRole, 'USAGE']
+      );
+      if (hasProt.rows[0]?.has_role) {
+        throw new Error(`[provision] Verification failed: '${appDbUser}' has unauthorized direct or inherited membership in '${protRole}'`);
+      }
+    }
+
+    // Verify no ownership of public application tables
+    const ownedTables = await client.query<{ tablename: string }>(
+      `SELECT c.relname as tablename
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_roles r ON r.oid = c.relowner
+       WHERE n.nspname = 'public' AND r.rolname = $1 AND c.relkind = 'r';`,
+      [appDbUser]
+    );
+    if (ownedTables.rows.length > 0) {
+      const names = ownedTables.rows.map((r) => r.tablename).join(', ');
+      throw new Error(`[provision] Verification failed: '${appDbUser}' owns application tables: ${names}`);
+    }
+
+    // Verify no schema CREATE privilege
+    const schemaCreateCheck = await client.query<{ has_create: boolean }>(
+      "SELECT has_schema_privilege($1, 'public', 'CREATE') as has_create;",
+      [appDbUser]
+    );
+    if (schemaCreateCheck.rows[0]?.has_create) {
+      throw new Error(`[provision] Verification failed: '${appDbUser}' has unauthorized CREATE privilege on schema public`);
+    }
+
+    // Verify exact intended privilege on schema_migrations
+    if (migCheck.rows[0]?.exists) {
+      const migCheckPriv = await client.query<{ has_priv: boolean }>(
+        "SELECT has_table_privilege($1, 'schema_migrations', 'INSERT') as has_priv;",
+        [appDbUser]
+      );
+      if (migCheckPriv.rows[0]?.has_priv) {
+        throw new Error(`[provision] Verification failed: '${appDbUser}' has unauthorized INSERT privilege on schema_migrations`);
+      }
     }
 
     await client.query('COMMIT');
