@@ -6,6 +6,17 @@ console.log('--- Running Migration 010 Static Security Verification ---');
 
 const rootDir = process.cwd();
 const migrationPath = path.join(rootDir, 'database/migrations/010_security_rls_baseline.sql');
+const tableOwnershipPath = path.join(rootDir, 'database/table_ownership.json');
+
+/**
+ * Extracts the complete CREATE POLICY statement for a given policy and table,
+ * up to the terminating semicolon.
+ */
+function policyStatement(content: string, policyName: string, tableName: string): string | null {
+  const regex = new RegExp(`CREATE\\s+POLICY\\s+${policyName}\\s+ON\\s+${tableName}[\\s\\S]*?;`, 'i');
+  const match = content.match(regex);
+  return match ? match[0] : null;
+}
 
 async function runTests() {
   await check('1. migration 010 file exists', fs.existsSync(migrationPath));
@@ -38,52 +49,103 @@ async function runTests() {
   const forceRlsPattern = /ALTER\s+TABLE\s+tenant_demo_items\s+FORCE\s+ROW\s+LEVEL\s+SECURITY;/i;
   await check('4. FORCE ROW LEVEL SECURITY on tenant_demo_items', forceRlsPattern.test(content));
 
-  // 5. Explicit policies targeting an_app
-  const policyTables = [
-    'platform_users',
-    'companies',
-    'company_memberships',
-    'user_sessions',
-    'login_rate_events',
+  // 5. Five independent global and shared policies
+  const independentPolicies = [
+    { policy: 'platform_users_app_policy', table: 'platform_users' },
+    { policy: 'companies_app_policy', table: 'companies' },
+    { policy: 'company_memberships_app_policy', table: 'company_memberships' },
+    { policy: 'user_sessions_app_policy', table: 'user_sessions' },
+    { policy: 'login_rate_events_app_policy', table: 'login_rate_events' },
   ];
 
-  for (const table of policyTables) {
-    const hasPolicy = content.includes(`CREATE POLICY ${table}_app_policy ON ${table}`) &&
-      content.includes('TO an_app');
-    await check(`5. explicit policy for an_app on '${table}'`, hasPolicy);
+  for (const { policy, table } of independentPolicies) {
+    const stmt = policyStatement(content, policy, table);
+    const valid = Boolean(
+      stmt &&
+      /\bTO\s+an_app\b/i.test(stmt) &&
+      /\bUSING\s*\(\s*true\s*\)/i.test(stmt) &&
+      /\bWITH\s+CHECK\s*\(\s*true\s*\)/i.test(stmt)
+    );
+    await check(`5. exact policy statement for '${policy}' on '${table}'`, valid);
   }
 
-  // 6. Append-only and SELECT-only policies
-  const schemaMigrationsPolicy = content.includes('CREATE POLICY schema_migrations_app_policy ON schema_migrations') &&
-    content.includes('FOR SELECT') &&
-    content.includes('TO an_app');
-  await check('6. schema_migrations is SELECT-only policy for an_app', schemaMigrationsPolicy);
+  // 6. schema_migrations policy (SELECT-only)
+  const schemaStmt = policyStatement(content, 'schema_migrations_app_policy', 'schema_migrations');
+  const schemaValid = Boolean(
+    schemaStmt &&
+    /\bFOR\s+SELECT\b/i.test(schemaStmt) &&
+    /\bTO\s+an_app\b/i.test(schemaStmt) &&
+    /\bUSING\s*\(\s*true\s*\)/i.test(schemaStmt)
+  );
+  await check("6. exact policy statement for 'schema_migrations_app_policy' on 'schema_migrations'", schemaValid);
 
-  const auditSelectPolicy = content.includes('CREATE POLICY audit_logs_app_select_policy ON audit_logs') &&
-    content.includes('FOR SELECT') &&
-    content.includes('TO an_app');
-  const auditInsertPolicy = content.includes('CREATE POLICY audit_logs_app_insert_policy ON audit_logs') &&
-    content.includes('FOR INSERT') &&
-    content.includes('TO an_app');
-  await check('6. audit_logs has dedicated SELECT and INSERT policies for an_app', auditSelectPolicy && auditInsertPolicy);
+  // 7. audit_logs SELECT and INSERT policies
+  const auditSelectStmt = policyStatement(content, 'audit_logs_app_select_policy', 'audit_logs');
+  const auditSelectValid = Boolean(
+    auditSelectStmt &&
+    /\bFOR\s+SELECT\b/i.test(auditSelectStmt) &&
+    /\bTO\s+an_app\b/i.test(auditSelectStmt) &&
+    /\bUSING\s*\(\s*true\s*\)/i.test(auditSelectStmt)
+  );
+  await check("7. exact SELECT policy statement for 'audit_logs_app_select_policy' on 'audit_logs'", auditSelectValid);
 
-  // 7. Tenant isolation policy with USING and WITH CHECK
-  const tenantIsolationPolicy = content.includes('CREATE POLICY tenant_demo_isolation ON tenant_demo_items') &&
-    content.includes("USING (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)") &&
-    content.includes("WITH CHECK (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)");
-  await check('7. tenant_demo_items enforces tenant isolation on USING and WITH CHECK', tenantIsolationPolicy);
+  const auditInsertStmt = policyStatement(content, 'audit_logs_app_insert_policy', 'audit_logs');
+  const auditInsertValid = Boolean(
+    auditInsertStmt &&
+    /\bFOR\s+INSERT\b/i.test(auditInsertStmt) &&
+    /\bTO\s+an_app\b/i.test(auditInsertStmt) &&
+    /\bWITH\s+CHECK\s*\(\s*true\s*\)/i.test(auditInsertStmt)
+  );
+  await check("7. exact INSERT policy statement for 'audit_logs_app_insert_policy' on 'audit_logs'", auditInsertValid);
 
-  // 8. Explicit table privilege restrictions on audit_logs and schema_migrations
+  // 8. tenant_demo_items tenant isolation policy
+  const tenantStmt = policyStatement(content, 'tenant_demo_isolation', 'tenant_demo_items');
+  const tenantValid = Boolean(
+    tenantStmt &&
+    /\bTO\s+an_app\b/i.test(tenantStmt) &&
+    tenantStmt.includes("USING (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)") &&
+    tenantStmt.includes("WITH CHECK (company_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)") &&
+    !/\bUSING\s*\(\s*true\s*\)/i.test(tenantStmt) &&
+    !/\bWITH\s+CHECK\s*\(\s*true\s*\)/i.test(tenantStmt)
+  );
+  await check("8. exact tenant isolation policy statement for 'tenant_demo_isolation' on 'tenant_demo_items'", tenantValid);
+
+  // 9. Explicit privilege restrictions on audit_logs and schema_migrations
   const hasAuditRevoke = /REVOKE\s+UPDATE,\s*DELETE,\s*TRUNCATE\s+ON\s+TABLE\s+audit_logs\s+FROM\s+an_app;/i.test(content);
+  await check('9. privileges: audit_logs mutations revoked from an_app', hasAuditRevoke);
+
   const hasSchemaRevoke = /REVOKE\s+ALL\s+ON\s+TABLE\s+schema_migrations\s+FROM\s+an_app;/i.test(content) &&
     /GRANT\s+SELECT\s+ON\s+TABLE\s+schema_migrations\s+TO\s+an_app;/i.test(content);
-  await check('8. audit_logs mutations revoked and schema_migrations restricted to SELECT', hasAuditRevoke && hasSchemaRevoke);
+  await check('9. privileges: schema_migrations is SELECT-only for an_app', hasSchemaRevoke);
 
-  // 9. PUBLIC routine execution revocation
+  // 10. Table ownership scopes from database/table_ownership.json
+  const ownershipExists = fs.existsSync(tableOwnershipPath);
+  const ownershipData: Array<{ table: string; scope: string }> = ownershipExists
+    ? JSON.parse(fs.readFileSync(tableOwnershipPath, 'utf8'))
+    : [];
+  const ownershipMap = new Map(ownershipData.map((item) => [item.table, item.scope]));
+
+  const expectedScopes: Record<string, string> = {
+    platform_users: 'global',
+    companies: 'global',
+    user_sessions: 'global',
+    login_rate_events: 'global',
+    schema_migrations: 'global',
+    company_memberships: 'shared',
+    audit_logs: 'shared',
+    tenant_demo_items: 'tenant',
+  };
+
+  const allScopesMatch = ownershipExists && Object.entries(expectedScopes).every(
+    ([tbl, expectedScope]) => ownershipMap.get(tbl) === expectedScope
+  );
+  await check('10. table ownership scopes match catalog in database/table_ownership.json', allScopesMatch);
+
+  // 11. PUBLIC routine execution revocation
   const hasPublicRoutineRevoke = /REVOKE\s+EXECUTE\s+ON\s+ALL\s+ROUTINES\s+IN\s+SCHEMA\s+public\s+FROM\s+PUBLIC;/i.test(content);
-  await check('9. explicit revocation of EXECUTE on ALL routines in schema public from PUBLIC', hasPublicRoutineRevoke);
+  await check('11. explicit revocation of EXECUTE on ALL routines in schema public from PUBLIC', hasPublicRoutineRevoke);
 
-  // 10. Untrusted Data API role revokes (anon & authenticated)
+  // 12. Untrusted Data API role revokes (anon & authenticated)
   const hasAnonRevokes = content.includes("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;") &&
     content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;") &&
     content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon;") &&
@@ -92,16 +154,16 @@ async function runTests() {
     content.includes("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated;") &&
     content.includes("REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM authenticated;") &&
     content.includes("REVOKE CREATE ON SCHEMA public FROM authenticated;");
-  await check('10. Data API roles (anon, authenticated) have tables, sequences, routines, and CREATE revoked', hasAnonRevokes && hasAuthRevokes);
+  await check('12. Data API roles (anon, authenticated) have tables, sequences, routines, and CREATE revoked', hasAnonRevokes && hasAuthRevokes);
 
-  // 11. Default privileges configured
+  // 13. Default privileges configured
   const hasDefaultPrivileges = content.includes('ALTER DEFAULT PRIVILEGES FOR ROLE') &&
     content.includes('REVOKE EXECUTE ON ROUTINES FROM PUBLIC');
-  await check('11. secure default privileges configured for future objects', hasDefaultPrivileges);
+  await check('13. secure default privileges configured for future objects', hasDefaultPrivileges);
 
-  // 12. service_role preservation
+  // 14. service_role preservation
   const touchesServiceRole = /service_role/i.test(content);
-  await check('12. service_role untouched and preserved without modification', !touchesServiceRole);
+  await check('14. service_role untouched and preserved without modification', !touchesServiceRole);
 
   const { exitCode } = summary();
   process.exit(exitCode);
