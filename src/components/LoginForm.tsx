@@ -84,8 +84,8 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
   return (
     <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl backdrop-blur-md">
       <div className="mb-6 text-center">
-        <h2 className="text-xl font-bold text-white mb-1">تسجيل الدخول للمنصة</h2>
-        <p className="text-xs text-slate-400">نظام هوية مستقل ذو سيادة محلية (لا Firebase)</p>
+        <h2 className="text-xl font-bold text-white mb-1">تسجيل الدخول</h2>
+        <p className="text-xs text-slate-400">أدخل بيانات حسابك للوصول إلى النظام</p>
       </div>
 
       {error && (

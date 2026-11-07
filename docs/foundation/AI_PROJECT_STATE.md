@@ -88,6 +88,11 @@
     4. Scope Control: Other P05 modules (Inventory, Purchasing, Cash, Fleet, POS) are NOT started.
   - P05_STARTED: `YES` (Accounting Core slice only)
   - OTHER_MODULES_STARTED: `NO`
+- **AN-UI-SHELL-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered clean Arabic product-language UI shell with vertical scrollable right sidebar (AppSidebar), role label translation (roleLabels), and removal of infrastructure/developer jargon (Firebase, Foundation Repair, P04, raw snake_case roles) from all user-facing screens.
+  - P05_STARTED: `YES` (Accounting Core slice UI reorganized into sidebar)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

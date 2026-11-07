@@ -1,0 +1,25 @@
+# AN-UI-SHELL-1 Results
+
+- **Package Name**: AN-UI-SHELL-1
+- **Date**: 2026-11-07 (UTC)
+- **HEAD SHA Before**: Working Tree
+- **HEAD SHA After**: Working Tree
+- **Files Created**:
+  - `src/components/shell/roleLabels.ts`
+  - `src/components/shell/AppSidebar.tsx`
+  - `scripts/verifyUiShell1.ts`
+  - `docs/foundation/AN-UI-SHELL-1_RESULTS.md`
+  - `evidence/ui-shell-1/acceptance-rows.md`
+  - `evidence/ui-shell-1/usability.md`
+- **Files Modified**:
+  - `src/App.tsx`
+  - `src/components/CompaniesPanel.tsx`
+  - `src/components/LoginForm.tsx`
+  - `package.json`
+  - `docs/foundation/AI_PROJECT_STATE.md`
+- **UI & Jargon Cleanup**:
+  - Scrollable vertical right sidebar (AppSidebar): YES
+  - Infrastructure and developer jargon removed (Firebase, Foundation Repair, P04, raw role codes): YES
+  - Companies and Accounting modules reachable from sidebar: YES
+  - P05_STARTED: YES (Accounting core slice retained and reorganized)
+  - CI_STATUS: PENDING

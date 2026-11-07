@@ -93,8 +93,8 @@ export function CompaniesPanel({ userRole }: CompaniesPanelProps) {
             <Building2 className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">إدارة الشركات والمستأجرين</h3>
-            <p className="text-xs text-slate-400">عزل سياق الشركات والأدوار (P04 Org RBAC)</p>
+            <h3 className="text-lg font-bold text-white">إدارة الشركات</h3>
+            <p className="text-xs text-slate-400">إنشاء الشركات وإدارتها ضمن صلاحياتك المعزولة</p>
           </div>
         </div>
 

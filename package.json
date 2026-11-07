@@ -41,6 +41,7 @@
     "test:tenant-scope-middleware": "tsx scripts/verifyTenantScopeMiddleware.ts",
     "test:migration-010": "tsx scripts/verifyMigration010.ts",
     "test:p05-accounting-core": "tsx scripts/verifyP05AccountingCore.ts",
+    "test:ui-shell-1": "tsx scripts/verifyUiShell1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts"
