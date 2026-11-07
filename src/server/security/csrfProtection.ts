@@ -95,7 +95,7 @@ export function createCsrfProtection(options: CsrfOptions = {}): RequestHandler 
     const referer = (req.headers.referer as string) || '';
 
     if (origin) {
-      if (!validateOrigin(origin)) {
+      if (!validateOrigin(origin, options.allowedOrigins)) {
         res.status(403).json({
           error: 'Forbidden',
           code: 'CSRF_ORIGIN',
@@ -116,7 +116,7 @@ export function createCsrfProtection(options: CsrfOptions = {}): RequestHandler 
         return;
       }
 
-      if (!validateOrigin(refererOrigin)) {
+      if (!validateOrigin(refererOrigin, options.allowedOrigins)) {
         res.status(403).json({
           error: 'Forbidden',
           code: 'CSRF_ORIGIN',

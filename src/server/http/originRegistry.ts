@@ -28,20 +28,16 @@ export function getAllowedOrigins(): string[] {
  * Validates if an origin is permitted.
  * Strictly prevents wildcard reflection and spoofing.
  */
-export function validateOrigin(origin: string | undefined): boolean {
+export function validateOrigin(origin: string | undefined, additionalOrigins: string[] = []): boolean {
   if (!origin) return false;
 
   const allowed = getAllowedOrigins();
+  const allAllowed = new Set([...allowed, ...additionalOrigins]);
   
   // Exact match only for security
-  if (allowed.includes(origin)) {
+  if (allAllowed.has(origin)) {
     return true;
   }
-
-  // AI Studio specific subdomains if needed (though we have explicit ones above)
-  // The user requested NO wide wildcards like *.run.app, 
-  // but if AI Studio URLs change dynamically, we might need a tighter regex.
-  // Given the strict instruction, we stick to the explicit ones unless proven insufficient.
   
   return false;
 }

@@ -36,7 +36,7 @@ export class AuthService {
 
     const user = await this.userStore.findByUsername(normalizedUsername);
 
-    if (!user) {
+    if (!user || !user.isActive) {
       // Execute constant-time dummy password verification to prevent username enumeration via timing
       const dummyHash = await getDummyHash();
       await verifyPassword(plainPassword, dummyHash);

@@ -81,6 +81,7 @@ describe('AuthService Reconciliation', () => {
     });
     
     await expect(authService.bootstrapPlatformAdminFromEnv()).rejects.toThrow('is inactive');
+    expect(mockUserStore.updatePasswordHash).not.toHaveBeenCalled();
   });
 
   it('should fail if role is not platform_admin', async () => {
@@ -95,6 +96,7 @@ describe('AuthService Reconciliation', () => {
     });
     
     await expect(authService.bootstrapPlatformAdminFromEnv()).rejects.toThrow('already exists with role \'user\'');
+    expect(mockUserStore.updatePasswordHash).not.toHaveBeenCalled();
   });
 
   it('should fail if database update affects zero rows', async () => {

@@ -37,6 +37,11 @@ describe('Origin Validation Registry', () => {
     expect(validateOrigin('http://localhost:3000')).toBe(false);
   });
 
+  it('should allow origins passed as additionalOrigins', () => {
+    expect(validateOrigin('https://custom.com', ['https://custom.com'])).toBe(true);
+    expect(validateOrigin('https://custom.com', ['https://other.com'])).toBe(false);
+  });
+
   it('should reject malformed or fake origins', () => {
     expect(validateOrigin('https://fake-ais-dev.run.app')).toBe(false);
     expect(validateOrigin('https://ais-dev-6vklnibghlun634krwmxyl.google.com.attacker.com')).toBe(false);

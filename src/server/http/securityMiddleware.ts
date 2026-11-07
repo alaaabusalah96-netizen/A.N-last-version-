@@ -40,7 +40,7 @@ export function applySecurityMiddleware(app: Application): void {
           }
         : false,
       crossOriginEmbedderPolicy: false,
-      frameguard: false, // Must be false to allow frame-ancestors to work
+      frameguard: false, // Required for frame-ancestors support
     })
   );
 }

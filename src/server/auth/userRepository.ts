@@ -36,7 +36,7 @@ export class UserRepository {
     const sql = `
       SELECT id, username, password_hash as "passwordHash", role, created_at as "createdAt", is_active as "isActive"
       FROM platform_users
-      WHERE username = $1 AND is_active = true;
+      WHERE username = $1;
     `;
 
     const res = await executor.query<User>(sql, [normalized]);
@@ -49,7 +49,7 @@ export class UserRepository {
     const sql = `
       SELECT id, username, password_hash as "passwordHash", role, created_at as "createdAt", is_active as "isActive"
       FROM platform_users
-      WHERE id = $1 AND is_active = true;
+      WHERE id = $1;
     `;
 
     const res = await executor.query<User>(sql, [id]);
