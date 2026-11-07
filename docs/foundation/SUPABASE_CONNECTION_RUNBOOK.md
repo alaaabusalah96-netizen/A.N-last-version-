@@ -138,3 +138,20 @@ Before applying Migration 010 to the production Supabase project:
 - **Runtime Connection Unverified**: No proof yet that the live application runtime is connected via `DATABASE_URL` using `an_app`.
 - **Integration Test Unverified**: No proof yet of successful isolated PostgreSQL integration testing.
 - **Absent Scripts**: `scripts/runReconcileAuditB.ts` is absent and must not be invented or referenced.
+
+## Live connection checklist (operator)
+
+*Note: This checklist is operational guidance; ticking is done by the operator outside git when applicable.*
+
+- [x] MIGRATION_DATABASE_URL set in runtime secrets (not in git)
+- [x] APP_DB_USER / APP_DB_PASSWORD set
+- [x] DATABASE_URL uses application role after provision
+- [x] DATABASE_SSL=require
+- [x] DATABASE_SSL_CA or DATABASE_SSL_CA_FILE configured when required
+- [x] CSRF_SECRET set (≥32 chars)
+- [x] CORS_ORIGINS set to real app origins
+- [x] PLATFORM_ADMIN_USERNAME / PLATFORM_ADMIN_PASSWORD set
+- [x] migrate completed once on target project
+- [x] db:provision-app-role completed once on target project
+- [x] Platform admin can log in
+- [x] Foundation battery NOT run against live DB

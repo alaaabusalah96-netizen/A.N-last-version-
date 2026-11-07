@@ -65,6 +65,26 @@
     4. Dev Preview Startup: Hardened `server.ts` to skip platform administrator bootstrap with a clear warning in development/preview when `DATABASE_URL` is unconfigured, while retaining fatal fail-closed behavior for mispaired admin credentials and production startup.
   - P05_STARTED: `NO`
   - SUPABASE_TOUCHED: `NO` (repository repair only; remote database untouched)
+- **AN-DOC-SYNC-LIVE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Operator-confirmed live facts (no secrets):
+    1. Application authentication (platform admin login) works against the configured database.
+    2. Environment secrets are configured in the runtime host (Google AI Studio / deployment), not in git.
+    3. DATABASE_SSL=require is in use for live connection policy.
+    4. Foundation security packages through AN-FOUNDATION-SECURITY-REPAIR-7 / SECURITY-BASELINE remain IMPLEMENTED.
+  - Explicit non-claims:
+    - Do NOT set SECURITY_VERIFIED.
+    - Do NOT set PRODUCTION_READY.
+    - Do NOT set INTEGRATION_TESTED solely because login works.
+    - CI_STATUS stays PENDING until a green GitHub Actions run SHA is recorded.
+  - P05_STARTED: `NO`
+  - SUPABASE_OPERATOR_CONNECTED: `YES` (operator-confirmed; no project URL or credentials in docs)
+
+### Current Operational Posture
+- Auth login: operational (operator-confirmed)
+- Live DB: operator-configured via environment secrets
+- Next gate: green CI on main OR explicit approval to start P05
+- Forbidden: running foundation battery against live DB
 
 ---
 
