@@ -38,5 +38,20 @@
     "table": "tenant_demo_items",
     "scope": "tenant",
     "reason": "Company-owned tenant demo items"
+  },
+  {
+    "table": "accounts",
+    "scope": "tenant",
+    "reason": "Tenant chart of accounts"
+  },
+  {
+    "table": "journal_entries",
+    "scope": "tenant",
+    "reason": "Tenant journal entries skeleton"
+  },
+  {
+    "table": "journal_lines",
+    "scope": "tenant",
+    "reason": "Tenant journal entry lines skeleton"
   }
 ]

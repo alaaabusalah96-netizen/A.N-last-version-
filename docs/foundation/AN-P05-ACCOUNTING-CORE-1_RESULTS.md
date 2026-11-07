@@ -1,0 +1,35 @@
+# AN-P05-ACCOUNTING-CORE-1 Results
+
+- **Package Name**: AN-P05-ACCOUNTING-CORE-1
+- **Date**: 2026-11-07 (UTC)
+- **HEAD SHA Before**: Working Tree
+- **HEAD SHA After**: Working Tree
+- **UI Visibility Compliance**:
+  - `App → المحاسبة → AccountingWorkspace`
+  - `AccountsPanel`: Chart of accounts list, seed default button, create new account modal
+- **Files Created**:
+  - `database/migrations/011_accounting_core.sql`
+  - `src/server/accounting/accountTypes.ts`
+  - `src/server/accounting/accountRepository.ts`
+  - `src/server/accounting/accountService.ts`
+  - `src/server/routes/accountingRoutes.ts`
+  - `src/components/accounting/AccountingWorkspace.tsx`
+  - `src/components/accounting/AccountsPanel.tsx`
+  - `scripts/verifyP05AccountingCore.ts`
+  - `docs/foundation/AN-P05-ACCOUNTING-CORE-1_RESULTS.md`
+  - `evidence/p05-accounting-core-1/acceptance-rows.md`
+  - `evidence/p05-accounting-core-1/usability.md`
+- **Files Modified**:
+  - `src/server/routes/index.ts` (mounted `/accounting`)
+  - `src/App.tsx` (added top navigation bar to `المحاسبة`)
+  - `package.json` (added `test:p05-accounting-core`)
+  - `database/table_ownership.json` (registered `accounts`, `journal_entries`, `journal_lines` as tenant)
+  - `docs/foundation/AI_PROJECT_STATE.md`
+  - `docs/foundation/MVP_SCOPE.md`
+- **Confirmations**:
+  - Migrations 001–010 modified: NO (Added 011 only)
+  - Firebase used: NO
+  - Foundation battery run against live Supabase: NO
+  - Other modules started (Inventory, Purchasing, Cash): NO
+  - P05_STARTED: YES (Accounting core slice only)
+  - CI_STATUS: PENDING

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, LogOut, Layers, CheckCircle2, User, Key, RefreshCw } from 'lucide-react';
+import { ShieldCheck, LogOut, Layers, CheckCircle2, User, Key, RefreshCw, Building2, BookOpen } from 'lucide-react';
 import { LoginForm } from './components/LoginForm.js';
 import { CompaniesPanel } from './components/CompaniesPanel.js';
+import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
 import { apiFetch } from './lib/apiClient.js';
 
 interface AuthUser {
@@ -15,6 +16,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting'>('companies');
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -86,7 +88,7 @@ export default function App() {
           </div>
         ) : currentUser ? (
           <div className="w-full flex flex-col gap-6">
-            {/* Authenticated Dashboard Panel */}
+            {/* Authenticated Dashboard Header */}
             <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl">
               <div className="flex items-center justify-between pb-6 border-b border-slate-800">
                 <div className="flex items-center gap-3">
@@ -114,33 +116,47 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="pt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4">
-                  <p className="text-xs text-slate-500 mb-1 flex items-center gap-1.5">
-                    <Key className="w-3.5 h-3.5 text-indigo-400" />
-                    نوع الدور (Role)
-                  </p>
-                  <p className="text-sm font-semibold text-indigo-300">{currentUser.role}</p>
-                </div>
+              {/* Primary App Module Navigation Bar */}
+              <div className="pt-6 flex items-center gap-3">
+                <button
+                  onClick={() => setActiveNav('companies')}
+                  className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeNav === 'companies'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 border border-indigo-500/40'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  <Building2 className="w-4 h-4" />
+                  <span>إدارة الشركات</span>
+                </button>
 
-                <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4">
-                  <p className="text-xs text-slate-500 mb-1 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    حوكمة الصلاحيات
-                  </p>
-                  <p className="text-sm font-semibold text-emerald-400">RBAC + Tenant Isolation</p>
-                </div>
+                <button
+                  onClick={() => setActiveNav('accounting')}
+                  className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeNav === 'accounting'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 border border-indigo-500/40'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>المحاسبة</span>
+                </button>
               </div>
             </div>
 
-            {/* Companies & Tenant Isolation Panel */}
-            <CompaniesPanel userRole={currentUser.role} />
+            {/* Selected Module View */}
+            {activeNav === 'companies' ? (
+              <CompaniesPanel userRole={currentUser.role} />
+            ) : (
+              <AccountingWorkspace />
+            )}
           </div>
         ) : (
           /* Login Form View */
           <LoginForm onLoginSuccess={(user) => setCurrentUser(user)} />
         )}
       </main>
+
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500">

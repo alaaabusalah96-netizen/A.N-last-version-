@@ -79,11 +79,21 @@
     - CI_STATUS stays PENDING until a green GitHub Actions run SHA is recorded.
   - P05_STARTED: `NO`
   - SUPABASE_OPERATOR_CONNECTED: `YES` (operator-confirmed; no project URL or credentials in docs)
+- **AN-P05-ACCOUNTING-CORE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered first P05 business module slice (Accounting Core & COA UI).
+    1. Database: Added migration 011_accounting_core.sql with tenant-scoped `accounts`, `journal_entries`, `journal_lines` tables with forced RLS & an_app isolation policy. Registered tables in `table_ownership.json`.
+    2. Backend: Created accountTypes, accountRepository, accountService (list, create, seedDefaultCoa), and accountingRoutes mounted at `/api/accounting`.
+    3. Frontend (UI_VISIBILITY_RULE): Added top navigation in App.tsx to "المحاسبة", rendered AccountingWorkspace with company selector, AccountsPanel (COA list, seed default button, create account modal), and Journal Entries placeholder.
+    4. Scope Control: Other P05 modules (Inventory, Purchasing, Cash, Fleet, POS) are NOT started.
+  - P05_STARTED: `YES` (Accounting Core slice only)
+  - OTHER_MODULES_STARTED: `NO`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
 - Live DB: operator-configured via environment secrets
-- Next gate: green CI on main OR explicit approval to start P05
+- P05 Accounting Core: IMPLEMENTED & UI WIRED
+- Next gate: green CI on main OR explicit approval for subsequent P05 slices
 - Forbidden: running foundation battery against live DB
 
 ---
@@ -100,6 +110,5 @@
 
 ## 4. محددات الأمان وقاعدة عدم البدء التلقائي
 - **حظر Firebase**: مؤكد ومفروض قطعيًا (`FORBIDDEN`).
-- **الموقف الحالي**: توقف تام وانتظار المراجعة والاعتماد البشري.
-- **بدء P05**: ممنوع منعًا باتًا البدء في P05 دون موافقة صريحة ومباشرة.
-- **P05_STARTED**: `NO`.
+- **بدء P05**: تم البدء رسمياً في النواة المحاسبية (Accounting Core Slice). باقي الوحدات الخارجية متوقفة.
+- **P05_STARTED**: `YES` (Accounting Core slice only).
