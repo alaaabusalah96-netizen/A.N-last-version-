@@ -1,18 +1,16 @@
-import { isProduction } from '../config/env.js';
+import { isProduction, TRUSTED_PREVIEW_HOSTS } from '../config/env.js';
 
 /**
  * Unified Registry of Allowed Origins for CORS and CSRF
  */
-
-const AI_STUDIO_DEV = 'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app';
-const AI_STUDIO_PRE = 'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app';
 
 export function getAllowedOrigins(): string[] {
   const envOrigins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
     : [];
 
-  const baseOrigins = [AI_STUDIO_DEV, AI_STUDIO_PRE, ...envOrigins];
+  const previewOrigins = TRUSTED_PREVIEW_HOSTS.map(host => `https://${host}`);
+  const baseOrigins = [...previewOrigins, ...envOrigins];
 
   if (!isProduction()) {
     baseOrigins.push('http://localhost:3000');

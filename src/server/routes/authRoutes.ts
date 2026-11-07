@@ -108,15 +108,7 @@ authRoutes.post(
 
     // 5. Session Cookie
     const cookieName = getSessionCookieName();
-    const isPreview = isAppPreview(req.get('host'));
-    
-    res.cookie(cookieName, session.id, {
-      httpOnly: true,
-      secure: isProduction() || isPreview,
-      sameSite: isPreview ? 'none' : 'lax',
-      path: '/',
-      expires: session.expiresAt,
-    });
+    res.cookie(cookieName, session.id, getSessionCookieOptions(req, session.expiresAt));
 
     // 6. Rotate CSRF Token bound to new session
     const csrfToken = generateCsrfToken(session.id);
@@ -155,12 +147,7 @@ authRoutes.post(
       );
     }
 
-    res.clearCookie(cookieName, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-    });
+    res.clearCookie(cookieName, getSessionCookieOptions(req));
 
     // Rotate CSRF token for unauthenticated state
     const csrfToken = generateCsrfToken('');
@@ -193,12 +180,7 @@ authRoutes.post(
     );
 
     const cookieName = getSessionCookieName();
-    res.clearCookie(cookieName, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-    });
+    res.clearCookie(cookieName, getSessionCookieOptions(req));
 
     const csrfToken = generateCsrfToken('');
     setCsrfCookie(req, res, csrfToken);
@@ -211,6 +193,23 @@ authRoutes.post(
     });
   })
 );
+
+/**
+ * Shared Session Cookie Options
+ * Ensures login and logout use identical attributes (SameSite, Secure, Path).
+ */
+function getSessionCookieOptions(req: Request, expires?: Date) {
+  const isProd = isProduction();
+  const isPreview = isAppPreview(req.get('host'));
+
+  return {
+    httpOnly: true,
+    secure: isProd || isPreview,
+    sameSite: (isPreview ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
+    path: '/',
+    ...(expires ? { expires } : {}),
+  };
+}
 
 // GET /api/auth/me
 authRoutes.get(

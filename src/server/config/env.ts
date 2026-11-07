@@ -17,17 +17,28 @@ export function assertValidNodeEnv(): void {
 }
 
 /**
+ * Trusted Google Cloud Run preview domains for AI Studio.
+ */
+export const TRUSTED_PREVIEW_HOSTS = [
+  'ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+  'ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+];
+
+/**
  * Safely determines if the application is running in a valid AI Studio Preview context.
- * Requires both the explicit APP_PREVIEW_MODE flag and a valid .run.app host.
+ * Requires:
+ * 1. APP_PREVIEW_MODE === 'true'
+ * 2. NODE_ENV !== 'production'
+ * 3. Host matches an explicit trusted preview domain.
  */
 export function isAppPreview(host: string | undefined): boolean {
-  const isPreviewMode = process.env.APP_PREVIEW_MODE === 'true';
-  if (!isPreviewMode || !host) return false;
+  const isPreviewFlag = process.env.APP_PREVIEW_MODE === 'true';
+  const isProd = process.env.NODE_ENV === 'production';
 
-  // Security: Only allow preview behavior on Google Cloud Run preview domains
-  const isValidPreviewHost = host.endsWith('.run.app');
-  
-  // Additional safety: Production (which should be on a custom domain) 
-  // must never trigger this even if the flag is accidentally set.
-  return isValidPreviewHost;
+  if (!isPreviewFlag || !host || isProd) {
+    return false;
+  }
+
+  // Exact match only against trusted hosts to prevent spoofing
+  return TRUSTED_PREVIEW_HOSTS.includes(host);
 }
