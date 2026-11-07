@@ -14,12 +14,13 @@ export default defineConfig(() => {
     server: {
       port: 3000,
       host: '0.0.0.0',
+      allowedHosts: true as const,
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
           target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:3001',
-          changeOrigin: true,
+          changeOrigin: false,
         },
       },
     },

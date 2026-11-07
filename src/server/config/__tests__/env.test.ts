@@ -30,7 +30,7 @@ describe('Environment Detection (Preview vs Production)', () => {
     process.env.APP_PREVIEW_MODE = 'true';
     expect(isAppPreview('myapp-preview.run.app')).toBe(false);
     expect(isAppPreview('my-production-domain.com')).toBe(false);
-    expect(isAppPreview('localhost:3000')).toBe(false);
+    expect(isAppPreview('evil-site.com')).toBe(false);
   });
 
   it('should NOT detect Preview if NODE_ENV is production', () => {

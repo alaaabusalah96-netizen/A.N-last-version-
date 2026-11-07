@@ -29,7 +29,7 @@ export const TRUSTED_PREVIEW_HOSTS = [
  * Requires:
  * 1. APP_PREVIEW_MODE === 'true'
  * 2. NODE_ENV !== 'production'
- * 3. Host matches an explicit trusted preview domain.
+ * 3. Host matches an explicit trusted preview domain (or localhost during preview mode).
  */
 export function isAppPreview(host: string | undefined): boolean {
   const isPreviewFlag = process.env.APP_PREVIEW_MODE === 'true';
@@ -39,6 +39,9 @@ export function isAppPreview(host: string | undefined): boolean {
     return false;
   }
 
-  // Exact match only against trusted hosts to prevent spoofing
-  return TRUSTED_PREVIEW_HOSTS.includes(host);
+  // Strip port if present (e.g. host:3000 or host:443)
+  const cleanHost = host.split(':')[0].trim().toLowerCase();
+
+  // Allow trusted preview hosts, or local internal loopback during dev preview mode
+  return TRUSTED_PREVIEW_HOSTS.includes(cleanHost) || cleanHost === '127.0.0.1' || cleanHost === 'localhost';
 }

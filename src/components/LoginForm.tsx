@@ -13,6 +13,8 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
   const [initializingCsrf, setInitializingCsrf] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [showPassword, setShowPassword] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     async function initCsrf() {
@@ -45,9 +47,11 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
     setLoading(true);
 
     try {
+      const trimmedUsername = username.trim().toLowerCase();
+      const trimmedPassword = password.trim();
       const res = await apiFetch('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: trimmedUsername, password: trimmedPassword }),
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -117,14 +121,25 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
               <Lock className="w-4 h-4" />
             </span>
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               required
               disabled={initializingCsrf}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full pr-10 pl-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition disabled:opacity-50"
+              className="w-full pr-10 pl-10 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition disabled:opacity-50"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 hover:text-slate-200 cursor-pointer"
+            >
+              {showPassword ? (
+                <span className="text-xs select-none">إخفاء</span>
+              ) : (
+                <span className="text-xs select-none">إظهار</span>
+              )}
+            </button>
           </div>
         </div>
 
