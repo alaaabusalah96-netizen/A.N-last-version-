@@ -83,6 +83,41 @@ export class UserRepository {
     const res = await executor.query(sql, [normalizedUsername, newPasswordHash]);
     return (res.rowCount ?? 0) === 1;
   }
+
+  async listUsersAdmin(): Promise<Omit<User, 'passwordHash'>[]> {
+    const executor = await this.getExecutor();
+
+    const sql = `
+      SELECT id, username, role, created_at as "createdAt", is_active as "isActive"
+      FROM platform_users
+      ORDER BY created_at DESC;
+    `;
+
+    const res = await executor.query<Omit<User, 'passwordHash'>>(sql);
+    return res.rows;
+  }
+
+  async setUserActive(userId: string, isActive: boolean): Promise<boolean> {
+    const executor = await this.getExecutor();
+    const sql = `
+      UPDATE platform_users
+      SET is_active = $2
+      WHERE id = $1;
+    `;
+    const res = await executor.query(sql, [userId, isActive]);
+    return (res.rowCount ?? 0) === 1;
+  }
+
+  async updatePasswordHashById(userId: string, newPasswordHash: string): Promise<boolean> {
+    const executor = await this.getExecutor();
+    const sql = `
+      UPDATE platform_users
+      SET password_hash = $2
+      WHERE id = $1;
+    `;
+    const res = await executor.query(sql, [userId, newPasswordHash]);
+    return (res.rowCount ?? 0) === 1;
+  }
 }
 
 export const defaultUserRepository = new UserRepository();

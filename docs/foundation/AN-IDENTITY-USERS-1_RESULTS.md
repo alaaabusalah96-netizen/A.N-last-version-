@@ -1,0 +1,30 @@
+# AN-IDENTITY-USERS-1 Results
+
+- **Package Name**: AN-IDENTITY-USERS-1
+- **Date**: 2026-11-07 (UTC)
+- **Files Created**:
+  - `src/server/identity/userAdminService.ts`
+  - `src/server/routes/userAdminRoutes.ts`
+  - `src/components/users/UsersAdminWorkspace.tsx`
+  - `scripts/verifyIdentityUsers1.ts`
+  - `docs/foundation/AN-IDENTITY-USERS-1_RESULTS.md`
+  - `evidence/identity-users-1/acceptance-rows.md`
+  - `evidence/identity-users-1/usability.md`
+- **Files Modified**:
+  - `src/server/auth/userRepository.ts`
+  - `src/server/org/membershipRepository.ts`
+  - `src/server/org/membershipStore.ts`
+  - `src/server/routes/index.ts`
+  - `src/App.tsx`
+  - `src/components/shell/AppSidebar.tsx`
+  - `package.json`
+  - `docs/foundation/AI_PROJECT_STATE.md`
+- **Identity Confirmations**:
+  - User admin routes (`/api/users`) enforced with USER_READ/USER_WRITE: YES
+  - Business rules enforced in `userAdminService` (e.g., privilege escalation guards): YES
+  - Membership administration added: YES
+  - Audit logging implemented for mutations: YES
+  - UI workspace for admin users implemented: YES
+  - No database migration needed for schema extension (used existing tables): YES
+  - P05_STARTED: YES
+  - CI_STATUS: PENDING

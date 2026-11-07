@@ -1,10 +1,10 @@
 import React from 'react';
-import { Building2, BookOpen, LogOut, Layers, UserCheck } from 'lucide-react';
+import { Building2, BookOpen, LogOut, Layers, UserCheck, Users } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
 interface AppSidebarProps {
-  activeNav: 'companies' | 'accounting';
-  onNavigate: (nav: 'companies' | 'accounting') => void;
+  activeNav: 'companies' | 'accounting' | 'users';
+  onNavigate: (nav: 'companies' | 'accounting' | 'users') => void;
   userName: string;
   userRole: string;
   onLogout: () => void;
@@ -71,6 +71,18 @@ export function AppSidebar({
         >
           <BookOpen className="w-4 h-4 shrink-0" />
           <span>المحاسبة</span>
+        </button>
+
+        <button
+          onClick={() => onNavigate('users')}
+          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+            activeNav === 'users'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 border border-indigo-500/30'
+              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+          }`}
+        >
+          <Users className="w-4 h-4 shrink-0" />
+          <span>المستخدمون</span>
         </button>
       </div>
 

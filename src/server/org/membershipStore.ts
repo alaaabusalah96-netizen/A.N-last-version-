@@ -44,8 +44,16 @@ export class MembershipStore {
     return this.repo.listByCompany(companyId, customExecutor);
   }
 
-  async setMembershipStatus(userId: string, companyId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
-    return this.repo.setMembershipStatus(userId, companyId, isActive, customExecutor);
+  async listAllByCompany(companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
+    return this.repo.listAllByCompany(companyId, customExecutor);
+  }
+
+  async updateRole(userId: string, companyId: string, role: RoleName, customExecutor?: DbExecutor): Promise<boolean> {
+    return this.repo.updateMembershipRole(userId, companyId, role, customExecutor);
+  }
+
+  async setStatusById(membershipId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
+    return this.repo.setMembershipStatusById(membershipId, isActive, customExecutor);
   }
 
   clear(): void {

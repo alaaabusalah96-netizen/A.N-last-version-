@@ -103,6 +103,11 @@
   - Summary: Aligned AccountsPanel UI with server-side accounting permissions by gating `canCreate` and `canSeed` action buttons based on user role (`platform_admin` / `company_admin`), ensuring fail-closed UI behavior for read-only roles (`company_user`).
   - P05_STARTED: `YES` (Accounting UI gates aligned)
   - CI_STATUS: `PENDING`
+- **AN-IDENTITY-USERS-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered operational user and membership administration using existing tables (`platform_users`, `company_memberships`). Added UserAdminService with business rules (create user, add membership, toggle active, reset password) and enforced domain security (USER_READ/USER_WRITE). UI provides a dedicated workspace for admins in the sidebar. Audit logs implemented for all modifications.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

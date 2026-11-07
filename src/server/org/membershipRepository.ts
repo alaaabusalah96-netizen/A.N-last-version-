@@ -73,15 +73,40 @@ export class MembershipRepository {
     return res.rows;
   }
 
-  async setMembershipStatus(userId: string, companyId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
+  async listAllByCompany(companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
+    const executor = await this.getExecutor(customExecutor);
+
+    const sql = `
+      SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
+      FROM company_memberships
+      WHERE company_id = $1;
+    `;
+
+    const res = await executor.query<CompanyMembership>(sql, [companyId]);
+    return res.rows;
+  }
+
+  async updateMembershipRole(userId: string, companyId: string, role: RoleName, customExecutor?: DbExecutor): Promise<boolean> {
     const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       UPDATE company_memberships
-      SET is_active = $3
+      SET role = $3
       WHERE user_id = $1 AND company_id = $2;
     `;
-    const res = await executor.query(sql, [userId, companyId, isActive]);
+    const res = await executor.query(sql, [userId, companyId, role]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async setMembershipStatusById(membershipId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
+    const executor = await this.getExecutor(customExecutor);
+
+    const sql = `
+      UPDATE company_memberships
+      SET is_active = $2
+      WHERE id = $1;
+    `;
+    const res = await executor.query(sql, [membershipId, isActive]);
     return (res.rowCount ?? 0) > 0;
   }
 }
