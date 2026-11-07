@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AuthService } from '../src/server/auth/authService.js';
-import { UserStore } from '../src/server/auth/userStore.js';
-import { SessionStore } from '../src/server/auth/sessionStore.js';
+import { AuthService } from '../authService.js';
+import { UserStore } from '../userStore.js';
+import { SessionStore } from '../sessionStore.js';
 
 describe('AuthService - Platform Admin Credential Reconciliation', () => {
   let mockUserStore: any;
@@ -19,10 +19,10 @@ describe('AuthService - Platform Admin Credential Reconciliation', () => {
     authService = new AuthService(mockUserStore, mockSessionStore);
   });
 
-  it('should return false when reconciliation flag is disabled', async () => {
+  it('should return undefined when reconciliation flag is disabled', async () => {
     process.env.PLATFORM_ADMIN_CREDENTIALS_RECONCILE = 'false';
     const result = await authService.reconcilePlatformAdminPassword();
-    expect(result).toBe(false);
+    expect(result).toBeUndefined();
   });
 
   it('should throw error when missing account during reconciliation', async () => {
@@ -70,13 +70,12 @@ describe('AuthService - Platform Admin Credential Reconciliation', () => {
 
     mockUserStore.updatePasswordHash.mockResolvedValueOnce(true);
 
-    const result = await authService.reconcilePlatformAdminPassword();
-    expect(result).toBe(true);
+    await authService.reconcilePlatformAdminPassword();
     expect(mockUserStore.updatePasswordHash).toHaveBeenCalledTimes(1);
     expect(mockUserStore.updatePasswordHash).toHaveBeenCalledWith('admin', expect.any(String));
   });
 
-  it('should return false or handle when zero rows updated', async () => {
+  it('should throw error when zero rows updated', async () => {
     process.env.PLATFORM_ADMIN_CREDENTIALS_RECONCILE = 'true';
     process.env.PLATFORM_ADMIN_USERNAME = 'admin';
     process.env.PLATFORM_ADMIN_PASSWORD = 'verysecurepassword123';
@@ -91,7 +90,8 @@ describe('AuthService - Platform Admin Credential Reconciliation', () => {
 
     mockUserStore.updatePasswordHash.mockResolvedValueOnce(false);
 
-    const result = await authService.reconcilePlatformAdminPassword();
-    expect(result).toBe(false);
+    await expect(authService.reconcilePlatformAdminPassword()).rejects.toThrow(
+      'Reconciliation failed — password update affected zero rows'
+    );
   });
 });

@@ -135,10 +135,10 @@ export class AuthService {
    * One-time credential reconciliation mechanism for platform admin password hash synchronization.
    * Requires PLATFORM_ADMIN_CREDENTIALS_RECONCILE=true and valid credentials.
    */
-  async reconcilePlatformAdminPassword(): Promise<boolean> {
+  async reconcilePlatformAdminPassword(): Promise<void> {
     const reconcileFlag = process.env.PLATFORM_ADMIN_CREDENTIALS_RECONCILE;
     if (reconcileFlag !== 'true' && reconcileFlag !== '1') {
-      return false; // Disabled by default
+      return; // Disabled by default
     }
 
     const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
@@ -165,12 +165,13 @@ export class AuthService {
     }
 
     const newPasswordHash = await hashPassword(password);
-    const updated = await (this.userStore as any).updatePasswordHash(username, newPasswordHash);
+    const updated = await this.userStore.updatePasswordHash(username, newPasswordHash);
 
-    if (updated) {
-      console.log(`[auth] SECURITY: Successfully reconciled password hash for platform admin '${username}'.`);
+    if (!updated) {
+      throw new Error('[auth] FATAL: Reconciliation failed — password update affected zero rows');
     }
-    return updated;
+
+    console.log(`[auth] SECURITY: Successfully reconciled password hash for platform admin '${username}'.`);
   }
 }
 
