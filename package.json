@@ -41,7 +41,8 @@
     "test:tenant-scope-middleware": "tsx scripts/verifyTenantScopeMiddleware.ts",
     "test:migration-010": "tsx scripts/verifyMigration010.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
-    "migrate": "tsx scripts/migrate.ts"
+    "migrate": "tsx scripts/migrate.ts",
+    "test:reconciliation": "vitest run src/server/auth/__tests__/reconciliation.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -73,6 +74,7 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
   }
 }

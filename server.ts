@@ -83,15 +83,15 @@ async function startServer() {
           process.exit(1);
         }
       }
-
-      // Reconciliation (One-time, only if enabled)
-      try {
-        await defaultAuthService.reconcilePlatformAdminPassword();
-      } catch (err) {
-        console.error('[auth] Reconciliation failure:', err instanceof Error ? err.message : err);
-        process.exit(1); // Enforce startup failure in all environments
-      }
     }
+  }
+
+  // Reconciliation (One-time, only if enabled)
+  try {
+    await defaultAuthService.reconcilePlatformAdminPassword();
+  } catch (err) {
+    console.error('[auth] Reconciliation failure:', err instanceof Error ? err.message : err);
+    process.exit(1); // Enforce startup failure in all environments
   }
 
   // 4. Start Express server
