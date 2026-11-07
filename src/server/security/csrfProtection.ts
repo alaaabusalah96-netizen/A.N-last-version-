@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { getSessionCookieName } from '../auth/authMiddleware.js';
-import { isProduction, isStrictEnv } from '../config/env.js';
+import { isProduction, isStrictEnv, isAppPreview } from '../config/env.js';
 import { validateOrigin } from '../http/originRegistry.js';
 
 const CSRF_COOKIE_NAME = 'an_csrf';
@@ -57,12 +57,15 @@ export function verifyCsrfToken(token: string, sessionToken: string = '', secret
   return crypto.timingSafeEqual(Buffer.from(expectedHmac), Buffer.from(computedHmac));
 }
 
-export function setCsrfCookie(res: Response, token: string): void {
+export function setCsrfCookie(req: Request, res: Response, token: string): void {
   const isProd = isProduction();
+  const host = req.get('host');
+  const isPreview = isAppPreview(host);
+
   res.cookie(CSRF_COOKIE_NAME, token, {
     httpOnly: false, // JS must read cookie to attach header
-    secure: isProd,
-    sameSite: 'lax',
+    secure: isProd || isPreview, // Must be secure for SameSite=None
+    sameSite: isPreview ? 'none' : 'lax',
     path: '/',
   });
 }

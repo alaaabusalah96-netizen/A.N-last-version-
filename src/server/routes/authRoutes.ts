@@ -7,6 +7,7 @@ import { defaultAuditService } from '../audit/auditService.js';
 import { generateCsrfToken, setCsrfCookie } from '../security/csrfProtection.js';
 import { InvalidCredentialsError, ValidationError } from '../http/errors.js';
 import { ExtendedRequest } from '../http/errorHandler.js';
+import { isAppPreview, isProduction } from '../config/env.js';
 
 export const authRoutes = Router();
 
@@ -17,7 +18,7 @@ authRoutes.get(
     const cookieName = getSessionCookieName();
     const sessionToken = req.cookies?.[cookieName] || '';
     const csrfToken = generateCsrfToken(sessionToken);
-    setCsrfCookie(res, csrfToken);
+    setCsrfCookie(req, res, csrfToken);
     return res.status(200).json({ status: 'ok', csrfToken });
   })
 );
@@ -107,17 +108,19 @@ authRoutes.post(
 
     // 5. Session Cookie
     const cookieName = getSessionCookieName();
+    const isPreview = isAppPreview(req.get('host'));
+    
     res.cookie(cookieName, session.id, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProduction() || isPreview,
+      sameSite: isPreview ? 'none' : 'lax',
       path: '/',
       expires: session.expiresAt,
     });
 
     // 6. Rotate CSRF Token bound to new session
     const csrfToken = generateCsrfToken(session.id);
-    setCsrfCookie(res, csrfToken);
+    setCsrfCookie(req, res, csrfToken);
 
     return res.status(200).json({
       status: 'ok',
@@ -161,7 +164,7 @@ authRoutes.post(
 
     // Rotate CSRF token for unauthenticated state
     const csrfToken = generateCsrfToken('');
-    setCsrfCookie(res, csrfToken);
+    setCsrfCookie(req, res, csrfToken);
 
     return res.status(200).json({
       status: 'ok',
@@ -198,7 +201,7 @@ authRoutes.post(
     });
 
     const csrfToken = generateCsrfToken('');
-    setCsrfCookie(res, csrfToken);
+    setCsrfCookie(req, res, csrfToken);
 
     return res.status(200).json({
       status: 'ok',
