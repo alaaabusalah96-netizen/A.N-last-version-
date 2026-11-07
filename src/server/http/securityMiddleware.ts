@@ -19,19 +19,28 @@ export function applySecurityMiddleware(app: Application): void {
         ? {
             directives: {
               defaultSrc: ["'self'"],
-              scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+              scriptSrc: ["'self'"], // Removed 'unsafe-inline' and 'unsafe-eval' unless proven necessary
               styleSrc: ["'self'", "'unsafe-inline'"],
               imgSrc: ["'self'", 'data:', 'https:'],
-              connectSrc: ["'self'", 'https://*.google.com', 'https://*.run.app'],
+              connectSrc: [
+                "'self'", 
+                'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+                'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app'
+              ],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],
               formAction: ["'self'"],
-              frameAncestors: ["'self'", 'https://aistudio.google.com', 'https://*.google.com'],
+              frameAncestors: [
+                "'self'", 
+                'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+                'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+                'https://aistudio.google.com'
+              ],
             },
           }
         : false,
       crossOriginEmbedderPolicy: false,
-      frameguard: false, // Allow framing in AI Studio
+      frameguard: false, // Must be false to allow frame-ancestors to work
     })
   );
 }

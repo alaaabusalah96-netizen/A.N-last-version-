@@ -105,40 +105,44 @@ export class AuthService {
 
     try {
       const existing = await this.userStore.findByUsername(username);
+      
       if (existing) {
-        // Requirement 7 & 8: If the username already exists with a different role, report an explicit conflict
         if (existing.role !== 'platform_admin') {
           throw new Error(`[auth] FATAL: Bootstrap conflict — user '${username}' already exists with role '${existing.role}', not 'platform_admin'`);
         }
+
+        if (!existing.isActive) {
+           throw new Error(`[auth] FATAL: Bootstrap failed — platform admin account '${username}' is inactive`);
+        }
         
         // Self-Healing: If the existing password hash does not match the current environment secret, synchronize it
-        const isMatch = await verifyPassword(password, (existing as any).passwordHash || '');
+        const isMatch = await verifyPassword(password, existing.passwordHash || '');
         if (!isMatch) {
+          console.log(`[auth] Reconciling password for existing platform admin '${username}'...`);
           const newHash = await hashPassword(password);
           const updated = await this.userStore.updatePasswordHash(username, newHash);
-          if (updated) {
-            console.log(`[auth] Platform admin '${username}' password hash successfully reconciled with environment secret.`);
+          
+          if (!updated) {
+            throw new Error(`[auth] FATAL: Failed to update password hash for platform admin '${username}'. Zero rows affected.`);
           }
+          
+          console.log(`[auth] SUCCESS: Platform admin '${username}' password reconciled.`);
+        } else {
+          console.log(`[auth] Platform admin '${username}' is already synchronized.`);
         }
 
-        return true; // Already exists and synchronized
+        return true;
       }
 
-      const passwordHash = await hashPassword(password);
-      await this.userStore.createUser({
-        username,
-        passwordHash,
-        role: 'platform_admin',
-      });
-
-      console.log(`[auth] Platform admin '${username}' initialized from environment variables.`);
-      return true;
+      // Strictly comply with 'Do not create a new admin account automatically'
+      console.warn(`[auth] WARNING: Platform admin account '${username}' does not exist. Automatic creation is disabled.`);
+      return false;
     } catch (err: unknown) {
-      if (err instanceof Error && err.message.startsWith('[auth] FATAL:')) {
+      if (err instanceof Error && err.message.includes('[auth] FATAL:')) {
         throw err;
       }
       const sanitizedMsg = err instanceof Error ? err.message : String(err);
-      throw new Error(`[auth] FATAL: Failed to bootstrap platform admin '${username}': ${sanitizedMsg}`);
+      throw new Error(`[auth] FATAL: Bootstrap failure for platform admin '${username}': ${sanitizedMsg}`);
     }
   }
 }

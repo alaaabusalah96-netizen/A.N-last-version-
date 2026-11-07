@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { getSessionCookieName } from '../auth/authMiddleware.js';
 import { isProduction, isStrictEnv } from '../config/env.js';
+import { validateOrigin } from '../http/originRegistry.js';
 
 const CSRF_COOKIE_NAME = 'an_csrf';
 const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -93,20 +94,8 @@ export function createCsrfProtection(options: CsrfOptions = {}): RequestHandler 
     const origin = (req.headers.origin as string) || '';
     const referer = (req.headers.referer as string) || '';
 
-    const host = req.get('host') || req.headers.host || '';
-    const reqProtocol = req.protocol || 'http';
-    const selfOrigin = host ? `${reqProtocol}://${host}` : '';
-
-    const configuredOrigins = options.allowedOrigins
-      ? options.allowedOrigins
-      : process.env.CORS_ORIGINS
-      ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
-      : [];
-
-    const allowedOrigins = new Set([...configuredOrigins, selfOrigin].filter(Boolean));
-
     if (origin) {
-      if (!allowedOrigins.has(origin)) {
+      if (!validateOrigin(origin)) {
         res.status(403).json({
           error: 'Forbidden',
           code: 'CSRF_ORIGIN',
@@ -127,7 +116,7 @@ export function createCsrfProtection(options: CsrfOptions = {}): RequestHandler 
         return;
       }
 
-      if (!allowedOrigins.has(refererOrigin)) {
+      if (!validateOrigin(refererOrigin)) {
         res.status(403).json({
           error: 'Forbidden',
           code: 'CSRF_ORIGIN',
