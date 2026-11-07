@@ -69,6 +69,20 @@ export class UserRepository {
     const res = await executor.query<Omit<User, 'passwordHash'>>(sql);
     return res.rows;
   }
+
+  async updatePasswordHash(username: string, newPasswordHash: string): Promise<boolean> {
+    const executor = await this.getExecutor();
+    const normalizedUsername = username.trim().toLowerCase();
+
+    const sql = `
+      UPDATE platform_users
+      SET password_hash = $2
+      WHERE username = $1 AND role = 'platform_admin' AND is_active = true;
+    `;
+
+    const res = await executor.query(sql, [normalizedUsername, newPasswordHash]);
+    return (res.rowCount ?? 0) === 1;
+  }
 }
 
 export const defaultUserRepository = new UserRepository();

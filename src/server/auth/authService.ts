@@ -130,6 +130,48 @@ export class AuthService {
       throw new Error(`[auth] FATAL: Failed to bootstrap platform admin '${username}': ${sanitizedMsg}`);
     }
   }
+
+  /**
+   * One-time credential reconciliation mechanism for platform admin password hash synchronization.
+   * Requires PLATFORM_ADMIN_CREDENTIALS_RECONCILE=true and valid credentials.
+   */
+  async reconcilePlatformAdminPassword(): Promise<boolean> {
+    const reconcileFlag = process.env.PLATFORM_ADMIN_CREDENTIALS_RECONCILE;
+    if (reconcileFlag !== 'true' && reconcileFlag !== '1') {
+      return false; // Disabled by default
+    }
+
+    const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
+    const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+
+    if (!rawUsername || !rawPassword || rawUsername.trim() === '' || rawPassword.trim() === '') {
+      throw new Error('[auth] FATAL: Reconciliation failed — PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured');
+    }
+
+    const username = rawUsername.trim().toLowerCase();
+    const password = rawPassword;
+
+    if (password.length < 12) {
+      throw new Error('[auth] FATAL: Reconciliation failed — password must be at least 12 characters long');
+    }
+
+    const existing = await this.userStore.findByUsername(username);
+    if (!existing) {
+      throw new Error('[auth] FATAL: Reconciliation failed — platform admin account does not exist');
+    }
+
+    if (existing.role !== 'platform_admin' || !existing.isActive) {
+      throw new Error('[auth] FATAL: Reconciliation failed — account is not an active platform_admin');
+    }
+
+    const newPasswordHash = await hashPassword(password);
+    const updated = await (this.userStore as any).updatePasswordHash(username, newPasswordHash);
+
+    if (updated) {
+      console.log(`[auth] SECURITY: Successfully reconciled password hash for platform admin '${username}'.`);
+    }
+    return updated;
+  }
 }
 
 export const defaultAuthService = new AuthService();

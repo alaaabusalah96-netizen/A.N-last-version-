@@ -37,6 +37,10 @@ export class UserStore {
     return this.repo.listUsers();
   }
 
+  async updatePasswordHash(username: string, newPasswordHash: string): Promise<boolean> {
+    return this.repo.updatePasswordHash(username, newPasswordHash);
+  }
+
   clear(): void {
     // No-op for database-backed store
   }

@@ -79,32 +79,74 @@ export function resolveSslConfig(env: Record<string, string | undefined>): pg.Co
 }
 
 export function sanitizeConnectionString(connectionString: string): string {
-  if (!connectionString || typeof connectionString !== 'string') {
+  if (!connectionString || typeof connectionString !== 'string' || connectionString.trim() === '') {
     throw new Error('Invalid connection string provided');
   }
 
+  const str = connectionString.trim();
+  const schemeMatch = str.match(/^(postgres(?:ql)?:\/\/)/i);
+  if (!schemeMatch) {
+    throw new Error('Invalid database connection string format');
+  }
+  const scheme = schemeMatch[1];
+  const remainder = str.substring(scheme.length);
+
+  const qIdx = remainder.indexOf('?');
+  const mainPart = qIdx !== -1 ? remainder.substring(0, qIdx) : remainder;
+  const queryPart = qIdx !== -1 ? remainder.substring(qIdx + 1) : '';
+
+  const slashIdx = mainPart.indexOf('/');
+  const authAndHost = slashIdx !== -1 ? mainPart.substring(0, slashIdx) : mainPart;
+  const dbName = slashIdx !== -1 ? mainPart.substring(slashIdx + 1) : '';
+
+  let user = '';
+  let password = '';
+  let hostPort = authAndHost;
+
+  const lastAt = authAndHost.lastIndexOf('@');
+  if (lastAt !== -1) {
+    const userinfo = authAndHost.substring(0, lastAt);
+    hostPort = authAndHost.substring(lastAt + 1);
+
+    const firstColon = userinfo.indexOf(':');
+    if (firstColon !== -1) {
+      user = userinfo.substring(0, firstColon);
+      password = userinfo.substring(firstColon + 1);
+    } else {
+      user = userinfo;
+    }
+  }
+
+  if (password.startsWith('[') && password.endsWith(']')) {
+    password = password.slice(1, -1);
+  }
+
+  const decUser = decodeURIComponent(user);
+  const decPass = decodeURIComponent(password);
+
+  const encUser = encodeURIComponent(decUser);
+  const encPass = encodeURIComponent(decPass);
+
+  const searchParams = new URLSearchParams(queryPart);
+  const paramsToRemove = ['sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'ssl'];
+  let removedSsl = false;
+  for (const p of paramsToRemove) {
+    if (searchParams.has(p)) {
+      searchParams.delete(p);
+      removedSsl = true;
+    }
+  }
+  if (removedSsl) {
+    console.warn('[db] WARNING: Ignored client-supplied SSL parameters from connection string to enforce environment policy.');
+  }
+
+  const cleanQuery = searchParams.toString();
+  const authPart = encUser ? (encPass ? `${encUser}:${encPass}@` : `${encUser}@`) : '';
+  const fullUrlStr = `${scheme}${authPart}${hostPort}/${dbName}${cleanQuery ? '?' + cleanQuery : ''}`;
+
   try {
-    const url = new URL(connectionString);
-    if (url.password) {
-      let pwd = decodeURIComponent(url.password);
-      if (pwd.startsWith('[') && pwd.endsWith(']')) {
-        pwd = pwd.slice(1, -1);
-        url.password = encodeURIComponent(pwd);
-      }
-    }
-    const paramsToRemove = ['sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'ssl'];
-    let removed = false;
-    for (const param of paramsToRemove) {
-      if (url.searchParams.has(param)) {
-        url.searchParams.delete(param);
-        removed = true;
-      }
-    }
-    if (removed) {
-      console.warn('[db] WARNING: Ignored client-supplied SSL parameters from connection string to enforce environment policy.');
-    }
-    return url.toString();
-  } catch (err) {
+    return new URL(fullUrlStr).toString();
+  } catch {
     throw new Error('Invalid database connection string format');
   }
 }

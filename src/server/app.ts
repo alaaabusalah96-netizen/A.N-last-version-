@@ -26,6 +26,18 @@ export function createApp(): Express {
   // Attach Request-Id to all requests
   app.use(requestIdMiddleware);
 
+  // Diagnostic Login Flow Tracer
+  app.use((req: any, _res: Response, next: NextFunction) => {
+    if (req.path.includes('/auth/login') || req.path.includes('/auth/csrf')) {
+      const requestId = req.requestId || 'unknown';
+      const origin = req.headers['origin'] || 'none';
+      const hasCookie = Boolean(req.cookies?.['an_csrf']);
+      const hasHeader = Boolean(req.headers['x-csrf-token']);
+      console.log(`[AuthTrace] ID: ${requestId} | Method: ${req.method} | Path: ${req.path} | Origin: ${origin} | HasCsrfCookie: ${hasCookie} | HasCsrfHeader: ${hasHeader}`);
+    }
+    next();
+  });
+
   // CSRF protection for /api routes
   app.use('/api', csrfProtection);
 

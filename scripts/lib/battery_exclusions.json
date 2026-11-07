@@ -1,7 +1,0 @@
-{
-  "verifyP01Scaffold.ts": "static legacy superseded",
-  "verifyP02aDbFoundation.ts": "static legacy superseded",
-  "verifyP03AuthCore.ts": "static legacy superseded",
-  "verifyP04OrgRbac.ts": "static legacy superseded",
-  "verifyLocal.ts": "local orchestrator executed via verify:local"
-}

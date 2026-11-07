@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, User as UserIcon, LogIn, AlertCircle } from 'lucide-react';
-import { apiFetch } from '../lib/apiClient.js';
+import { apiFetch, refreshCsrfToken } from '../lib/apiClient.js';
 
 interface LoginFormProps {
   onLoginSuccess: (user: { id: string; username: string; role: string }) => void;
@@ -10,10 +10,37 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initializingCsrf, setInitializingCsrf] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function initCsrf() {
+      try {
+        const token = await refreshCsrfToken();
+        if (!mounted) return;
+        if (!token) {
+          setError('تعذر تهيئة رمز الحماية (CSRF). يجدر تحديث الصفحة.');
+        }
+      } catch {
+        if (mounted) {
+          setError('فشل الاتصال بخادم الحماية لتهيئة الجلسة');
+        }
+      } finally {
+        if (mounted) {
+          setInitializingCsrf(false);
+        }
+      }
+    }
+    initCsrf();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (initializingCsrf) return;
     setError(null);
     setLoading(true);
 
@@ -74,10 +101,11 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
             <input
               type="text"
               required
+              disabled={initializingCsrf}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="admin"
-              className="w-full pr-10 pl-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+              className="w-full pr-10 pl-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition disabled:opacity-50"
             />
           </div>
         </div>
@@ -91,20 +119,23 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
             <input
               type="password"
               required
+              disabled={initializingCsrf}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full pr-10 pl-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+              className="w-full pr-10 pl-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition disabled:opacity-50"
             />
           </div>
         </div>
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || initializingCsrf}
           className="w-full mt-2 inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white font-medium text-sm transition shadow-lg shadow-indigo-600/25 cursor-pointer"
         >
-          {loading ? (
+          {initializingCsrf ? (
+            <span className="text-xs text-slate-300">جارٍ تهيئة الجلسة...</span>
+          ) : loading ? (
             <span className="inline-block w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
           ) : (
             <>
