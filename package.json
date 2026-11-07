@@ -41,8 +41,7 @@
     "test:tenant-scope-middleware": "tsx scripts/verifyTenantScopeMiddleware.ts",
     "test:migration-010": "tsx scripts/verifyMigration010.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
-    "migrate": "tsx scripts/migrate.ts",
-    "test:reconciliation": "vitest run src/server/auth/__tests__/reconciliation.test.ts"
+    "migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

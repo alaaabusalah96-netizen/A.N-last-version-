@@ -38,12 +38,18 @@ export function createCorsMiddleware() {
         return callback(new CorsOriginError(`CORS policy violation: origin '${origin}' is not allowed`));
       }
 
+      // AI Studio Preview Origins: Permit any ais-dev or ais-pre subdomains automatically
+      const aiStudioRegex = /^https:\/\/ais-(dev|pre)-[a-z0-9-]+\.[a-z0-9-]+\.run\.app$/;
+      if (aiStudioRegex.test(origin)) {
+        return callback(null, true);
+      }
+
       // In development: strictly allow exact localhost / 127.0.0.1 origins
       if (localOriginRegex.test(origin)) {
         return callback(null, true);
       }
 
-      return callback(new CorsOriginError(`CORS policy violation in dev: origin '${origin}' is not permitted`));
+      return callback(new CorsOriginError(`CORS policy violation: origin '${origin}' is not permitted`));
     },
     credentials: true,
   });

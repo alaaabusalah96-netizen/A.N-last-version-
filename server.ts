@@ -86,14 +86,6 @@ async function startServer() {
     }
   }
 
-  // Reconciliation (One-time, only if enabled)
-  try {
-    await defaultAuthService.reconcilePlatformAdminPassword();
-  } catch (err) {
-    console.error('[auth] Reconciliation failure:', err instanceof Error ? err.message : err);
-    process.exit(1); // Enforce startup failure in all environments
-  }
-
   // 4. Start Express server
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[an-erp-platform] Server running on http://0.0.0.0:${PORT}`);

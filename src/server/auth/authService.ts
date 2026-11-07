@@ -110,7 +110,18 @@ export class AuthService {
         if (existing.role !== 'platform_admin') {
           throw new Error(`[auth] FATAL: Bootstrap conflict — user '${username}' already exists with role '${existing.role}', not 'platform_admin'`);
         }
-        return true; // Already exists as platform_admin
+        
+        // Self-Healing: If the existing password hash does not match the current environment secret, synchronize it
+        const isMatch = await verifyPassword(password, (existing as any).passwordHash || '');
+        if (!isMatch) {
+          const newHash = await hashPassword(password);
+          const updated = await this.userStore.updatePasswordHash(username, newHash);
+          if (updated) {
+            console.log(`[auth] Platform admin '${username}' password hash successfully reconciled with environment secret.`);
+          }
+        }
+
+        return true; // Already exists and synchronized
       }
 
       const passwordHash = await hashPassword(password);
@@ -129,49 +140,6 @@ export class AuthService {
       const sanitizedMsg = err instanceof Error ? err.message : String(err);
       throw new Error(`[auth] FATAL: Failed to bootstrap platform admin '${username}': ${sanitizedMsg}`);
     }
-  }
-
-  /**
-   * One-time credential reconciliation mechanism for platform admin password hash synchronization.
-   * Requires PLATFORM_ADMIN_CREDENTIALS_RECONCILE=true and valid credentials.
-   */
-  async reconcilePlatformAdminPassword(): Promise<void> {
-    const reconcileFlag = process.env.PLATFORM_ADMIN_CREDENTIALS_RECONCILE;
-    if (reconcileFlag !== 'true' && reconcileFlag !== '1') {
-      return; // Disabled by default
-    }
-
-    const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
-    const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
-
-    if (!rawUsername || !rawPassword || rawUsername.trim() === '' || rawPassword.trim() === '') {
-      throw new Error('[auth] FATAL: Reconciliation failed — PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured');
-    }
-
-    const username = rawUsername.trim().toLowerCase();
-    const password = rawPassword;
-
-    if (password.length < 12) {
-      throw new Error('[auth] FATAL: Reconciliation failed — password must be at least 12 characters long');
-    }
-
-    const existing = await this.userStore.findByUsername(username);
-    if (!existing) {
-      throw new Error('[auth] FATAL: Reconciliation failed — platform admin account does not exist');
-    }
-
-    if (existing.role !== 'platform_admin' || !existing.isActive) {
-      throw new Error('[auth] FATAL: Reconciliation failed — account is not an active platform_admin');
-    }
-
-    const newPasswordHash = await hashPassword(password);
-    const updated = await this.userStore.updatePasswordHash(username, newPasswordHash);
-
-    if (!updated) {
-      throw new Error('[auth] FATAL: Reconciliation failed — password update affected zero rows');
-    }
-
-    console.log(`[auth] SECURITY: Successfully reconciled password hash for platform admin '${username}'.`);
   }
 }
 

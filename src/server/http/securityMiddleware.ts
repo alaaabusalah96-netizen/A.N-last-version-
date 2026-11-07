@@ -19,17 +19,19 @@ export function applySecurityMiddleware(app: Application): void {
         ? {
             directives: {
               defaultSrc: ["'self'"],
-              scriptSrc: ["'self'"],
+              scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
               styleSrc: ["'self'", "'unsafe-inline'"],
-              imgSrc: ["'self'", 'data:'],
-              connectSrc: ["'self'"],
+              imgSrc: ["'self'", 'data:', 'https:'],
+              connectSrc: ["'self'", 'https://*.google.com', 'https://*.run.app'],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],
               formAction: ["'self'"],
+              frameAncestors: ["'self'", 'https://aistudio.google.com', 'https://*.google.com'],
             },
           }
-        : false, // In development, let Vite manage script injection without CSP blockers
+        : false,
       crossOriginEmbedderPolicy: false,
+      frameguard: false, // Allow framing in AI Studio
     })
   );
 }
