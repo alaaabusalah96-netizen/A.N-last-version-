@@ -1,17 +1,22 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { defaultAccountService } from '../accounting/accountService.js';
-import { defaultMembershipStore } from '../org/membershipStore.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
+import { PERMISSIONS } from '../rbac/permissions.js';
+import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
 import { isUuid } from '../http/validators.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../http/errors.js';
 
 export const accountingRoutes = Router();
 
-async function assertCompanyAccess(userId: string, userRole: string, companyId: string): Promise<void> {
-  if (!isUuid(companyId)) {
-    throw new ValidationError('Invalid company ID format');
+async function assertPermissionForCompanyQueryOrBody(
+  user: AuthenticatedRequest['user'],
+  permission: string,
+  companyId: string
+): Promise<void> {
+  if (!companyId || !isUuid(companyId)) {
+    throw new ValidationError('Invalid or missing company ID format');
   }
 
   const company = await defaultCompanyStore.getById(companyId);
@@ -19,13 +24,9 @@ async function assertCompanyAccess(userId: string, userRole: string, companyId: 
     throw new NotFoundError('Company not found');
   }
 
-  if (userRole === 'platform_admin') {
-    return;
-  }
-
-  const membership = await defaultMembershipStore.getMembership(userId, companyId);
-  if (!membership || !membership.isActive) {
-    throw new ForbiddenError('Access denied: You do not hold an active membership for this company');
+  const allowed = await defaultRbacService.hasPermission(user!, permission, companyId);
+  if (!allowed) {
+    throw new ForbiddenError(`Access denied: Missing required permission '${permission}' for this company`);
   }
 }
 
@@ -37,11 +38,7 @@ accountingRoutes.get(
     const user = req.user!;
     const companyId = (req.query.companyId as string) || '';
 
-    if (!companyId) {
-      throw new ValidationError('Query parameter companyId is required');
-    }
-
-    await assertCompanyAccess(user.id, user.role, companyId);
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_ACCOUNTS_READ, companyId);
 
     const accounts = await defaultAccountService.listAccounts(companyId);
     return res.status(200).json({ status: 'ok', accounts });
@@ -60,7 +57,7 @@ accountingRoutes.post(
       throw new ValidationError('companyId is required');
     }
 
-    await assertCompanyAccess(user.id, user.role, companyId);
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_ACCOUNTS_CREATE, companyId);
 
     const account = await defaultAccountService.createAccount(
       companyId,
@@ -84,7 +81,7 @@ accountingRoutes.post(
       throw new ValidationError('companyId is required');
     }
 
-    await assertCompanyAccess(user.id, user.role, companyId);
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_ACCOUNTS_SEED, companyId);
 
     const result = await defaultAccountService.seedDefaultCoa(companyId);
     return res.status(200).json({

@@ -17,6 +17,11 @@ export const PERMISSIONS = {
 
   // Audit logs inspection
   AUDIT_READ: 'audit:read',
+
+  // Accounting Chart of Accounts permissions
+  ACCOUNTING_ACCOUNTS_READ: 'accounting.accounts.read',
+  ACCOUNTING_ACCOUNTS_CREATE: 'accounting.accounts.create',
+  ACCOUNTING_ACCOUNTS_SEED: 'accounting.accounts.seed',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;

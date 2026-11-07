@@ -93,6 +93,11 @@
   - Summary: Delivered clean Arabic product-language UI shell with vertical scrollable right sidebar (AppSidebar), role label translation (roleLabels), and removal of infrastructure/developer jargon (Firebase, Foundation Repair, P04, raw snake_case roles) from all user-facing screens.
   - P05_STARTED: `YES` (Accounting Core slice UI reorganized into sidebar)
   - CI_STATUS: `PENDING`
+- **AN-FIX-ACCOUNTING-RBAC-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Enforced strict domain accounting permissions (`accounting.accounts.read`, `accounting.accounts.create`, `accounting.accounts.seed`) across accounting routes (`/api/accounting/accounts` and `/seed-default`) via `RbacService`, preventing `company_user` from performing write operations without relying on generic `company:write`.
+  - P05_STARTED: `YES` (Accounting RBAC secured)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

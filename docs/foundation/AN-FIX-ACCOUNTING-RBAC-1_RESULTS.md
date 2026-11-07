@@ -1,0 +1,23 @@
+# AN-FIX-ACCOUNTING-RBAC-1 Results
+
+- **Package Name**: AN-FIX-ACCOUNTING-RBAC-1
+- **Date**: 2026-11-07 (UTC)
+- **Files Created**:
+  - `scripts/verifyFixAccountingRbac1.ts`
+  - `docs/foundation/AN-FIX-ACCOUNTING-RBAC-1_RESULTS.md`
+  - `evidence/fix-accounting-rbac-1/acceptance-rows.md`
+  - `evidence/fix-accounting-rbac-1/usability.md`
+- **Files Modified**:
+  - `src/server/rbac/permissions.ts`
+  - `src/server/rbac/roles.ts`
+  - `src/server/routes/accountingRoutes.ts`
+  - `package.json`
+  - `docs/foundation/AI_PROJECT_STATE.md`
+- **Security Confirmations**:
+  - Domain permissions created (`accounting.accounts.read`, `accounting.accounts.create`, `accounting.accounts.seed`): YES
+  - `company_user` restricted to READ only: YES
+  - `company_admin` & `platform_admin` granted READ + CREATE + SEED: YES
+  - Server routes enforced via `RbacService.hasPermission`: YES
+  - COMPANY_WRITE used for accounting writes: NO
+  - P05_STARTED: YES
+  - CI_STATUS: PENDING
