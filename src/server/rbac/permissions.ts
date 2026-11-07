@@ -22,6 +22,10 @@ export const PERMISSIONS = {
   ACCOUNTING_ACCOUNTS_READ: 'accounting.accounts.read',
   ACCOUNTING_ACCOUNTS_CREATE: 'accounting.accounts.create',
   ACCOUNTING_ACCOUNTS_SEED: 'accounting.accounts.seed',
+
+  // Company Settings
+  COMPANY_SETTINGS_READ: 'company:settings:read',
+  COMPANY_SETTINGS_WRITE: 'company:settings:write',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;

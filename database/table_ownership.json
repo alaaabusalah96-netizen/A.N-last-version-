@@ -53,5 +53,10 @@
     "table": "journal_lines",
     "scope": "tenant",
     "reason": "Tenant journal entry lines skeleton"
+  },
+  {
+    "table": "company_settings",
+    "scope": "tenant",
+    "reason": "Per-company operational settings"
   }
 ]

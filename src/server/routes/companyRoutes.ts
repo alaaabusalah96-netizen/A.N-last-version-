@@ -9,8 +9,12 @@ import { requirePlatformAdmin } from '../rbac/requirePlatformAdmin.js';
 import { wrap } from '../http/asyncHandler.js';
 import { isUuid, isValidCompanyCode } from '../http/validators.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
+import { companySettingsRoutes } from './companySettingsRoutes.js';
 
 export const companyRoutes = Router();
+
+// Nest settings routes
+companyRoutes.use('/:companyId', companySettingsRoutes);
 
 // GET /api/companies — requireAuth + company:read
 companyRoutes.get(

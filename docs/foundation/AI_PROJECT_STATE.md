@@ -108,6 +108,11 @@
   - Summary: Delivered operational user and membership administration using existing tables (`platform_users`, `company_memberships`). Added UserAdminService with business rules (create user, add membership, toggle active, reset password) and enforced domain security (USER_READ/USER_WRITE). UI provides a dedicated workspace for admins in the sidebar. Audit logs implemented for all modifications.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-COMPANY-SETTINGS-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered per-company operational settings (currency, timezone, fiscal year, locale). Added migration 012 for `company_settings` table with tenant-scoped RLS policies. Implemented backend service and routes under `/api/companies/:companyId/settings`. Added `CompanySettingsPanel` to the UI, accessible via the sidebar for users with `COMPANY_SETTINGS_READ/WRITE` permissions.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
