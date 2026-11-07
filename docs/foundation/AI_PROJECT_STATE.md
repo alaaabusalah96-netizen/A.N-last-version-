@@ -98,6 +98,11 @@
   - Summary: Enforced strict domain accounting permissions (`accounting.accounts.read`, `accounting.accounts.create`, `accounting.accounts.seed`) across accounting routes (`/api/accounting/accounts` and `/seed-default`) via `RbacService`, preventing `company_user` from performing write operations without relying on generic `company:write`.
   - P05_STARTED: `YES` (Accounting RBAC secured)
   - CI_STATUS: `PENDING`
+- **AN-FIX-ACCOUNTING-UI-GATES-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Aligned AccountsPanel UI with server-side accounting permissions by gating `canCreate` and `canSeed` action buttons based on user role (`platform_admin` / `company_admin`), ensuring fail-closed UI behavior for read-only roles (`company_user`).
+  - P05_STARTED: `YES` (Accounting UI gates aligned)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

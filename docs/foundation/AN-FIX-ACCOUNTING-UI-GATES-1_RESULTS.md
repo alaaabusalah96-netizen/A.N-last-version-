@@ -1,0 +1,22 @@
+# AN-FIX-ACCOUNTING-UI-GATES-1 Results
+
+- **Package Name**: AN-FIX-ACCOUNTING-UI-GATES-1
+- **Date**: 2026-11-07 (UTC)
+- **Files Created**:
+  - `scripts/verifyFixAccountingUiGates1.ts`
+  - `docs/foundation/AN-FIX-ACCOUNTING-UI-GATES-1_RESULTS.md`
+  - `evidence/fix-accounting-ui-gates-1/acceptance-rows.md`
+  - `evidence/fix-accounting-ui-gates-1/usability.md`
+- **Files Modified**:
+  - `src/App.tsx`
+  - `src/components/accounting/AccountingWorkspace.tsx`
+  - `src/components/accounting/AccountsPanel.tsx`
+  - `package.json`
+  - `docs/foundation/AI_PROJECT_STATE.md`
+- **UI Gating Confirmations**:
+  - `canCreate` and `canSeed` props implemented with fail-closed default (`false`): YES
+  - `AccountsPanel` conditionally renders "حساب جديد" and "تحميل الدليل الافتراضي" based on capability flags: YES
+  - Role propagated from App → Workspace → AccountsPanel: YES
+  - Server-side domain checks intact: YES
+  - P05_STARTED: YES
+  - CI_STATUS: PENDING

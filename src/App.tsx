@@ -104,7 +104,7 @@ export default function App() {
         {activeNav === 'companies' ? (
           <CompaniesPanel userRole={currentUser.role} />
         ) : (
-          <AccountingWorkspace />
+          <AccountingWorkspace userRole={currentUser.role} />
         )}
       </main>
     </div>

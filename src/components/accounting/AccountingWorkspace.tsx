@@ -10,13 +10,19 @@ interface Company {
   nameEn?: string | null;
 }
 
-export function AccountingWorkspace() {
+interface AccountingWorkspaceProps {
+  userRole?: string;
+}
+
+export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'coa' | 'journal'>('coa');
+
+  const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
 
   useEffect(() => {
     async function loadCompanies() {
@@ -139,7 +145,7 @@ export function AccountingWorkspace() {
           </p>
         </div>
       ) : activeTab === 'coa' ? (
-        <AccountsPanel companyId={selectedCompanyId} />
+        <AccountsPanel companyId={selectedCompanyId} canCreate={canWrite} canSeed={canWrite} />
       ) : (
         /* Journal Entries Placeholder Tab */
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-10 text-center flex flex-col items-center gap-3 shadow-xl">
