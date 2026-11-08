@@ -188,6 +188,14 @@
     2. Application Membership Guard: Added `checkUserCompanyMembership` in `orgUnitRepository.ts` and enforced active target user membership check inside `orgUnitService.ts` `setUserScopes`.
   - P05_STARTED: `YES` (Org Data Integrity implemented)
   - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 016 on live environments)
+- **AN-FIX-LEDGER-ORG-FOLLOWUP-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Remediated residual org unit composite foreign key delete behavior, trial balance posted entry aggregation, and journal lines trigger immutability.
+    1. Migration 017: Created `017_ledger_org_followup.sql` replacing composite FK `ON DELETE SET NULL` with `ON DELETE RESTRICT` for `(company_id, org_unit_id)` on `accounts`, `journal_entries`, and `journal_lines`.
+    2. Journal Lines Immutability Trigger: Hardened `trg_fn_journal_lines_immutability` to evaluate `TG_OP` branches ('INSERT', 'DELETE', 'UPDATE') and validate status on BOTH `OLD.entry_id` and `NEW.entry_id`.
+    3. Trial Balance Aggregation: Fixed `trialBalanceService.ts` to use subquery pattern strictly filtering `e.status = 'posted'`, preventing unposted draft line amounts from being aggregated.
+  - P05_STARTED: `YES` (Followup fixes implemented)
+  - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 017 on live environments)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

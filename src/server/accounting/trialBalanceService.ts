@@ -44,7 +44,7 @@ export class TrialBalanceService {
         }
       }
 
-      // Aggregate posted journal lines joined with accounts
+      // Aggregate posted journal lines joined with accounts via subquery (posted entries only)
       const sql = `
         SELECT 
           a.id as "accountId",
@@ -52,17 +52,25 @@ export class TrialBalanceService {
           a.name_ar as "accountNameAr",
           a.name_en as "accountNameEn",
           a.account_type as "accountType",
-          COALESCE(SUM(l.debit), 0)::float as "totalDebit",
-          COALESCE(SUM(l.credit), 0)::float as "totalCredit",
-          (COALESCE(SUM(l.debit), 0) - COALESCE(SUM(l.credit), 0))::float as "netBalance"
+          COALESCE(x.total_debit, 0)::float as "totalDebit",
+          COALESCE(x.total_credit, 0)::float as "totalCredit",
+          (COALESCE(x.total_debit, 0) - COALESCE(x.total_credit, 0))::float as "netBalance"
         FROM accounts a
-        LEFT JOIN journal_lines l ON a.id = l.account_id AND l.company_id = a.company_id
-        LEFT JOIN journal_entries e ON l.entry_id = e.id AND e.company_id = a.company_id 
-          AND e.status = 'posted'
-          AND ($2::date IS NULL OR e.entry_date <= $2::date)
-          AND ($3::uuid IS NULL OR e.org_unit_id = $3::uuid OR l.org_unit_id = $3::uuid)
+        LEFT JOIN (
+          SELECT 
+            l.account_id,
+            SUM(l.debit) as total_debit,
+            SUM(l.credit) as total_credit
+          FROM journal_lines l
+          INNER JOIN journal_entries e 
+            ON e.id = l.entry_id AND e.company_id = l.company_id
+          WHERE e.status = 'posted'
+            AND l.company_id = $1
+            AND ($2::date IS NULL OR e.entry_date <= $2::date)
+            AND ($3::uuid IS NULL OR e.org_unit_id = $3::uuid)
+          GROUP BY l.account_id
+        ) x ON x.account_id = a.id
         WHERE a.company_id = $1 AND a.is_postable = true
-        GROUP BY a.id, a.code, a.name_ar, a.name_en, a.account_type
         ORDER BY a.code ASC
       `;
 

@@ -54,6 +54,7 @@
     "test:p1d-accounting-ui-1": "tsx scripts/verifyP1dAccountingUi1.ts",
     "test:p1b-ledger-hardening-1": "tsx scripts/verifyP1bLedgerHardening1.ts",
     "test:p1c-org-integrity-1": "tsx scripts/verifyP1cOrgIntegrity1.ts",
+    "test:fix-ledger-org-followup-1": "tsx scripts/verifyFixLedgerOrgFollowup1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"
