@@ -132,6 +132,17 @@
     3. Architecture: Validated clean app factory (`createApp`) export without side-effect server listen.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING` (P0 C1–C5 code fixes locked with verifyP0Verify1; CI green SHA still PENDING until Actions run)
+- **AN-P1A-LEDGER-ORG-DESIGN-1**: `DESIGN_COMPLETE`
+  - Status: `DESIGN_COMPLETE`, `DOCUMENTED`, `CI_STATUS=PENDING`
+  - Summary: Architectural design and Architecture Decision Records (ADRs) for double-entry ledger guarantees and organizational unit structure.
+    1. ADR-01 (Org Structure): Adjacency list (`parent_id`) with path hierarchy, `branch`/`department`/`cost_center` types, `user_org_scope`, nullable org fields in P1. No intercompany in P1.
+    2. ADR-02 (Ledger Guarantees): Invariant balance requirement `SUM(debit) == SUM(credit)`, positive amounts, minimum 2 lines, composite tenant FK integrity (`company_id`), posted entry immutability, reversal state machine, and per-company atomic monotonic numbering.
+    3. ADR-03 (Tenant vs Org Scope): RLS strictly tied to `company_id` via `app.current_tenant_id`; org units handled via application-layer filtering in Phase 1 with forward compatibility for RLS v2.
+    4. ADR-04 (Currency & Periods): Functional currency from `company_settings.default_currency_code`, single functional currency in P1 with future-proof currency/rate columns, fiscal year period locks preventing historical entries in closed periods.
+    5. Data Model & Phased Migration: Defined logical schema draft and strict separated migration sequencing (P1b Ledger Guarantees -> P1c Org Units -> P1d Accounting UI Expansion).
+  - Explicit non-claim: Runtime ledger engine and `org_units` database tables are NOT implemented yet (design and specification phase only).
+  - P05_STARTED: `YES` (Design foundations complete; next phase is P1b runtime implementation)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
