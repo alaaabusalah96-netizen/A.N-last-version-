@@ -98,15 +98,28 @@ export class MembershipRepository {
     return (res.rowCount ?? 0) > 0;
   }
 
-  async setMembershipStatusById(membershipId: string, isActive: boolean, customExecutor?: DbExecutor): Promise<boolean> {
+  async setMembershipStatusById(
+    membershipId: string,
+    companyId: string,
+    isActive: boolean,
+    userId?: string,
+    customExecutor?: DbExecutor
+  ): Promise<boolean> {
     const executor = await this.getExecutor(customExecutor);
 
-    const sql = `
+    let sql = `
       UPDATE company_memberships
       SET is_active = $2
-      WHERE id = $1;
+      WHERE id = $1 AND company_id = $3
     `;
-    const res = await executor.query(sql, [membershipId, isActive]);
+    const params: (string | boolean)[] = [membershipId, isActive, companyId];
+
+    if (userId) {
+      sql += ` AND user_id = $4`;
+      params.push(userId);
+    }
+
+    const res = await executor.query(sql, params);
     return (res.rowCount ?? 0) > 0;
   }
 }

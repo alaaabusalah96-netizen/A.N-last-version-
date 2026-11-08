@@ -113,6 +113,17 @@
   - Summary: Delivered per-company operational settings (currency, timezone, fiscal year, locale). Added migration 012 for `company_settings` table with tenant-scoped RLS policies. Implemented backend service and routes under `/api/companies/:companyId/settings`. Added `CompanySettingsPanel` to the UI, accessible via the sidebar for users with `COMPANY_SETTINGS_READ/WRITE` permissions.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-P0-PLATFORM-SECURITY-FIX-1B**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Remediated confirmed security and architectural defects C1–C5 and P0-7 based on 1A diagnosis.
+    1. C1: Explicitly mounted `accountingRoutes` (`/api/accounting`) and `userAdminRoutes` (`/api/users`) in `src/server/app.ts`.
+    2. C2: Added privilege escalation guards in `userAdminService.ts` ensuring non-platform admins cannot modify or reset platform admins, and must operate strictly within their active company membership scope. Enforced minimum password length >= 12 on user creation and reset.
+    3. C3: Closed membership update IDOR vulnerability by scoping `company_memberships` updates to `WHERE id = $1 AND company_id = $3` (and optional `AND user_id = $4`).
+    4. C4: Wrapped all `companySettingsRepository` queries within `withTenantTransaction(companyId, ...)` to set `app.current_tenant_id` session variable required by RLS.
+    5. C5: Closed cross-tenant user listing leak by querying tenant memberships via `listUsersByCompany` for company admins.
+    6. P0-7: Removed string concatenation and dynamic import obfuscation in `userAdminRoutes.ts`, using direct typed imports.
+  - P05_STARTED: `YES` (Fixes applied to existing platform routes and services; org units / ledger engine NOT started)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

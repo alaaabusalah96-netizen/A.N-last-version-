@@ -10,3 +10,5 @@ apiRouter.use('/auth', authRoutes);
 apiRouter.use('/companies', companyRoutes);
 apiRouter.use('/accounting', accountingRoutes);
 apiRouter.use('/users', userAdminRoutes);
+
+export { authRoutes, companyRoutes, accountingRoutes, userAdminRoutes };

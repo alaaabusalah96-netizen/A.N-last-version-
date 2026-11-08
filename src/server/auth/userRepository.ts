@@ -97,6 +97,21 @@ export class UserRepository {
     return res.rows;
   }
 
+  async listUsersByCompany(companyId: string): Promise<Omit<User, 'passwordHash'>[]> {
+    const executor = await this.getExecutor();
+
+    const sql = `
+      SELECT u.id, u.username, u.role, u.created_at as "createdAt", u.is_active as "isActive"
+      FROM platform_users u
+      INNER JOIN company_memberships m ON u.id = m.user_id
+      WHERE m.company_id = $1
+      ORDER BY u.created_at DESC;
+    `;
+
+    const res = await executor.query<Omit<User, 'passwordHash'>>(sql, [companyId]);
+    return res.rows;
+  }
+
   async setUserActive(userId: string, isActive: boolean): Promise<boolean> {
     const executor = await this.getExecutor();
     const sql = `
