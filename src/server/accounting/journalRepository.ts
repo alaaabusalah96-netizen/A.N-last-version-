@@ -134,12 +134,13 @@ export class JournalRepository {
   }
 
   /**
-   * Find a journal entry by ID.
+   * Find a journal entry by ID with optional row locking FOR UPDATE.
    */
   async findById(
     companyId: string,
     entryId: string,
-    customExecutor?: DbExecutor
+    customExecutor?: DbExecutor,
+    forUpdate: boolean = false
   ): Promise<JournalEntry | null> {
     const run = async (executor: DbExecutor) => {
       const entrySql = `
@@ -162,6 +163,7 @@ export class JournalRepository {
         FROM journal_entries e
         LEFT JOIN org_units o ON e.org_unit_id = o.id
         WHERE e.id = $1 AND e.company_id = $2
+        ${forUpdate ? 'FOR UPDATE OF e' : ''}
       `;
       const res = await executor.query<JournalEntry>(entrySql, [entryId, companyId]);
       if (res.rows.length === 0) return null;
@@ -193,6 +195,17 @@ export class JournalRepository {
       return await run(customExecutor);
     }
     return await withTenantTransaction(companyId, run);
+  }
+
+  /**
+   * Find a journal entry by ID locked FOR UPDATE inside a transaction.
+   */
+  async findByIdForUpdate(
+    companyId: string,
+    entryId: string,
+    customExecutor?: DbExecutor
+  ): Promise<JournalEntry | null> {
+    return await this.findById(companyId, entryId, customExecutor, true);
   }
 
   /**

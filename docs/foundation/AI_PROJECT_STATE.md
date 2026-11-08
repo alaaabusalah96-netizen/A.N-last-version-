@@ -172,6 +172,15 @@
     4. Constraints: No new migrations or business modules added.
   - P05_STARTED: `YES` (Trial Balance & Ledger UI Expansion implemented)
   - CI_STATUS: `PENDING`
+- **AN-P1B-LEDGER-HARDENING-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Closed critical ledger guarantee gaps per ADR-02 via migration 015 and application row locking.
+    1. Migration 015: Created `015_ledger_hardening.sql` with trigger `trg_journal_lines_immutability` blocking `INSERT`, `UPDATE`, and `DELETE` of lines against posted entries using `COALESCE(NEW.entry_id, OLD.entry_id)`.
+    2. Posted Immutability: Narrowed `trg_fn_journal_entries_immutability` to permit strictly setting `reversed_by_entry_id` from NULL to a valid UUID while asserting equality on all other columns (`period_id`, `memo`, `entry_date`, `posted_at`, `posted_by`, `created_by`, `org_unit_id`).
+    3. DB Balance Guard: Added DB-level validation on transition to `posted` verifying `SUM(debit) == SUM(credit) > 0` and line count >= 2.
+    4. Concurrency Locking: Added `FOR UPDATE` row locking in `journalRepository.ts` (`findByIdForUpdate`) and used in `journalService.ts` (`postEntry`).
+  - P05_STARTED: `YES` (Ledger Hardening implemented)
+  - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 015 on live environments)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

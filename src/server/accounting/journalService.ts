@@ -125,7 +125,7 @@ export class JournalService {
     }
 
     return await withTenantTransaction(companyId, async (tx) => {
-      const entry = await this.journalRepo.findById(companyId, entryId, tx);
+      const entry = await this.journalRepo.findByIdForUpdate(companyId, entryId, tx);
       if (!entry) {
         throw new NotFoundError('Journal entry not found');
       }
