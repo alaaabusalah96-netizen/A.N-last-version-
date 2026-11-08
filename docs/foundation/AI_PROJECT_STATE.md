@@ -211,6 +211,14 @@
     4. Service Integration: Wired scope checks across `journalService.ts` (`createDraftEntry`, `postEntry`, `reverseEntry`, `listEntries`, `getEntry`), `trialBalanceService.ts` (`getTrialBalance`), and `accountingRoutes.ts`.
   - P05_STARTED: `YES` (Org Scope Ledger Wiring implemented)
   - CI_STATUS: `PENDING` (No database migrations required)
+- **AN-P1-FOUNDATION-CLOSE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `P1_FOUNDATION_CLOSED=YES`, `CI_STATUS=PENDING`
+  - Summary: Formally closed the P1 Foundation track in documentation and verification markers.
+    1. Open Gaps Registry: Created `docs/foundation/OPEN_GAPS.md` recording residual risks (`PG-SMOKE-LIVE`, `PERIODS`, `CI`, `C2-LIVE`, `RLS-ORG-V2`, `MODULES`).
+    2. Foundation Close Document: Created `docs/foundation/P1_FOUNDATION_CLOSE.md` summarizing all closed foundation packages and decision rules.
+    3. Automated Closure Harness: Created `scripts/verifyP1FoundationClose1.ts` validating regression markers for P0 security, ledger hardening, org integrity, trial balance isolation, and org scope wiring.
+  - P05_STARTED: `YES` (P1 Foundation track CLOSED; external business modules remain unstarted)
+  - CI_STATUS: `PENDING` (No runtime code or migration changes)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
