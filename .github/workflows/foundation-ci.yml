@@ -76,6 +76,15 @@ jobs:
           APP_DB_USER: an_app
           NODE_ENV: test
 
+      - name: PostgreSQL Integration Proof (T1-T7 strict)
+        run: npm run test:pg-proof-2
+        env:
+          AN_PG_PROOF_STRICT: "1"
+          AN_PG_PROOF_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          NODE_ENV: test
+          CI: "true"
+
       - name: Run Foundation Test Battery
         id: battery
         run: npm run test:foundation

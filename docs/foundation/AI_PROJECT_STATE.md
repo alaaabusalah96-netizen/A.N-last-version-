@@ -236,6 +236,11 @@
     3. Migration 018: Created `database/migrations/018_trigger_search_path.sql` setting explicit `search_path = public` on trigger functions (`trg_fn_journal_entries_immutability`, `trg_fn_journal_lines_immutability`, `audit_logs_block_mutation`) for Supabase advisor compliance.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-CI-PROOF-WIRE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Wired PostgreSQL integration proof harness (`test:pg-proof-2`) into `.github/workflows/foundation-ci.yml` running with `AN_PG_PROOF_STRICT="1"` against the CI PostgreSQL service container after migrations and role provisioning.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
