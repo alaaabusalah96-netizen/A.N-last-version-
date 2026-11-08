@@ -56,6 +56,7 @@
     "test:p1c-org-integrity-1": "tsx scripts/verifyP1cOrgIntegrity1.ts",
     "test:fix-ledger-org-followup-1": "tsx scripts/verifyFixLedgerOrgFollowup1.ts",
     "test:pg-smoke-1": "tsx scripts/verifyPgIntegrationSmoke1.ts",
+    "test:pg-proof-2": "tsx scripts/verifyPgIntegrationProof2.ts",
     "test:org-scope-on-ledger-1": "tsx scripts/verifyOrgScopeOnLedger1.ts",
     "test:p1-foundation-close-1": "tsx scripts/verifyP1FoundationClose1.ts",
     "test:fix-verify-migrate-scope-1": "tsx scripts/verifyFixVerifyMigrateScope1.ts",

@@ -1,7 +1,7 @@
 # Open Gaps & Residual Technical Risks Registry
 
 ## Overview
-This document tracks residual technical gaps, open risk items, and recommended future packages following the closure of the P1 Foundation track (P0 Security, P1 Ledger, P1 Org Units, P1 UI Expansion, and AN-FIX-VERIFY-MIGRATE-SCOPE-1).
+This document tracks residual technical gaps, open risk items, and recommended future packages following the closure of the P1 Foundation track and `AN-PG-INTEGRATION-PROOF-2`.
 
 ---
 
@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **PG-PROOF-HARNESS** | Smoke tests needed independent T1–T7 case isolation and strict error checking. | **CLOSED** | Test Quality & Proof | Fixed in `AN-PG-INTEGRATION-PROOF-2` (`scripts/verifyPgIntegrationProof2.ts`, migration 018 for search_path). |
 | **MIGRATE-ENV** | Scraped `/proc` for `DATABASE_URL` and fell back to `DATABASE_URL` on migration auth failure. | **CLOSED** | Security & Privileges | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. `/proc` removed. `MIGRATION_DATABASE_URL` is strictly required. No fallback. |
 | **PG-SMOKE-QUALITY** | Smoke test T2 passed on any error; contained `/proc` scraping. | **CLOSED** | Test Quality & Assurance | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. `/proc` removed. T2 requires matching `/CANNOT_MODIFY_POSTED|posted journal entry/i`. |
 | **LIST-SCOPE-ENFORCE** | `listEntries` / `getTrialBalance` permitted scoped users without `orgUnitId` to read company-wide entries. | **CLOSED** | Scope Security | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. Requires `orgUnitId` parameter for scoped users (`ValidationError`). |
