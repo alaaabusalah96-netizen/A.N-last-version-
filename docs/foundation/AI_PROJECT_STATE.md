@@ -196,6 +196,12 @@
     3. Trial Balance Aggregation: Fixed `trialBalanceService.ts` to use subquery pattern strictly filtering `e.status = 'posted'`, preventing unposted draft line amounts from being aggregated.
   - P05_STARTED: `YES` (Followup fixes implemented)
   - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 017 on live environments)
+- **AN-PG-INTEGRATION-SMOKE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Smoke Posture: `DB_BLOCKED` in local preview environment without privileged DDL connection string; static assertions S1–S5 **PASSED**; live DB cases T1–T7 **BLOCKED** cleanly without false passes or failures.
+  - Summary: Created automated PostgreSQL integration smoke verification script `scripts/verifyPgIntegrationSmoke1.ts` validating migrations 015–017 presence, trial balance posted subquery isolation, journal line trigger OLD/NEW checks, and live DB case assertions when a valid connection string is provided.
+  - P05_STARTED: `YES` (PostgreSQL Smoke Harness implemented)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
