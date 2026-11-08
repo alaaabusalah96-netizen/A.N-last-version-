@@ -248,6 +248,28 @@ export class OrgUnitRepository {
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);
   }
+
+  /**
+   * Check whether a user has an active membership in a company.
+   */
+  async checkUserCompanyMembership(
+    companyId: string,
+    userId: string,
+    customExecutor?: DbExecutor
+  ): Promise<boolean> {
+    const run = async (tx: DbExecutor) => {
+      const sql = `
+        SELECT 1 
+        FROM company_memberships 
+        WHERE company_id = $1 AND user_id = $2 AND status = 'active'
+      `;
+      const res = await tx.query(sql, [companyId, userId]);
+      return res.rows.length > 0;
+    };
+
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
 }
 
 export const defaultOrgUnitRepository = new OrgUnitRepository();

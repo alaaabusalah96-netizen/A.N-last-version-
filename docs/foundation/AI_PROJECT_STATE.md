@@ -181,6 +181,13 @@
     4. Concurrency Locking: Added `FOR UPDATE` row locking in `journalRepository.ts` (`findByIdForUpdate`) and used in `journalService.ts` (`postEntry`).
   - P05_STARTED: `YES` (Ledger Hardening implemented)
   - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 015 on live environments)
+- **AN-P1C-ORG-INTEGRITY-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Closed organizational unit data integrity gaps via migration 016 and application membership checks.
+    1. Migration 016: Created `016_org_integrity.sql` enforcing composite tenant foreign keys `(company_id, parent_id)` on `org_units`, `(company_id, org_unit_id)` on `user_org_scope`, `accounts`, `journal_entries`, and `journal_lines` to guarantee cross-company parent/unit assignments are prevented at DB layer.
+    2. Application Membership Guard: Added `checkUserCompanyMembership` in `orgUnitRepository.ts` and enforced active target user membership check inside `orgUnitService.ts` `setUserScopes`.
+  - P05_STARTED: `YES` (Org Data Integrity implemented)
+  - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 016 on live environments)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

@@ -124,6 +124,12 @@ export class OrgUnitService {
     if (!companyId || !userId) throw new ValidationError('companyId and userId are required');
 
     return await withTenantTransaction(companyId, async (tx) => {
+      // Validate target user is an active member of this company
+      const isMember = await this.orgRepo.checkUserCompanyMembership(companyId, userId, tx);
+      if (!isMember) {
+        throw new ValidationError(`Target user ${userId} is not an active member of company ${companyId}`);
+      }
+
       // Validate all orgUnitIds belong to company
       for (const sc of input.scopes) {
         const u = await this.orgRepo.findById(companyId, sc.orgUnitId, tx);
