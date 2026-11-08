@@ -96,13 +96,14 @@ accountingRoutes.post(
 // Journal Entries Endpoints (Ledger Guarantees)
 // ==========================================
 
-// GET /api/accounting/journals?companyId=...
+// GET /api/accounting/journals?companyId=...&orgUnitId=...
 accountingRoutes.get(
   '/journals',
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
     const companyId = (req.query.companyId as string) || '';
+    const orgUnitId = (req.query.orgUnitId as string) || undefined;
 
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
 
@@ -110,7 +111,7 @@ accountingRoutes.get(
     const offset = parseInt(req.query.offset as string, 10) || 0;
 
     const { defaultJournalService } = await import('../accounting/journalService.js');
-    const journals = await defaultJournalService.listEntries(companyId, limit, offset);
+    const journals = await defaultJournalService.listEntries(companyId, limit, offset, orgUnitId);
     return res.status(200).json({ status: 'ok', journals });
   })
 );
@@ -141,7 +142,7 @@ accountingRoutes.post(
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
-    const { companyId, entryDate, memo, lines } = req.body || {};
+    const { companyId, entryDate, memo, orgUnitId, lines } = req.body || {};
 
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('companyId is required');
@@ -152,7 +153,7 @@ accountingRoutes.post(
     const { defaultJournalService } = await import('../accounting/journalService.js');
     const journal = await defaultJournalService.createDraftEntry(
       companyId,
-      { entryDate, memo, lines },
+      { entryDate, memo, orgUnitId, lines },
       user.id
     );
     return res.status(201).json({ status: 'ok', journal });
@@ -198,5 +199,27 @@ accountingRoutes.post(
     const { defaultJournalService } = await import('../accounting/journalService.js');
     const reversal = await defaultJournalService.reverseEntry(companyId, id, user.id, reversalMemo);
     return res.status(200).json({ status: 'ok', reversal });
+  })
+);
+
+// ==========================================
+// Trial Balance Endpoints
+// ==========================================
+
+// GET /api/accounting/trial-balance?companyId=...&asOfDate=...&orgUnitId=...
+accountingRoutes.get(
+  '/trial-balance',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const asOfDate = (req.query.asOfDate as string) || undefined;
+    const orgUnitId = (req.query.orgUnitId as string) || undefined;
+
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+
+    const { defaultTrialBalanceService } = await import('../accounting/trialBalanceService.js');
+    const summary = await defaultTrialBalanceService.getTrialBalance(companyId, { asOfDate, orgUnitId });
+    return res.status(200).json({ status: 'ok', summary });
   })
 );

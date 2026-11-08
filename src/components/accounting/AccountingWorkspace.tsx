@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers } from 'lucide-react';
+import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountsPanel } from './AccountsPanel.js';
 import { JournalWorkspace } from './JournalWorkspace.js';
+import { TrialBalancePanel } from './TrialBalancePanel.js';
 
 interface Company {
   id: string;
@@ -21,7 +22,7 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'coa' | 'journal'>('coa');
+  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb'>('coa');
 
   const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
 
@@ -61,7 +62,7 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">النظام المحاسبي الرئيسي (Accounting Core)</h2>
-              <p className="text-xs text-slate-400">إدارة دليل الحسابات المالي والشجرة المحاسبية لكل شركة معزولة</p>
+              <p className="text-xs text-slate-400">إدارة دليل الحسابات المالي والشجرة المحاسبية وميزان المراجعة لكل شركة معزولة</p>
             </div>
           </div>
 
@@ -122,6 +123,18 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
               <FileText className="w-4 h-4" />
               <span>دفتر اليومية العامة (Journal Entries)</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('tb')}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeTab === 'tb'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Scale className="w-4 h-4" />
+              <span>ميزان المراجعة (Trial Balance)</span>
+            </button>
           </div>
         )}
       </div>
@@ -147,13 +160,16 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
         </div>
       ) : activeTab === 'coa' ? (
         <AccountsPanel companyId={selectedCompanyId} canCreate={canWrite} canSeed={canWrite} />
-      ) : (
+      ) : activeTab === 'journal' ? (
         <JournalWorkspace
           companyId={selectedCompanyId}
           canWrite={canWrite}
           canPost={userRole === 'platform_admin' || userRole === 'company_admin'}
         />
+      ) : (
+        <TrialBalancePanel companyId={selectedCompanyId} />
       )}
     </div>
   );
 }
+

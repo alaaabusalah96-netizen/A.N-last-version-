@@ -72,12 +72,25 @@ export class JournalService {
         }
       }
 
+      // Validate orgUnitId if provided
+      if (input.orgUnitId) {
+        const { defaultOrgUnitRepository } = await import('../org/orgUnitRepository.js');
+        const orgUnit = await defaultOrgUnitRepository.findById(companyId, input.orgUnitId, tx);
+        if (!orgUnit) {
+          throw new ValidationError(`Organizational unit ${input.orgUnitId} not found in this company`);
+        }
+        if (!orgUnit.isActive) {
+          throw new ValidationError(`Organizational unit ${orgUnit.code} (${orgUnit.nameAr}) is inactive`);
+        }
+      }
+
       const draft = await this.journalRepo.createDraft(
         companyId,
         input.entryDate,
         input.memo || null,
         input.lines,
         actorId,
+        input.orgUnitId || null,
         tx
       );
 
@@ -235,6 +248,7 @@ export class JournalService {
         memo,
         reversingLines,
         actorId,
+        source.orgUnitId || null,
         tx
       );
 
@@ -284,8 +298,13 @@ export class JournalService {
   /**
    * 4. List journal entries for a company.
    */
-  async listEntries(companyId: string, limit: number = 50, offset: number = 0): Promise<JournalEntry[]> {
-    return await this.journalRepo.list(companyId, limit, offset);
+  async listEntries(
+    companyId: string,
+    limit: number = 50,
+    offset: number = 0,
+    orgUnitId?: string
+  ): Promise<JournalEntry[]> {
+    return await this.journalRepo.list(companyId, limit, offset, orgUnitId);
   }
 
   /**

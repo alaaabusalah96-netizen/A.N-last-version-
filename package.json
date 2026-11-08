@@ -51,6 +51,7 @@
     "test:p1a-design-1": "tsx scripts/verifyP1aDesign1.ts",
     "test:p1b-ledger-1": "tsx scripts/verifyP1bLedgerGuarantees1.ts",
     "test:p1c-org-units-1": "tsx scripts/verifyP1cOrgUnits1.ts",
+    "test:p1d-accounting-ui-1": "tsx scripts/verifyP1dAccountingUi1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

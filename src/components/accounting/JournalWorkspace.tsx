@@ -32,6 +32,9 @@ interface JournalEntry {
   status: 'draft' | 'posted';
   postedAt?: string | null;
   reversedByEntryId?: string | null;
+  orgUnitId?: string | null;
+  orgUnitCode?: string | null;
+  orgUnitNameAr?: string | null;
   lines?: JournalLine[];
 }
 
@@ -40,6 +43,13 @@ interface Account {
   code: string;
   nameAr: string;
   isPostable: boolean;
+  isActive: boolean;
+}
+
+interface OrgUnit {
+  id: string;
+  code: string;
+  nameAr: string;
   isActive: boolean;
 }
 
@@ -52,6 +62,8 @@ interface JournalWorkspaceProps {
 export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorkspaceProps) {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
+  const [filterOrgUnitId, setFilterOrgUnitId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -64,6 +76,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
   // New draft form state
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
   const [newMemo, setNewMemo] = useState('');
+  const [newOrgUnitId, setNewOrgUnitId] = useState('');
   const [newLines, setNewLines] = useState<
     { accountId: string; debit: string; credit: string; lineMemo: string }[]
   >([
@@ -75,8 +88,12 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
     setLoading(true);
     setError(null);
     try {
-      // 1. Load journals
-      const resJournals = await apiFetch(`/api/accounting/journals?companyId=${companyId}`);
+      // 1. Load journals with optional orgUnitId filter
+      let url = `/api/accounting/journals?companyId=${companyId}`;
+      if (filterOrgUnitId) {
+        url += `&orgUnitId=${filterOrgUnitId}`;
+      }
+      const resJournals = await apiFetch(url);
       if (!resJournals.ok) {
         const data = await resJournals.json();
         throw new Error(data.message || data.error || 'فشل في تحميل قيود اليومية');
@@ -90,6 +107,13 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
         const dataAccounts = await resAccounts.json();
         setAccounts((dataAccounts.accounts || []).filter((a: Account) => a.isPostable && a.isActive));
       }
+
+      // 3. Load org units
+      const resOrgUnits = await apiFetch(`/api/companies/${companyId}/org-units`);
+      if (resOrgUnits.ok) {
+        const dataOrg = await resOrgUnits.json();
+        setOrgUnits((dataOrg.orgUnits || []).filter((u: OrgUnit) => u.isActive));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء تحميل البيانات');
     } finally {
@@ -101,7 +125,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
     if (companyId) {
       loadData();
     }
-  }, [companyId]);
+  }, [companyId, filterOrgUnitId]);
 
   const handleAddLine = () => {
     setNewLines([...newLines, { accountId: '', debit: '', credit: '', lineMemo: '' }]);
@@ -162,6 +186,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
           companyId,
           entryDate: newDate,
           memo: newMemo || undefined,
+          orgUnitId: newOrgUnitId || undefined,
           lines: formattedLines,
         }),
       });
@@ -174,6 +199,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
       setSuccess('تم إنشاء مسودة القيد بنجاح');
       setShowCreateModal(false);
       setNewMemo('');
+      setNewOrgUnitId('');
       setNewLines([
         { accountId: '', debit: '', credit: '', lineMemo: '' },
         { accountId: '', debit: '', credit: '', lineMemo: '' },
@@ -281,7 +307,25 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {orgUnits.length > 0 && (
+            <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+              <span className="text-slate-400">الوحدة:</span>
+              <select
+                value={filterOrgUnitId}
+                onChange={(e) => setFilterOrgUnitId(e.target.value)}
+                className="bg-transparent text-slate-200 focus:outline-none text-xs cursor-pointer"
+              >
+                <option value="" className="bg-slate-900 text-slate-200">كل الوحدات التنظيمية</option>
+                {orgUnits.map((ou) => (
+                  <option key={ou.id} value={ou.id} className="bg-slate-900 text-slate-200">
+                    {ou.code} — {ou.nameAr}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button
             onClick={loadData}
             disabled={loading}
@@ -325,6 +369,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
               <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
                 <th className="py-3.5 px-4">رقم القيد</th>
                 <th className="py-3.5 px-4">التاريخ</th>
+                <th className="py-3.5 px-4">الوحدة التنظيمية</th>
                 <th className="py-3.5 px-4">البيان / الشرح</th>
                 <th className="py-3.5 px-4 text-center">الحالة</th>
                 <th className="py-3.5 px-4 text-center">الإجراءات</th>
@@ -333,7 +378,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-500">
+                  <td colSpan={6} className="py-12 text-center text-slate-500">
                     <div className="flex items-center justify-center gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
                       <span>جاري تحميل دفتر القيود...</span>
@@ -342,7 +387,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
                 </tr>
               ) : entries.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-500">
+                  <td colSpan={6} className="py-12 text-center text-slate-500">
                     لا توجد قيود مسجلة بعد في دفتر اليومية
                   </td>
                 </tr>
@@ -353,6 +398,15 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
                       {entry.entryNo || 'مسودة (لم يرحل)'}
                     </td>
                     <td className="py-3.5 px-4">{entry.entryDate}</td>
+                    <td className="py-3.5 px-4 text-slate-300">
+                      {entry.orgUnitNameAr ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-slate-800 text-slate-300 font-medium">
+                          {entry.orgUnitCode ? `${entry.orgUnitCode} - ` : ''}{entry.orgUnitNameAr}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 font-mono">—</span>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4 text-slate-300 max-w-xs truncate">
                       {entry.memo || '—'}
                       {entry.reversedByEntryId && (
@@ -580,7 +634,24 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
-                <div className="sm:col-span-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    الوحدة التنظيمية (اختياري)
+                  </label>
+                  <select
+                    value={newOrgUnitId}
+                    onChange={(e) => setNewOrgUnitId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">(غير محدد - على مستوى الشركة)</option>
+                    {orgUnits.map((ou) => (
+                      <option key={ou.id} value={ou.id}>
+                        {ou.code} — {ou.nameAr}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     البيان العام للقيد
                   </label>

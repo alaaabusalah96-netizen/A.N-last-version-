@@ -163,6 +163,15 @@
     5. Architecture: RLS remains strictly company-first; org scoping is enforced in application services for v1 with forward compatibility for RLS v2.
   - P05_STARTED: `YES` (Organizational structure implemented)
   - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 014 on live environments)
+- **AN-P1D-ACCOUNTING-UI-EXPANSION-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Implemented Trial Balance aggregation and optional Org Unit filtering in general ledger entries.
+    1. Backend: Added `GET /api/accounting/trial-balance` endpoint in `accountingRoutes.ts`, creating `trialBalanceService` wrapped in `withTenantTransaction` to compute debits, credits, and net balances for postable accounts from posted journal entries (`status = 'posted'`) with optional date (`asOfDate`) and `orgUnitId` filters.
+    2. Journal Org Unit Integration: Updated `journalTypes`, `journalRepository`, and `journalService` to handle `orgUnitId` persistence and filtering.
+    3. UI Expansion: Added `TrialBalancePanel` component with date and org unit filters, debit/credit totals, and balance status indicators. Wired as «ميزان المراجعة» tab in `AccountingWorkspace`. Added org unit filter dropdown and draft selection in `JournalWorkspace`.
+    4. Constraints: No new migrations or business modules added.
+  - P05_STARTED: `YES` (Trial Balance & Ledger UI Expansion implemented)
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

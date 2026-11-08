@@ -23,6 +23,9 @@ export interface JournalEntry {
   postedAt?: string | null;
   postedBy?: string | null;
   reversedByEntryId?: string | null;
+  orgUnitId?: string | null;
+  orgUnitCode?: string | null;
+  orgUnitNameAr?: string | null;
   createdBy?: string | null;
   createdAt: string;
   lines?: JournalLine[];
@@ -38,5 +41,6 @@ export interface CreateJournalLineInput {
 export interface CreateDraftJournalEntryInput {
   entryDate: string;
   memo?: string | null;
+  orgUnitId?: string | null;
   lines: CreateJournalLineInput[];
 }

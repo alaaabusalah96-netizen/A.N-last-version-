@@ -57,18 +57,22 @@ export class JournalRepository {
   /**
    * Create a draft journal entry and its child lines atomically.
    */
+  /**
+   * Create a draft journal entry and its child lines atomically.
+   */
   async createDraft(
     companyId: string,
     entryDate: string,
     memo: string | null,
     lines: CreateJournalLineInput[],
     actorId?: string,
+    orgUnitId?: string | null,
     customExecutor?: DbExecutor
   ): Promise<JournalEntry> {
     const run = async (executor: DbExecutor) => {
       const entrySql = `
-        INSERT INTO journal_entries (company_id, entry_date, memo, status, created_by, created_at)
-        VALUES ($1, $2, $3, 'draft', $4, NOW())
+        INSERT INTO journal_entries (company_id, entry_date, memo, status, created_by, org_unit_id, created_at)
+        VALUES ($1, $2, $3, 'draft', $4, $5, NOW())
         RETURNING 
           id, 
           company_id as "companyId", 
@@ -80,6 +84,7 @@ export class JournalRepository {
           posted_at as "postedAt",
           posted_by as "postedBy",
           reversed_by_entry_id as "reversedByEntryId",
+          org_unit_id as "orgUnitId",
           created_by as "createdBy", 
           created_at as "createdAt"
       `;
@@ -88,14 +93,15 @@ export class JournalRepository {
         entryDate,
         memo,
         actorId || null,
+        orgUnitId || null,
       ]);
       const entry = entryRes.rows[0];
 
       const insertedLines: JournalLine[] = [];
       for (const line of lines) {
         const lineSql = `
-          INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit, line_memo)
-          VALUES ($1, $2, $3, $4, $5, $6)
+          INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit, line_memo, org_unit_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING 
             id, 
             company_id as "companyId", 
@@ -112,6 +118,7 @@ export class JournalRepository {
           line.debit,
           line.credit,
           line.lineMemo || null,
+          orgUnitId || null,
         ]);
         insertedLines.push(lineRes.rows[0]);
       }
@@ -137,20 +144,24 @@ export class JournalRepository {
     const run = async (executor: DbExecutor) => {
       const entrySql = `
         SELECT 
-          id, 
-          company_id as "companyId", 
-          entry_date::text as "entryDate", 
-          entry_no as "entryNo",
-          memo, 
-          status, 
-          period_id as "periodId",
-          posted_at as "postedAt",
-          posted_by as "postedBy",
-          reversed_by_entry_id as "reversedByEntryId",
-          created_by as "createdBy", 
-          created_at as "createdAt"
-        FROM journal_entries
-        WHERE id = $1 AND company_id = $2
+          e.id, 
+          e.company_id as "companyId", 
+          e.entry_date::text as "entryDate", 
+          e.entry_no as "entryNo",
+          e.memo, 
+          e.status, 
+          e.period_id as "periodId",
+          e.posted_at as "postedAt",
+          e.posted_by as "postedBy",
+          e.reversed_by_entry_id as "reversedByEntryId",
+          e.org_unit_id as "orgUnitId",
+          o.code as "orgUnitCode",
+          o.name_ar as "orgUnitNameAr",
+          e.created_by as "createdBy", 
+          e.created_at as "createdAt"
+        FROM journal_entries e
+        LEFT JOIN org_units o ON e.org_unit_id = o.id
+        WHERE e.id = $1 AND e.company_id = $2
       `;
       const res = await executor.query<JournalEntry>(entrySql, [entryId, companyId]);
       if (res.rows.length === 0) return null;
@@ -185,35 +196,40 @@ export class JournalRepository {
   }
 
   /**
-   * List journal entries for a company.
+   * List journal entries for a company with optional orgUnitId filter.
    */
   async list(
     companyId: string,
     limit: number = 50,
     offset: number = 0,
+    orgUnitId?: string,
     customExecutor?: DbExecutor
   ): Promise<JournalEntry[]> {
     const run = async (executor: DbExecutor) => {
       const sql = `
         SELECT 
-          id, 
-          company_id as "companyId", 
-          entry_date::text as "entryDate", 
-          entry_no as "entryNo",
-          memo, 
-          status, 
-          period_id as "periodId",
-          posted_at as "postedAt",
-          posted_by as "postedBy",
-          reversed_by_entry_id as "reversedByEntryId",
-          created_by as "createdBy", 
-          created_at as "createdAt"
-        FROM journal_entries
-        WHERE company_id = $1
-        ORDER BY created_at DESC
+          e.id, 
+          e.company_id as "companyId", 
+          e.entry_date::text as "entryDate", 
+          e.entry_no as "entryNo",
+          e.memo, 
+          e.status, 
+          e.period_id as "periodId",
+          e.posted_at as "postedAt",
+          e.posted_by as "postedBy",
+          e.reversed_by_entry_id as "reversedByEntryId",
+          e.org_unit_id as "orgUnitId",
+          o.code as "orgUnitCode",
+          o.name_ar as "orgUnitNameAr",
+          e.created_by as "createdBy", 
+          e.created_at as "createdAt"
+        FROM journal_entries e
+        LEFT JOIN org_units o ON e.org_unit_id = o.id
+        WHERE e.company_id = $1 AND ($4::uuid IS NULL OR e.org_unit_id = $4::uuid)
+        ORDER BY e.created_at DESC
         LIMIT $2 OFFSET $3
       `;
-      const res = await executor.query<JournalEntry>(sql, [companyId, limit, offset]);
+      const res = await executor.query<JournalEntry>(sql, [companyId, limit, offset, orgUnitId || null]);
       return res.rows;
     };
 
