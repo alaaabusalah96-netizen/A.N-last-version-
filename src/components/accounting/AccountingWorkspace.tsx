@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountsPanel } from './AccountsPanel.js';
+import { JournalWorkspace } from './JournalWorkspace.js';
 
 interface Company {
   id: string;
@@ -147,19 +148,11 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
       ) : activeTab === 'coa' ? (
         <AccountsPanel companyId={selectedCompanyId} canCreate={canWrite} canSeed={canWrite} />
       ) : (
-        /* Journal Entries Placeholder Tab */
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-10 text-center flex flex-col items-center gap-3 shadow-xl">
-          <div className="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400">
-            <FileText className="w-6 h-6 text-indigo-400" />
-          </div>
-          <h3 className="text-base font-bold text-white">دفتر اليومية العامة (Journal Entries)</h3>
-          <p className="text-xs text-slate-400 max-w-md">
-            الهيكل التأسيسي لقيود اليومية جاهز في قاعدة البيانات (`journal_entries` & `journal_lines`). وسيتم تفعيل المحرك الكامل في الحزم التالية.
-          </p>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 text-xs font-medium mt-2">
-            <span>لا توجد قيود مسجلة بعد</span>
-          </div>
-        </div>
+        <JournalWorkspace
+          companyId={selectedCompanyId}
+          canWrite={canWrite}
+          canPost={userRole === 'platform_admin' || userRole === 'company_admin'}
+        />
       )}
     </div>
   );

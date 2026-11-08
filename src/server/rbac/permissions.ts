@@ -23,6 +23,11 @@ export const PERMISSIONS = {
   ACCOUNTING_ACCOUNTS_CREATE: 'accounting.accounts.create',
   ACCOUNTING_ACCOUNTS_SEED: 'accounting.accounts.seed',
 
+  // Accounting Journal Entries permissions
+  ACCOUNTING_JOURNALS_READ: 'accounting.journals.read',
+  ACCOUNTING_JOURNALS_WRITE: 'accounting.journals.write',
+  ACCOUNTING_JOURNALS_POST: 'accounting.journals.post',
+
   // Company Settings
   COMPANY_SETTINGS_READ: 'company:settings:read',
   COMPANY_SETTINGS_WRITE: 'company:settings:write',

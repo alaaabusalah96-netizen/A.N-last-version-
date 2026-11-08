@@ -55,6 +55,24 @@ export class AccountRepository {
     return await withTenantTransaction(companyId, run);
   }
 
+  async findById(companyId: string, id: string, customExecutor?: DbExecutor): Promise<Account | null> {
+    const run = async (tx: DbExecutor) => {
+      const sql = `
+        SELECT id, company_id, code, name_ar, name_en, account_type, parent_id, is_postable, is_active, created_at, updated_at
+        FROM accounts
+        WHERE company_id = $1 AND id = $2;
+      `;
+      const res = await tx.query(sql, [companyId, id]);
+      if (res.rows.length === 0) return null;
+      return mapRowToAccount(res.rows[0]);
+    };
+
+    if (customExecutor) {
+      return run(customExecutor);
+    }
+    return await withTenantTransaction(companyId, run);
+  }
+
   async countAccountsByCompany(companyId: string, customExecutor?: DbExecutor): Promise<number> {
     const run = async (tx: DbExecutor) => {
       const sql = `

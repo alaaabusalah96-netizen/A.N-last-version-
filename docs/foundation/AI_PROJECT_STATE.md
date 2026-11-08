@@ -143,6 +143,16 @@
   - Explicit non-claim: Runtime ledger engine and `org_units` database tables are NOT implemented yet (design and specification phase only).
   - P05_STARTED: `YES` (Design foundations complete; next phase is P1b runtime implementation)
   - CI_STATUS: `PENDING`
+- **AN-P1B-LEDGER-GUARANTEES-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Implemented double-entry ledger guarantees per ADR-02.
+    1. Migration 013: Created `accounting_sequences` (atomic monotonic document numbering) and `accounting_periods`, added `entry_no`, `posted_at`, `posted_by`, and `reversed_by_entry_id` columns, enforced non-negative and single-sided line constraints, and implemented immutability triggers on posted entries and lines with tenant RLS policies for `an_app`. Registered in `table_ownership.json`.
+    2. Journal Engine: Created `journalTypes`, `journalRepository`, and `journalService` enforcing `SUM(debit) === SUM(credit) > 0`, minimum 2 lines, active/postable account validation, sequence allocation, immutability, and transactional reversal.
+    3. API Routes: Added `/api/accounting/journals` (list, get, create draft, post, reverse) guarded by fine-grained permissions `ACCOUNTING_JOURNALS_READ/WRITE/POST`.
+    4. UI: Mounted `JournalWorkspace` inside the Accounting Core workspace under the «دفتر اليومية العامة» tab with draft creation, balance indicators, entry posting, and reversing actions.
+    5. Out of scope / Deferred: Org units (P1c), multi-currency revaluation, auto-close periods.
+  - P05_STARTED: `YES` (Ledger Posting Engine implemented)
+  - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 013 on live environments)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

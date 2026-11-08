@@ -58,5 +58,15 @@
     "table": "company_settings",
     "scope": "tenant",
     "reason": "Per-company operational settings"
+  },
+  {
+    "table": "accounting_sequences",
+    "scope": "tenant",
+    "reason": "Per-company document sequence counters"
+  },
+  {
+    "table": "accounting_periods",
+    "scope": "tenant",
+    "reason": "Per-company accounting periods"
   }
 ]
