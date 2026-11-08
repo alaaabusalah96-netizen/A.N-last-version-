@@ -156,19 +156,35 @@ export class OrgUnitService {
   /**
    * Application-layer scope check helper (ADR-03).
    * If a user has defined scopes, asserts whether target orgUnitId is authorized.
-   * If user has no specific org unit scopes configured, access defaults to company-wide (backward compatible).
+   * - platform_admin: BYPASS (returns true).
+   * - empty scopes: returns true (company-wide access).
+   * - non-empty scopes + targetOrgUnitId null/undefined:
+   *   - requiredLevel === 'write': returns false (scoped user must specify an allowed org unit).
+   *   - requiredLevel === 'read': returns true (for reading company summary).
+   * - targetOrgUnitId set: returns true if matching direct unit or descendant.
    */
   async assertUserOrgAccess(
     companyId: string,
     userId: string,
     targetOrgUnitId?: string | null,
-    requiredLevel: 'read' | 'write' = 'read'
+    requiredLevel: 'read' | 'write' = 'read',
+    isPlatformAdmin: boolean = false
   ): Promise<boolean> {
-    if (!targetOrgUnitId) return true; // Company-wide entity
+    if (isPlatformAdmin) return true; // platform_admin bypasses org scope
+    if (!companyId || !userId) return false;
 
     const userScopes = await this.orgRepo.listUserScopes(companyId, userId);
     if (userScopes.length === 0) {
       // Backward-compatible: No explicit org unit restriction implies company-wide access
+      return true;
+    }
+
+    // Scoped user with non-empty scopes
+    if (!targetOrgUnitId) {
+      // Write/post without target org unit when user has restricted scopes -> reject
+      if (requiredLevel === 'write') {
+        return false;
+      }
       return true;
     }
 

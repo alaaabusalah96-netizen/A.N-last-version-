@@ -1,5 +1,7 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
+import { defaultOrgUnitService } from '../org/orgUnitService.js';
+import { ForbiddenError } from '../http/errors.js';
 
 export interface TrialBalanceRow {
   accountId: string;
@@ -25,12 +27,28 @@ export interface TrialBalanceSummary {
 export class TrialBalanceService {
   /**
    * Generates a Trial Balance summary for a company from POSTED journal lines only.
+   * Asserts actor has read scope access for opts.orgUnitId if specified.
    * Uses withTenantTransaction to enforce tenant database isolation.
    */
   async getTrialBalance(
     companyId: string,
-    opts?: { asOfDate?: string; orgUnitId?: string }
+    opts?: { asOfDate?: string; orgUnitId?: string },
+    actorId?: string,
+    isPlatformAdmin: boolean = false
   ): Promise<TrialBalanceSummary> {
+    if (actorId && opts?.orgUnitId) {
+      const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+        companyId,
+        actorId,
+        opts.orgUnitId,
+        'read',
+        isPlatformAdmin
+      );
+      if (!allowed) {
+        throw new ForbiddenError('User is not authorized to view trial balance for this organizational unit scope');
+      }
+    }
+
     return await withTenantTransaction(companyId, async (executor: DbExecutor) => {
       let orgUnitNameAr: string | null = null;
 

@@ -56,6 +56,7 @@
     "test:p1c-org-integrity-1": "tsx scripts/verifyP1cOrgIntegrity1.ts",
     "test:fix-ledger-org-followup-1": "tsx scripts/verifyFixLedgerOrgFollowup1.ts",
     "test:pg-smoke-1": "tsx scripts/verifyPgIntegrationSmoke1.ts",
+    "test:org-scope-on-ledger-1": "tsx scripts/verifyOrgScopeOnLedger1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

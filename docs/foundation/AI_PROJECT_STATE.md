@@ -202,6 +202,15 @@
   - Summary: Created automated PostgreSQL integration smoke verification script `scripts/verifyPgIntegrationSmoke1.ts` validating migrations 015–017 presence, trial balance posted subquery isolation, journal line trigger OLD/NEW checks, and live DB case assertions when a valid connection string is provided.
   - P05_STARTED: `YES` (PostgreSQL Smoke Harness implemented)
   - CI_STATUS: `PENDING`
+- **AN-ORG-SCOPE-ON-LEDGER-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Connected `assertUserOrgAccess` to general ledger entries and trial balance routes per ADR-03.
+    1. Backward Compatibility: Preserved company-wide access when a user has zero org scopes configured.
+    2. Scoped User Enforcements: Enforced that users with active org scopes must select/specify an authorized org unit for creation, posting, and reversal.
+    3. Platform Admin Policy: Implemented BYPASS policy for `platform_admin` role for support/administrative actions.
+    4. Service Integration: Wired scope checks across `journalService.ts` (`createDraftEntry`, `postEntry`, `reverseEntry`, `listEntries`, `getEntry`), `trialBalanceService.ts` (`getTrialBalance`), and `accountingRoutes.ts`.
+  - P05_STARTED: `YES` (Org Scope Ledger Wiring implemented)
+  - CI_STATUS: `PENDING` (No database migrations required)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

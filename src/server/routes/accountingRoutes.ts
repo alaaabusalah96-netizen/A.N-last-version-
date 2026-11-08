@@ -111,7 +111,14 @@ accountingRoutes.get(
     const offset = parseInt(req.query.offset as string, 10) || 0;
 
     const { defaultJournalService } = await import('../accounting/journalService.js');
-    const journals = await defaultJournalService.listEntries(companyId, limit, offset, orgUnitId);
+    const journals = await defaultJournalService.listEntries(
+      companyId,
+      limit,
+      offset,
+      orgUnitId,
+      user.id,
+      user.role === 'platform_admin'
+    );
     return res.status(200).json({ status: 'ok', journals });
   })
 );
@@ -128,7 +135,12 @@ accountingRoutes.get(
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
 
     const { defaultJournalService } = await import('../accounting/journalService.js');
-    const journal = await defaultJournalService.getEntry(companyId, id);
+    const journal = await defaultJournalService.getEntry(
+      companyId,
+      id,
+      user.id,
+      user.role === 'platform_admin'
+    );
     if (!journal) {
       throw new NotFoundError('Journal entry not found');
     }
@@ -154,7 +166,8 @@ accountingRoutes.post(
     const journal = await defaultJournalService.createDraftEntry(
       companyId,
       { entryDate, memo, orgUnitId, lines },
-      user.id
+      user.id,
+      user.role === 'platform_admin'
     );
     return res.status(201).json({ status: 'ok', journal });
   })
@@ -176,7 +189,12 @@ accountingRoutes.post(
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_POST, companyId);
 
     const { defaultJournalService } = await import('../accounting/journalService.js');
-    const journal = await defaultJournalService.postEntry(companyId, id, user.id);
+    const journal = await defaultJournalService.postEntry(
+      companyId,
+      id,
+      user.id,
+      user.role === 'platform_admin'
+    );
     return res.status(200).json({ status: 'ok', journal });
   })
 );
@@ -197,7 +215,13 @@ accountingRoutes.post(
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_POST, companyId);
 
     const { defaultJournalService } = await import('../accounting/journalService.js');
-    const reversal = await defaultJournalService.reverseEntry(companyId, id, user.id, reversalMemo);
+    const reversal = await defaultJournalService.reverseEntry(
+      companyId,
+      id,
+      user.id,
+      reversalMemo,
+      user.role === 'platform_admin'
+    );
     return res.status(200).json({ status: 'ok', reversal });
   })
 );
@@ -219,7 +243,12 @@ accountingRoutes.get(
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
 
     const { defaultTrialBalanceService } = await import('../accounting/trialBalanceService.js');
-    const summary = await defaultTrialBalanceService.getTrialBalance(companyId, { asOfDate, orgUnitId });
+    const summary = await defaultTrialBalanceService.getTrialBalance(
+      companyId,
+      { asOfDate, orgUnitId },
+      user.id,
+      user.role === 'platform_admin'
+    );
     return res.status(200).json({ status: 'ok', summary });
   })
 );

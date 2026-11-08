@@ -2,7 +2,8 @@ import { defaultJournalRepository, JournalRepository } from './journalRepository
 import { defaultAccountRepository, AccountRepository } from './accountRepository.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { defaultAuditService } from '../audit/auditService.js';
-import { ValidationError, NotFoundError } from '../http/errors.js';
+import { defaultOrgUnitService } from '../org/orgUnitService.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.js';
 import {
   JournalEntry,
   CreateDraftJournalEntryInput,
@@ -17,12 +18,14 @@ export class JournalService {
 
   /**
    * 1. Create a draft journal entry.
-   * Validates accounts belong to the company, are postable and active, and line amounts are valid.
+   * Validates accounts belong to the company, are postable and active, line amounts are valid,
+   * and target orgUnitId is authorized under the actor's user_org_scope.
    */
   async createDraftEntry(
     companyId: string,
     input: CreateDraftJournalEntryInput,
-    actorId?: string
+    actorId?: string,
+    isPlatformAdmin: boolean = false
   ): Promise<JournalEntry> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('companyId is required');
@@ -34,6 +37,19 @@ export class JournalService {
 
     if (!input.lines || !Array.isArray(input.lines) || input.lines.length < 2) {
       throw new ValidationError('Journal entry must have at least two lines');
+    }
+
+    if (actorId) {
+      const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+        companyId,
+        actorId,
+        input.orgUnitId,
+        'write',
+        isPlatformAdmin
+      );
+      if (!allowed) {
+        throw new ForbiddenError('User is not authorized to create journal entries for this organizational unit scope');
+      }
     }
 
     return await withTenantTransaction(companyId, async (tx) => {
@@ -113,12 +129,14 @@ export class JournalService {
   /**
    * 2. Post a journal entry.
    * Strict double-entry balance check: SUM(debit) === SUM(credit) > 0.
+   * Asserts actor has write scope access for entry.orgUnitId.
    * Allocates sequence number from accounting_sequences inside the same transaction.
    */
   async postEntry(
     companyId: string,
     entryId: string,
-    actorId: string
+    actorId: string,
+    isPlatformAdmin: boolean = false
   ): Promise<JournalEntry> {
     if (!companyId || !entryId) {
       throw new ValidationError('companyId and entryId are required');
@@ -128,6 +146,19 @@ export class JournalService {
       const entry = await this.journalRepo.findByIdForUpdate(companyId, entryId, tx);
       if (!entry) {
         throw new NotFoundError('Journal entry not found');
+      }
+
+      if (actorId) {
+        const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+          companyId,
+          actorId,
+          entry.orgUnitId,
+          'write',
+          isPlatformAdmin
+        );
+        if (!allowed) {
+          throw new ForbiddenError('User is not authorized to post journal entries for this organizational unit scope');
+        }
       }
 
       if (entry.status !== 'draft') {
@@ -198,6 +229,7 @@ export class JournalService {
   /**
    * 3. Reverse a posted journal entry.
    * Source entry must be posted and not previously reversed.
+   * Asserts actor has write scope access for source.orgUnitId.
    * Creates a new reversing entry with swapped debit/credits, posts it immediately,
    * and links reversed_by_entry_id on the original entry.
    */
@@ -205,7 +237,8 @@ export class JournalService {
     companyId: string,
     entryId: string,
     actorId: string,
-    reversalMemo?: string
+    reversalMemo?: string,
+    isPlatformAdmin: boolean = false
   ): Promise<JournalEntry> {
     if (!companyId || !entryId) {
       throw new ValidationError('companyId and entryId are required');
@@ -215,6 +248,19 @@ export class JournalService {
       const source = await this.journalRepo.findById(companyId, entryId, tx);
       if (!source) {
         throw new NotFoundError('Source journal entry not found');
+      }
+
+      if (actorId) {
+        const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+          companyId,
+          actorId,
+          source.orgUnitId,
+          'write',
+          isPlatformAdmin
+        );
+        if (!allowed) {
+          throw new ForbiddenError('User is not authorized to reverse journal entries for this organizational unit scope');
+        }
       }
 
       if (source.status !== 'posted') {
@@ -302,16 +348,48 @@ export class JournalService {
     companyId: string,
     limit: number = 50,
     offset: number = 0,
-    orgUnitId?: string
+    orgUnitId?: string,
+    actorId?: string,
+    isPlatformAdmin: boolean = false
   ): Promise<JournalEntry[]> {
+    if (actorId && orgUnitId) {
+      const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+        companyId,
+        actorId,
+        orgUnitId,
+        'read',
+        isPlatformAdmin
+      );
+      if (!allowed) {
+        throw new ForbiddenError('User is not authorized to view entries for this organizational unit scope');
+      }
+    }
     return await this.journalRepo.list(companyId, limit, offset, orgUnitId);
   }
 
   /**
    * 5. Get single entry with lines.
    */
-  async getEntry(companyId: string, entryId: string): Promise<JournalEntry | null> {
-    return await this.journalRepo.findById(companyId, entryId);
+  async getEntry(
+    companyId: string,
+    entryId: string,
+    actorId?: string,
+    isPlatformAdmin: boolean = false
+  ): Promise<JournalEntry | null> {
+    const entry = await this.journalRepo.findById(companyId, entryId);
+    if (entry && actorId) {
+      const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+        companyId,
+        actorId,
+        entry.orgUnitId,
+        'read',
+        isPlatformAdmin
+      );
+      if (!allowed) {
+        throw new ForbiddenError('User is not authorized to view entries for this organizational unit scope');
+      }
+    }
+    return entry;
   }
 }
 
