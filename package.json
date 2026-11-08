@@ -47,9 +47,10 @@
     "test:identity-users-1": "tsx scripts/verifyIdentityUsers1.ts",
     "test:company-settings-1": "tsx scripts/verifyCompanySettings1.ts",
     "test:p0-security-fix-1b": "tsx scripts/verifyP0SecurityFix1b.ts",
+    "test:p0-verify-1": "tsx scripts/verifyP0Verify1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "test:unit": "vitest run src/server/**/__tests__/*.test.ts"
+    "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

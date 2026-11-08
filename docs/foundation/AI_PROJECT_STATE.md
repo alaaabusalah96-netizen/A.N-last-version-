@@ -124,6 +124,14 @@
     6. P0-7: Removed string concatenation and dynamic import obfuscation in `userAdminRoutes.ts`, using direct typed imports.
   - P05_STARTED: `YES` (Fixes applied to existing platform routes and services; org units / ledger engine NOT started)
   - CI_STATUS: `PENDING`
+- **AN-P0-VERIFY-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Automated regression harness and HTTP verification locking P0 security fixes C1–C5.
+    1. C1 Route Verification: Real in-process HTTP tests (`src/server/tests/p0HttpRoutes.test.ts` and `scripts/verifyP0Verify1.ts`) proving `/api/accounting/accounts` and `/api/users` are mounted and return HTTP 401/403 rather than 404.
+    2. Regression Guards: Automated static assertions for target protection (C2), company-scoped mutations (C2), membership IDOR prevention (C3), RLS tenant context (C4), tenant user listing (C5), de-obfuscation (P0-7), and min password length >= 12.
+    3. Architecture: Validated clean app factory (`createApp`) export without side-effect server listen.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING` (P0 C1–C5 code fixes locked with verifyP0Verify1; CI green SHA still PENDING until Actions run)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
