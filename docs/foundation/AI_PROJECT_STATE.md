@@ -219,6 +219,15 @@
     3. Automated Closure Harness: Created `scripts/verifyP1FoundationClose1.ts` validating regression markers for P0 security, ledger hardening, org integrity, trial balance isolation, and org scope wiring.
   - P05_STARTED: `YES` (P1 Foundation track CLOSED; external business modules remain unstarted)
   - CI_STATUS: `PENDING` (No runtime code or migration changes)
+- **AN-FIX-VERIFY-MIGRATE-SCOPE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Closed three residual security, tooling, and scoping defects.
+    1. Migrate Tooling Security: Completely removed `/proc` process environment scraping and `DATABASE_URL` retry/fallback from `scripts/migrate.ts`, requiring `MIGRATION_DATABASE_URL` explicitly for running schema migrations.
+    2. PostgreSQL Smoke Verification: Removed `/proc` loading from `scripts/verifyPgIntegrationSmoke1.ts` and hardened T2 assertion to match strictly on `/CANNOT_MODIFY_POSTED|posted journal entry/i`.
+    3. Scope Security Enforcement: Updated `journalService.ts` (`listEntries`) and `trialBalanceService.ts` (`getTrialBalance`) to require an `orgUnitId` filter parameter for scoped users when listing entries or generating a trial balance.
+    4. Verification Harness: Created `scripts/verifyFixVerifyMigrateScope1.ts` (script `test:fix-verify-migrate-scope-1`).
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

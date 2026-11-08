@@ -1,14 +1,17 @@
 # Open Gaps & Residual Technical Risks Registry
 
 ## Overview
-This document tracks residual technical gaps, open risk items, and recommended future packages following the closure of the P1 Foundation track (P0 Security, P1 Ledger, P1 Org Units, and P1 UI Expansion).
+This document tracks residual technical gaps, open risk items, and recommended future packages following the closure of the P1 Foundation track (P0 Security, P1 Ledger, P1 Org Units, P1 UI Expansion, and AN-FIX-VERIFY-MIGRATE-SCOPE-1).
 
 ---
 
 ## Residual Open Gaps Registry
 
-| ID | Gap / Description | Severity | Impact / Risk Area | Suggested Package / Mitigation |
+| ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **MIGRATE-ENV** | Scraped `/proc` for `DATABASE_URL` and fell back to `DATABASE_URL` on migration auth failure. | **CLOSED** | Security & Privileges | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. `/proc` removed. `MIGRATION_DATABASE_URL` is strictly required. No fallback. |
+| **PG-SMOKE-QUALITY** | Smoke test T2 passed on any error; contained `/proc` scraping. | **CLOSED** | Test Quality & Assurance | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. `/proc` removed. T2 requires matching `/CANNOT_MODIFY_POSTED|posted journal entry/i`. |
+| **LIST-SCOPE-ENFORCE** | `listEntries` / `getTrialBalance` permitted scoped users without `orgUnitId` to read company-wide entries. | **CLOSED** | Scope Security | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. Requires `orgUnitId` parameter for scoped users (`ValidationError`). |
 | **PG-SMOKE-LIVE** | Integration smoke tests (`T1–T7` in `verifyPgIntegrationSmoke1.ts`) are `BLOCKED` in local preview due to unauthenticated / restricted application role DDL credentials in AI Studio preview sandbox. | **High** for Prod Certification | Database Trigger & FK Runtime Execution | Operator executes `npm run test:pg-smoke-1` on an isolated test database with `MIGRATION_DATABASE_URL` configured. |
 | **PERIODS** | `accounting_periods` table and structure exist in migration 013, but fiscal period closure enforcement (blocking entry posting in closed periods) is not yet wired into `postEntry`. | **Medium** | Accounting Controls | `AN-ACCOUNTING-PERIODS-ENFORCE-1` |
 | **CI** | No green GitHub Actions run SHA recorded yet for the latest baseline commits. | **Medium** | Automated CI Verification | `AN-CI-GATE-1` (Trigger and verify GitHub Actions pipeline run). |
@@ -20,3 +23,4 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 ## Next Steps & Strategy
 No new business modules should be deployed to production until high-severity open items (specifically `PG-SMOKE-LIVE`) are validated by the database operator on an active PostgreSQL test instance.
+

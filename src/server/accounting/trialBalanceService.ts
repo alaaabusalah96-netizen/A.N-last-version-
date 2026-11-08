@@ -1,7 +1,7 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { defaultOrgUnitService } from '../org/orgUnitService.js';
-import { ForbiddenError } from '../http/errors.js';
+import { ForbiddenError, ValidationError } from '../http/errors.js';
 
 export interface TrialBalanceRow {
   accountId: string;
@@ -36,7 +36,24 @@ export class TrialBalanceService {
     actorId?: string,
     isPlatformAdmin: boolean = false
   ): Promise<TrialBalanceSummary> {
-    if (actorId && opts?.orgUnitId) {
+    if (actorId && !isPlatformAdmin) {
+      const userScopes = await defaultOrgUnitService.listUserScopes(companyId, actorId);
+      if (userScopes.length > 0) {
+        if (!opts?.orgUnitId) {
+          throw new ValidationError('Organizational unit filter (orgUnitId) is required for scoped users to generate Trial Balance');
+        }
+        const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+          companyId,
+          actorId,
+          opts.orgUnitId,
+          'read',
+          isPlatformAdmin
+        );
+        if (!allowed) {
+          throw new ForbiddenError('User is not authorized to view trial balance for this organizational unit scope');
+        }
+      }
+    } else if (actorId && opts?.orgUnitId) {
       const allowed = await defaultOrgUnitService.assertUserOrgAccess(
         companyId,
         actorId,

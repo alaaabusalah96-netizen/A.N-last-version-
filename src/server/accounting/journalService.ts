@@ -343,6 +343,8 @@ export class JournalService {
 
   /**
    * 4. List journal entries for a company.
+   * If actor is scoped (has user_org_scope entries) and is not a platform admin,
+   * an orgUnitId filter is required.
    */
   async listEntries(
     companyId: string,
@@ -352,7 +354,24 @@ export class JournalService {
     actorId?: string,
     isPlatformAdmin: boolean = false
   ): Promise<JournalEntry[]> {
-    if (actorId && orgUnitId) {
+    if (actorId && !isPlatformAdmin) {
+      const userScopes = await defaultOrgUnitService.listUserScopes(companyId, actorId);
+      if (userScopes.length > 0) {
+        if (!orgUnitId) {
+          throw new ValidationError('Organizational unit filter (orgUnitId) is required for scoped users when listing entries');
+        }
+        const allowed = await defaultOrgUnitService.assertUserOrgAccess(
+          companyId,
+          actorId,
+          orgUnitId,
+          'read',
+          isPlatformAdmin
+        );
+        if (!allowed) {
+          throw new ForbiddenError('User is not authorized to view entries for this organizational unit scope');
+        }
+      }
+    } else if (actorId && orgUnitId) {
       const allowed = await defaultOrgUnitService.assertUserOrgAccess(
         companyId,
         actorId,

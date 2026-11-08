@@ -3,44 +3,11 @@ import path from 'path';
 import pg from 'pg';
 import { resolveSslConfig } from '../src/server/db/connection.js';
 
-
-function loadProcessEnvironIfEmpty() {
-  if (!process.env.DATABASE_URL && !process.env.MIGRATION_DATABASE_URL) {
-    try {
-      const pids = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p));
-      for (const pid of pids) {
-        try {
-          const envText = fs.readFileSync(`/proc/${pid}/environ`, 'utf8');
-          if (envText.includes('DATABASE_URL=')) {
-            const parsed = Object.fromEntries(
-              envText
-                .split('\0')
-                .filter(Boolean)
-                .map((s) => {
-                  const i = s.indexOf('=');
-                  return [s.substring(0, i), s.substring(i + 1)];
-                })
-            );
-            Object.assign(process.env, parsed);
-            console.log('[migrate] Auto-loaded environment secrets from running process:', pid);
-            break;
-          }
-        } catch {
-          // Ignore unreadable processes
-        }
-      }
-    } catch {
-      // Ignore proc errors
-    }
-  }
-}
-
 async function runMigrations() {
-  loadProcessEnvironIfEmpty();
-  const connectionString = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
+  const connectionString = process.env.MIGRATION_DATABASE_URL;
 
   if (!connectionString) {
-    console.error('[migrate] FATAL: Neither MIGRATION_DATABASE_URL nor DATABASE_URL environment variable is configured.');
+    console.error('[migrate] FATAL: MIGRATION_DATABASE_URL environment variable is required for running migrations.');
     process.exit(1);
   }
 
@@ -52,31 +19,13 @@ async function runMigrations() {
   const envSsl = resolveSslConfig(process.env as Record<string, string | undefined>);
   const ssl = isProd ? envSsl : { rejectUnauthorized: false };
 
-  let client = new pg.Client({
+  const client = new pg.Client({
     connectionString: cleanConnectionString(connectionString),
     ssl,
   });
 
-  console.log('[migrate] Connecting to database...');
-  try {
-    await client.connect();
-  } catch (connErr: any) {
-    if (
-      process.env.MIGRATION_DATABASE_URL &&
-      process.env.DATABASE_URL &&
-      process.env.MIGRATION_DATABASE_URL !== process.env.DATABASE_URL &&
-      connErr?.message?.includes('password authentication failed')
-    ) {
-      console.warn('[migrate] MIGRATION_DATABASE_URL authentication failed. Retrying migration using DATABASE_URL...');
-      client = new pg.Client({
-        connectionString: cleanConnectionString(process.env.DATABASE_URL),
-        ssl,
-      });
-      await client.connect();
-    } else {
-      throw connErr;
-    }
-  }
+  console.log('[migrate] Connecting to database using MIGRATION_DATABASE_URL...');
+  await client.connect();
 
   try {
     // 1. Ensure schema_migrations table exists

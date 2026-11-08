@@ -2,36 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 
-function loadProcessEnvironIfEmpty() {
-  if (!process.env.DATABASE_URL && !process.env.MIGRATION_DATABASE_URL) {
-    try {
-      const pids = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p));
-      for (const pid of pids) {
-        try {
-          const envText = fs.readFileSync(`/proc/${pid}/environ`, 'utf8');
-          if (envText.includes('DATABASE_URL=')) {
-            const parsed = Object.fromEntries(
-              envText
-                .split('\0')
-                .filter(Boolean)
-                .map((s) => {
-                  const i = s.indexOf('=');
-                  return [s.substring(0, i), s.substring(i + 1)];
-                })
-            );
-            Object.assign(process.env, parsed);
-            break;
-          }
-        } catch {
-          // Ignore unreadable
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }
-}
-
 async function verifyPgIntegrationSmoke1() {
   console.log('=== VERIFYING AN-PG-INTEGRATION-SMOKE-1 ===\n');
   let passedCount = 0;
@@ -70,7 +40,7 @@ async function verifyPgIntegrationSmoke1() {
   const tbServicePath = path.join(process.cwd(), 'src/server/accounting/trialBalanceService.ts');
   const tbContent = fs.existsSync(tbServicePath) ? fs.readFileSync(tbServicePath, 'utf8') : '';
   assertStatic(
-    tbContent.includes('e.status = \'posted\'') && tbContent.includes('INNER JOIN journal_entries'),
+    tbContent.includes("e.status = 'posted'") && tbContent.includes('INNER JOIN journal_entries'),
     'S2: trialBalanceService.ts strictly filters posted entries via subquery INNER JOIN'
   );
 
@@ -104,7 +74,6 @@ async function verifyPgIntegrationSmoke1() {
   console.log('\n--- Live PostgreSQL Integration Tests (T1 - T7) ---');
 
   // === PART 2: LIVE POSTGRES INTEGRATION TESTS (T1 - T7) ===
-  loadProcessEnvironIfEmpty();
   const connStr = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
 
   if (!connStr) {
@@ -134,7 +103,6 @@ async function verifyPgIntegrationSmoke1() {
 
         // Set RLS tenant variable for a dummy company UUID
         const companyA = '10000000-0000-0000-0000-000000000001';
-        const companyB = '20000000-0000-0000-0000-000000000002';
         await client.query(`SET LOCAL app.current_tenant_id = '${companyA}';`);
 
         // T2: Test line INSERT into posted entry
@@ -159,12 +127,17 @@ async function verifyPgIntegrationSmoke1() {
           console.error('[FAIL] T2: INSERT line into posted entry unexpectedly succeeded');
           failedCount++;
         } catch (err: any) {
-          if (err.message && (err.message.includes('CANNOT_MODIFY_POSTED') || err.message.includes('posted'))) {
+          const isExpectedError =
+            err &&
+            err.message &&
+            /CANNOT_MODIFY_POSTED|posted journal entry/i.test(err.message);
+
+          if (isExpectedError) {
             console.log('[PASS] T2: DB correctly rejected INSERT line into posted entry (CANNOT_MODIFY_POSTED_LINES)');
             passedCount++;
           } else {
-            console.log(`[PASS] T2: DB rejected line insert into posted entry: ${err.message}`);
-            passedCount++;
+            console.error(`[FAIL] T2: Unexpected error when testing posted entry line insert: ${err?.message}`);
+            failedCount++;
           }
         }
 
@@ -208,3 +181,4 @@ verifyPgIntegrationSmoke1().catch((err) => {
   console.error('Unhandled error in verifyPgIntegrationSmoke1:', err);
   process.exit(1);
 });
+

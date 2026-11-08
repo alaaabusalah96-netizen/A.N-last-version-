@@ -58,6 +58,7 @@
     "test:pg-smoke-1": "tsx scripts/verifyPgIntegrationSmoke1.ts",
     "test:org-scope-on-ledger-1": "tsx scripts/verifyOrgScopeOnLedger1.ts",
     "test:p1-foundation-close-1": "tsx scripts/verifyP1FoundationClose1.ts",
+    "test:fix-verify-migrate-scope-1": "tsx scripts/verifyFixVerifyMigrateScope1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"
