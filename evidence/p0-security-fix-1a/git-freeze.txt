@@ -1,0 +1,4 @@
+BRANCH=UNKNOWN (not a git repository)
+HEAD_SHA=UNKNOWN
+STATUS=clean
+LOG1=UNKNOWN
