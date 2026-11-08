@@ -5,6 +5,7 @@ import { CompaniesPanel } from './components/CompaniesPanel.js';
 import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
 import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
+import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
 import { AppSidebar } from './components/shell/AppSidebar.js';
 import { apiFetch } from './lib/apiClient.js';
 
@@ -19,7 +20,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'users' | 'company_settings'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'users' | 'company_settings' | 'org_units'>('companies');
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -92,10 +93,26 @@ export default function App() {
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div>
             <h2 className="text-xl font-bold text-white">
-              {activeNav === 'companies' ? 'الشركات' : activeNav === 'accounting' ? 'المحاسبة' : activeNav === 'users' ? 'المستخدمون' : 'إعدادات الشركة'}
+              {activeNav === 'companies'
+                ? 'الشركات'
+                : activeNav === 'accounting'
+                ? 'المحاسبة'
+                : activeNav === 'users'
+                ? 'المستخدمون'
+                : activeNav === 'org_units'
+                ? 'الوحدات التنظيمية'
+                : 'إعدادات الشركة'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              {activeNav === 'companies' ? 'إدارة الشركات والمستأجرين' : activeNav === 'accounting' ? 'الدليل المحاسبي والقيود' : activeNav === 'users' ? 'إدارة الحسابات وصلاحيات الوصول' : 'الإعدادات التشغيلية والمالية للشركة'}
+              {activeNav === 'companies'
+                ? 'إدارة الشركات والمستأجرين'
+                : activeNav === 'accounting'
+                ? 'الدليل المحاسبي والقيود'
+                : activeNav === 'users'
+                ? 'إدارة الحسابات وصلاحيات الوصول'
+                : activeNav === 'org_units'
+                ? 'الفروع والإدارات ومراكز التكلفة'
+                : 'الإعدادات التشغيلية والمالية للشركة'}
             </p>
           </div>
           <div className="text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
@@ -109,6 +126,8 @@ export default function App() {
           <AccountingWorkspace userRole={currentUser.role} />
         ) : activeNav === 'users' ? (
           <UsersAdminWorkspace />
+        ) : activeNav === 'org_units' ? (
+          <OrgUnitsPanel userRole={currentUser.role} />
         ) : (
           <CompanySettingsPanel userRole={currentUser.role} />
         )}

@@ -153,6 +153,16 @@
     5. Out of scope / Deferred: Org units (P1c), multi-currency revaluation, auto-close periods.
   - P05_STARTED: `YES` (Ledger Posting Engine implemented)
   - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 013 on live environments)
+- **AN-P1C-ORG-UNITS-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Implemented company-scoped organizational units and user org scoping per ADR-01 and ADR-03.
+    1. Migration 014: Created `org_units` (adjacency list `parent_id` + hierarchical `path`), `user_org_scope` (user access by unit with `include_descendants`), and added nullable `org_unit_id` on `accounts`, `journal_entries`, and `journal_lines`. Enabled & forced tenant RLS for `an_app`. Registered in `table_ownership.json`.
+    2. Backend: Created `orgUnitTypes`, `orgUnitRepository`, and `orgUnitService` with parent company isolation validation (preventing intercompany), automated path generation, and application-layer access helpers (`assertUserOrgAccess`).
+    3. API Routes: Added `/api/companies/:companyId/org-units` (list, create, update) and `/api/companies/:companyId/org-scopes` guarded by `ORG_UNITS_READ/WRITE` permissions.
+    4. UI: Added «الوحدات التنظيمية» to AppSidebar, created `OrgUnitsPanel` with tree indentation by path, unit creation modal (with parent selection), and active/inactive toggles.
+    5. Architecture: RLS remains strictly company-first; org scoping is enforced in application services for v1 with forward compatibility for RLS v2.
+  - P05_STARTED: `YES` (Organizational structure implemented)
+  - CI_STATUS: `PENDING` (Requires operator `npm run migrate` for migration 014 on live environments)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

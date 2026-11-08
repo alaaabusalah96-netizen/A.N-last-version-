@@ -28,6 +28,10 @@ export const PERMISSIONS = {
   ACCOUNTING_JOURNALS_WRITE: 'accounting.journals.write',
   ACCOUNTING_JOURNALS_POST: 'accounting.journals.post',
 
+  // Organizational Units permissions
+  ORG_UNITS_READ: 'org:units:read',
+  ORG_UNITS_WRITE: 'org:units:write',
+
   // Company Settings
   COMPANY_SETTINGS_READ: 'company:settings:read',
   COMPANY_SETTINGS_WRITE: 'company:settings:write',

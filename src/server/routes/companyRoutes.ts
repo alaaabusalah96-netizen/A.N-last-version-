@@ -10,11 +10,13 @@ import { wrap } from '../http/asyncHandler.js';
 import { isUuid, isValidCompanyCode } from '../http/validators.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { companySettingsRoutes } from './companySettingsRoutes.js';
+import { orgUnitRoutes } from './orgUnitRoutes.js';
 
 export const companyRoutes = Router();
 
-// Nest settings routes
+// Nest settings and org-units routes
 companyRoutes.use('/:companyId', companySettingsRoutes);
+companyRoutes.use('/:companyId', orgUnitRoutes);
 
 // GET /api/companies — requireAuth + company:read
 companyRoutes.get(

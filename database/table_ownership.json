@@ -68,5 +68,15 @@
     "table": "accounting_periods",
     "scope": "tenant",
     "reason": "Per-company accounting periods"
+  },
+  {
+    "table": "org_units",
+    "scope": "tenant",
+    "reason": "Per-company organizational units (branches, departments, cost centers, divisions)"
+  },
+  {
+    "table": "user_org_scope",
+    "scope": "tenant",
+    "reason": "Per-company user organizational unit access scopes"
   }
 ]
