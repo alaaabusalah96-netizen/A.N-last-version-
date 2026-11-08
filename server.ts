@@ -4,6 +4,7 @@ import { defaultAuthService } from './src/server/auth/authService.js';
 import { defaultSessionRepository } from './src/server/auth/sessionRepository.js';
 import { defaultRateLimitStore } from './src/server/security/rateLimitStore.js';
 import { closeAllExecutors, getDefaultExecutor } from './src/server/db/index.js';
+import { runMigrations } from './src/server/db/migrationRunner.js';
 import { assertSafeDbRole } from './src/server/db/roleGuard.js';
 import { assertValidNodeEnv } from './src/server/config/env.js';
 
@@ -13,6 +14,18 @@ const isProd = process.env.NODE_ENV === 'production';
 
 async function startServer() {
   assertValidNodeEnv();
+
+  if (process.env.MIGRATION_DATABASE_URL) {
+    try {
+      console.log('[server] MIGRATION_DATABASE_URL detected. Running pending database migrations automatically...');
+      await runMigrations();
+    } catch (migErr) {
+      console.error('[server] FATAL: Automatic migration execution failed:', migErr);
+      if (isProd) {
+        process.exit(1);
+      }
+    }
+  }
   // 1. Startup DB Role Safety & Health Check Retry Loop
   try {
     const executor = await getDefaultExecutor();

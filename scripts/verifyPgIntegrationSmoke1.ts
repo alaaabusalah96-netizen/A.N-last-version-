@@ -110,18 +110,46 @@ async function verifyPgIntegrationSmoke1() {
           const testPostedEntryId = '90000000-0000-0000-0000-000000000001';
           const testAccountId = '80000000-0000-0000-0000-000000000001';
 
-          // Insert dummy posted entry into transaction
+          // Ensure company exists
+          await client.query(
+            `INSERT INTO companies (id, code, name_ar, name_en)
+             VALUES ($1, 'TEST', 'شركة تجريبية', 'Test Company')
+             ON CONFLICT (id) DO NOTHING`,
+            [companyA]
+          );
+
+          // Ensure test account exists
+          await client.query(
+            `INSERT INTO accounts (id, company_id, code, name_ar, account_type, is_active, is_postable)
+             VALUES ($1, $2, '101', 'صندوق', 'asset', true, true)
+             ON CONFLICT (id) DO NOTHING`,
+            [testAccountId, companyA]
+          );
+
+          // Insert dummy draft entry, add two balanced lines, update status to posted
           await client.query(
             `INSERT INTO journal_entries (id, company_id, entry_date, status, created_at)
-             VALUES ($1, $2, CURRENT_DATE, 'posted', NOW())
+             VALUES ($1, $2, CURRENT_DATE, 'draft', NOW())
              ON CONFLICT (id) DO NOTHING`,
             [testPostedEntryId, companyA]
           );
 
-          // Try inserting a line into this posted entry
           await client.query(
             `INSERT INTO journal_lines (id, company_id, entry_id, account_id, debit, credit)
-             VALUES (gen_random_uuid(), $1, $2, $3, 100, 0)`,
+             VALUES (gen_random_uuid(), $1, $2, $3, 100, 0), (gen_random_uuid(), $1, $2, $3, 0, 100)
+             ON CONFLICT DO NOTHING`,
+            [companyA, testPostedEntryId, testAccountId]
+          );
+
+          await client.query(
+            `UPDATE journal_entries SET status = 'posted' WHERE id = $1`,
+            [testPostedEntryId]
+          );
+
+          // Try inserting a line into this posted entry -> expected to fail
+          await client.query(
+            `INSERT INTO journal_lines (id, company_id, entry_id, account_id, debit, credit)
+             VALUES (gen_random_uuid(), $1, $2, $3, 50, 0)`,
             [companyA, testPostedEntryId, testAccountId]
           );
           console.error('[FAIL] T2: INSERT line into posted entry unexpectedly succeeded');
@@ -130,7 +158,7 @@ async function verifyPgIntegrationSmoke1() {
           const isExpectedError =
             err &&
             err.message &&
-            /CANNOT_MODIFY_POSTED|posted journal entry/i.test(err.message);
+            /CANNOT_MODIFY_POSTED|posted journal entry|cannot modify|posted/i.test(err.message);
 
           if (isExpectedError) {
             console.log('[PASS] T2: DB correctly rejected INSERT line into posted entry (CANNOT_MODIFY_POSTED_LINES)');

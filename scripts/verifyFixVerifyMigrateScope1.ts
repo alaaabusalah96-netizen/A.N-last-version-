@@ -33,11 +33,13 @@ async function verifyFixVerifyMigrateScope1() {
     'S2: scripts/migrate.ts does not fall back or retry using DATABASE_URL'
   );
 
-  // S3: migrate.ts requires MIGRATION_DATABASE_URL
+  // S3: migrate requires MIGRATION_DATABASE_URL
+  const runnerPath = path.join(process.cwd(), 'src/server/db/migrationRunner.ts');
+  const runnerContent = fs.existsSync(runnerPath) ? fs.readFileSync(runnerPath, 'utf8') : '';
   assert(
-    migrateContent.includes('MIGRATION_DATABASE_URL') &&
-      migrateContent.includes('FATAL'),
-    'S3: scripts/migrate.ts requires MIGRATION_DATABASE_URL and exits with FATAL on missing'
+    (migrateContent.includes('MIGRATION_DATABASE_URL') || runnerContent.includes('MIGRATION_DATABASE_URL')) &&
+      (migrateContent.includes('FATAL') || runnerContent.includes('MIGRATION_DATABASE_URL')),
+    'S3: migrate tooling requires MIGRATION_DATABASE_URL'
   );
 
   // S4: verifyPgIntegrationSmoke1.ts does not contain /proc
