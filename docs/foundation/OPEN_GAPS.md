@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **CI-MISSING-SCRIPTS-RESTORE** | 28 scripts referenced in `package.json` and `scripts/lib/*` were accidentally deleted in commit `c718317`. | **CLOSED** | CI & Local Verification | Restored all 28 scripts + 3 library modules from commit `ad07ba9557a453705770988cf4c11f8a0f714cfe` (`AN-CI-MISSING-SCRIPTS-RESTORE-1`). |
 | **CI-SIMULATE-MANAGED-PG** | Missing `scripts/ciSimulateManagedPg.ts` caused CI step failure. | **CLOSED** | CI Environment | Restored script with loopback host assertion (`AN-CI-RESTORE-SIMULATE-MANAGED-PG-1`). |
 | **CI-GUARD-RLS-AUTO-ENABLE** | Vanilla PostgreSQL in CI failed migration 010 because Supabase routine `rls_auto_enable` does not exist. | **CLOSED** | CI Environment | Guarded `REVOKE EXECUTE ON FUNCTION public.rls_auto_enable()` in `010_security_rls_baseline.sql` with an `IF EXISTS (pg_proc)` check (`AN-CI-GUARD-RLS-AUTO-ENABLE-1`). |
 | **CI-ROLES-BOOTSTRAP** | Vanilla PostgreSQL in CI failed migrations 010–014 due to missing Supabase roles `anon` and `authenticated`. | **CLOSED** | CI Environment | Added `ci:bootstrap-roles` pre-migration step creating stub `anon` and `authenticated` roles with `NOLOGIN` in CI workflow (`AN-CI-BOOTSTRAP-ROLES-1`). |

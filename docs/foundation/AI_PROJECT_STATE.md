@@ -271,6 +271,11 @@
   - Summary: Restored missing `scripts/ciSimulateManagedPg.ts` referenced in `package.json` and `.github/workflows/foundation-ci.yml`, enforcing loopback-only host restriction during CI managed Postgres simulation.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-CI-MISSING-SCRIPTS-RESTORE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Restored all 28 missing scripts referenced in `package.json` plus supporting `scripts/lib/*` libraries from historical Git commit `ad07ba9557a453705770988cf4c11f8a0f714cfe` (prior to accidental deletion in `c718317`). Fixed MembershipRepository backward compatibility method.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

@@ -122,6 +122,22 @@ export class MembershipRepository {
     const res = await executor.query(sql, params);
     return (res.rowCount ?? 0) > 0;
   }
+
+  async setMembershipStatus(
+    userId: string,
+    companyId: string,
+    isActive: boolean,
+    customExecutor?: DbExecutor
+  ): Promise<boolean> {
+    const executor = await this.getExecutor(customExecutor);
+    const sql = `
+      UPDATE company_memberships
+      SET is_active = $3
+      WHERE user_id = $1 AND company_id = $2;
+    `;
+    const res = await executor.query(sql, [userId, companyId, isActive]);
+    return (res.rowCount ?? 0) > 0;
+  }
 }
 
 export const defaultMembershipRepository = new MembershipRepository();
