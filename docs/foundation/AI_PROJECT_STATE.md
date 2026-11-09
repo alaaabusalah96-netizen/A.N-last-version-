@@ -311,6 +311,11 @@
   - Summary: Moved `Verify Migration Checksums` step after `Provision App DB Role` in `foundation-ci.yml`, configured `DATABASE_URL` with provisioned `an_app` credentials and `MIGRATION_DATABASE_URL` with `an_test`, updated C11 to verify `an_app` real blocked mutations, and updated C12 to verify `an_test` owner full privileges vs `an_app` select-only privileges.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-RBAC-FORBIDDEN-RESPONSE-CODE-FIX-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Standardized `requirePermission` middleware JSON response on 403 Forbidden to include `code: 'FORBIDDEN'`, resolving assertion code checks in `verifyRbacHttp.ts` Test B and Test H.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

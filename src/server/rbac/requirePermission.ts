@@ -36,6 +36,7 @@ export function requirePermission(
     if (!allowed) {
       res.status(403).json({
         error: 'Forbidden',
+        code: 'FORBIDDEN',
         message: `Missing required permission: '${permission}'`,
       });
       return;
