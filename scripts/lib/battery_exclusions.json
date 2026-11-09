@@ -32,5 +32,6 @@
   "verifyPgIntegrationSmoke1.ts": "package-specific verification",
   "verifyUiShell1.ts": "package-specific verification",
   "verifyCiMissingScriptsRestore1.ts": "package-specific verification",
-  "verifyProvisionRoleMissingRolesFix1.ts": "package-specific verification"
+  "verifyProvisionRoleMissingRolesFix1.ts": "package-specific verification",
+  "verifyProvisioningHangGuard1.ts": "package-specific verification"
 }

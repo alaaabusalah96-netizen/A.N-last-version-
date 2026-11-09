@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **PROVISIONING-TEST-HANG-DIAGNOSTIC** | `verifyProvisioning.ts` lacked timeout management and stage instrumentation, risking hang during Foundation Test Battery. | **CLOSED** | Test Reliability | Instrumented all stages with timing, added 10s connect timeout, 15s query timeout, 15s spawnSync timeout, and guaranteed client closure (`AN-PROVISIONING-TEST-HANG-DIAGNOSTIC-1`). |
 | **PROVISION-ROLE-MISSING-ROLES** | In CI, `provisionAppRole.ts` called `pg_has_role` on non-existent roles (e.g. `postgres`), failing with error 42704. | **CLOSED** | CI Provisioning | Check `pg_roles` before calling `pg_has_role`, skipping missing roles while enforcing membership rules when roles exist (`AN-PROVISION-ROLE-MISSING-ROLES-FIX-1`). |
 | **CI-MISSING-SCRIPTS-RESTORE** | 28 scripts referenced in `package.json` and `scripts/lib/*` were accidentally deleted in commit `c718317`. | **CLOSED** | CI & Local Verification | Restored all 28 scripts + 3 library modules from commit `ad07ba9557a453705770988cf4c11f8a0f714cfe` (`AN-CI-MISSING-SCRIPTS-RESTORE-1`). |
 | **CI-SIMULATE-MANAGED-PG** | Missing `scripts/ciSimulateManagedPg.ts` caused CI step failure. | **CLOSED** | CI Environment | Restored script with loopback host assertion (`AN-CI-RESTORE-SIMULATE-MANAGED-PG-1`). |

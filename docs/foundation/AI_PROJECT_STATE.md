@@ -281,6 +281,11 @@
   - Summary: Fixed CI failure in `provisionAppRole.ts` where `pg_has_role` threw code 42704 on non-existent roles (e.g. `postgres`). Added existence check in `pg_roles` before calling `pg_has_role`, skipping missing roles while retaining strict membership failure when roles exist.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-PROVISIONING-TEST-HANG-DIAGNOSTIC-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Diagnosed and hardened `scripts/verifyProvisioning.ts` with explicit connection timeouts, statement timeouts, spawnSync timeouts, full stage timing instrumentation, and fail-safe pg.Client cleanup in finally blocks.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
