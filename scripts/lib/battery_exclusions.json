@@ -30,5 +30,7 @@
   "verifyP1dAccountingUi1.ts": "package-specific verification",
   "verifyPgIntegrationProof2.ts": "package-specific verification",
   "verifyPgIntegrationSmoke1.ts": "package-specific verification",
-  "verifyUiShell1.ts": "package-specific verification"
+  "verifyUiShell1.ts": "package-specific verification",
+  "verifyCiMissingScriptsRestore1.ts": "package-specific verification",
+  "verifyProvisionRoleMissingRolesFix1.ts": "package-specific verification"
 }

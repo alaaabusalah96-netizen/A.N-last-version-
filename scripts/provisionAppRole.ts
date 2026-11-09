@@ -232,6 +232,15 @@ async function provisionAppRole() {
     // Verify no direct or nested membership in protected roles
     const protectedRoles = ['postgres', 'supabase_admin', 'service_role', 'authenticator', 'anon', 'authenticated'];
     for (const protRole of protectedRoles) {
+      // Check if role exists before querying pg_has_role to avoid 42704 error on missing roles in vanilla Postgres
+      const roleExists = await client.query<{ exists: boolean }>(
+        'SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1) as exists;',
+        [protRole]
+      );
+      if (!roleExists.rows[0]?.exists) {
+        continue;
+      }
+
       const hasProt = await client.query<{ has_role: boolean }>(
         'SELECT pg_has_role($1, $2, $3) as has_role;',
         [appDbUser, protRole, 'USAGE']

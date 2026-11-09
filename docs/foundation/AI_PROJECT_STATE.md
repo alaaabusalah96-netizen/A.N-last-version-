@@ -276,6 +276,11 @@
   - Summary: Restored all 28 missing scripts referenced in `package.json` plus supporting `scripts/lib/*` libraries from historical Git commit `ad07ba9557a453705770988cf4c11f8a0f714cfe` (prior to accidental deletion in `c718317`). Fixed MembershipRepository backward compatibility method.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-PROVISION-ROLE-MISSING-ROLES-FIX-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed CI failure in `provisionAppRole.ts` where `pg_has_role` threw code 42704 on non-existent roles (e.g. `postgres`). Added existence check in `pg_roles` before calling `pg_has_role`, skipping missing roles while retaining strict membership failure when roles exist.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
