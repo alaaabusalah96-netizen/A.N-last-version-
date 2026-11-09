@@ -67,6 +67,7 @@
     "ci:bootstrap-roles": "tsx scripts/ciBootstrapRoles.ts",
     "test:ci-bootstrap-roles-1": "tsx scripts/verifyCiBootstrapRoles1.ts",
     "test:ci-guard-rls-auto-enable-1": "tsx scripts/verifyCiGuardRlsAutoEnable1.ts",
+    "test:ci-restore-simulate-managed-pg-1": "tsx scripts/verifyCiRestoreSimulateManagedPg1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

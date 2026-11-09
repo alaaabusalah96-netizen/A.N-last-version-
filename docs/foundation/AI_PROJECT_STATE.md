@@ -266,6 +266,11 @@
   - Summary: Wrapped `REVOKE EXECUTE ON FUNCTION public.rls_auto_enable()` in `010_security_rls_baseline.sql` inside an idempotent `IF EXISTS` check querying `pg_proc`, enabling vanilla PostgreSQL in CI to run migration 010 without failing on missing Supabase-only routine.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-CI-RESTORE-SIMULATE-MANAGED-PG-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Restored missing `scripts/ciSimulateManagedPg.ts` referenced in `package.json` and `.github/workflows/foundation-ci.yml`, enforcing loopback-only host restriction during CI managed Postgres simulation.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

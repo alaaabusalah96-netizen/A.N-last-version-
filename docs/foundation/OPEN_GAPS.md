@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **CI-SIMULATE-MANAGED-PG** | Missing `scripts/ciSimulateManagedPg.ts` caused CI step failure. | **CLOSED** | CI Environment | Restored script with loopback host assertion (`AN-CI-RESTORE-SIMULATE-MANAGED-PG-1`). |
 | **CI-GUARD-RLS-AUTO-ENABLE** | Vanilla PostgreSQL in CI failed migration 010 because Supabase routine `rls_auto_enable` does not exist. | **CLOSED** | CI Environment | Guarded `REVOKE EXECUTE ON FUNCTION public.rls_auto_enable()` in `010_security_rls_baseline.sql` with an `IF EXISTS (pg_proc)` check (`AN-CI-GUARD-RLS-AUTO-ENABLE-1`). |
 | **CI-ROLES-BOOTSTRAP** | Vanilla PostgreSQL in CI failed migrations 010–014 due to missing Supabase roles `anon` and `authenticated`. | **CLOSED** | CI Environment | Added `ci:bootstrap-roles` pre-migration step creating stub `anon` and `authenticated` roles with `NOLOGIN` in CI workflow (`AN-CI-BOOTSTRAP-ROLES-1`). |
 | **DB-SSL-DISABLE-SCOPE** | Global `DATABASE_SSL=disable` secret short-circuited before host detection, inadvertently disabling TLS for remote Supabase connections. | **CLOSED** | Connection SSL Policy | Scoped `DATABASE_SSL=disable` in `resolveSslConfig` (`connection.ts`) to apply exclusively to local hosts (`localhost`, `127.0.0.1`, `::1`) (`AN-DB-SSL-DISABLE-SCOPE-1`). |
