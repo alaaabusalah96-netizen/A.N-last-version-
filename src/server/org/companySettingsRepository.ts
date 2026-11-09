@@ -1,15 +1,7 @@
-import { getDefaultExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { CompanySettings, UpsertCompanySettingsInput } from './companySettingsTypes.js';
 
 export class CompanySettingsRepository {
-  private async getExecutor() {
-    const executor = await getDefaultExecutor();
-    if (!executor) {
-      throw new Error('DB_UNAVAILABLE: Database executor not available for CompanySettingsRepository');
-    }
-    return executor;
-  }
 
   async getByCompanyId(companyId: string): Promise<CompanySettings | null> {
     return await withTenantTransaction(companyId, async (executor) => {

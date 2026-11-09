@@ -8,7 +8,7 @@ import { requirePermission } from '../rbac/requirePermission.js';
 import { requirePlatformAdmin } from '../rbac/requirePlatformAdmin.js';
 import { wrap } from '../http/asyncHandler.js';
 import { isUuid, isValidCompanyCode } from '../http/validators.js';
-import { ValidationError, NotFoundError } from '../http/errors.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.js';
 import { companySettingsRoutes } from './companySettingsRoutes.js';
 import { orgUnitRoutes } from './orgUnitRoutes.js';
 
@@ -92,6 +92,14 @@ companyRoutes.get(
 
     if (!company) {
       throw new NotFoundError('Company not found');
+    }
+
+    const user = req.user!;
+    if (user.role !== 'platform_admin') {
+      const hasMembership = await defaultMembershipStore.hasMembership(user.id, id);
+      if (!hasMembership) {
+        throw new ForbiddenError('Forbidden');
+      }
     }
 
     return res.status(200).json({ status: 'ok', company });

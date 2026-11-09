@@ -34,5 +34,6 @@
   "verifyCiMissingScriptsRestore1.ts": "package-specific verification",
   "verifyProvisionRoleMissingRolesFix1.ts": "package-specific verification",
   "verifyProvisioningHangGuard1.ts": "package-specific verification",
-  "verifyScramVerifierFormat1.ts": "package-specific verification"
+  "verifyScramVerifierFormat1.ts": "package-specific verification",
+  "verifyFixAbd1.ts": "package-specific verification"
 }

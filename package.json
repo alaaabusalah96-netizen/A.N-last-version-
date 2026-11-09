@@ -72,6 +72,7 @@
     "test:provision-role-missing-roles-fix-1": "tsx scripts/verifyProvisionRoleMissingRolesFix1.ts",
     "test:provisioning-hang-guard-1": "tsx scripts/verifyProvisioningHangGuard1.ts",
     "test:scram-verifier-format-1": "tsx scripts/verifyScramVerifierFormat1.ts",
+    "test:fix-a-b-d-1": "tsx scripts/verifyFixAbd1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

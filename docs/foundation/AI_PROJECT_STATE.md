@@ -291,6 +291,11 @@
   - Summary: Fixed SCRAM-SHA-256 verifier generation in `src/server/security/scram.ts` to use PostgreSQL-compliant delimiter `$` between salt and StoredKey (`SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>`), resolving password authentication failures for provisioned roles (`an_app`, `an_prov_*`).
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-FIX-A-B-D-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Removed unused `getDefaultExecutor` import and `getExecutor()` method from `companySettingsRepository.ts` (A); added active membership check for non-platform_admin users in `GET /api/companies/:id` yielding HTTP 403 FORBIDDEN (B); and updated `verifyMigration010.ts` to support guarded DO + pg_proc check pattern for `rls_auto_enable` revokes (D).
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

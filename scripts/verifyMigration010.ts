@@ -152,11 +152,15 @@ async function runTests() {
   const auditSearchPath = /ALTER\s+FUNCTION\s+public\.audit_logs_block_mutation\(\)\s+SET\s+search_path\s*=\s*pg_catalog;/i.test(content);
   await check('13. search_path pinned to pg_catalog on audit_logs_block_mutation()', auditSearchPath);
 
-  // 13. Targeted routine revokes for rls_auto_enable
-  const rlsPublicRevoke = /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+PUBLIC;/i.test(content);
+  // 13. Targeted routine revokes for rls_auto_enable (accepts direct REVOKE or guarded DO + pg_proc + EXECUTE REVOKE)
+  const rlsPublicRevoke =
+    /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+PUBLIC/i.test(content) &&
+    (content.includes('pg_proc') || !content.includes('DO $$'));
   await check('14. targeted PUBLIC revoke on rls_auto_enable()', rlsPublicRevoke);
 
-  const rlsDataApiRevoke = /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+anon,\s*authenticated;/i.test(content);
+  const rlsDataApiRevoke =
+    /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.rls_auto_enable\(\)\s+FROM\s+anon,\s*authenticated/i.test(content) &&
+    (content.includes('pg_proc') || !content.includes('DO $$'));
   await check('15. targeted anon,authenticated revoke on rls_auto_enable()', rlsDataApiRevoke);
 
   // 14. Preserve rls_auto_enable definition (no DROP)
