@@ -106,12 +106,14 @@ async function runTests() {
         await check("audit_logs has 'audit_logs_immutable' trigger (owner verified)", triggerNames.has('audit_logs_immutable'));
         await check("audit_logs has 'audit_logs_no_truncate' trigger (owner verified)", triggerNames.has('audit_logs_no_truncate'));
 
-        // 3.2 Verify all schema_migrations have non-empty checksums
+        // 3.2 Verify all schema_migrations have non-empty valid SHA-256 checksums
         const migDbRes = await ownerClient.query<{ version: string; checksum: string | null }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version;'
         );
-        const allHaveChecksum = migDbRes.rows.length > 0 && migDbRes.rows.every((r) => Boolean(r.checksum && r.checksum.trim()));
-        await check('All schema_migrations records contain non-empty checksums', allHaveChecksum);
+        const allHaveChecksum =
+          migDbRes.rows.length > 0 &&
+          migDbRes.rows.every((r) => Boolean(r.checksum && /^[a-f0-9]{64}$/i.test(r.checksum.trim())));
+        await check('All schema_migrations records contain non-empty valid SHA-256 checksums', allHaveChecksum);
 
         // 3.3 Idempotency: Running migrate twice succeeds without changes
         const tsxBin = path.resolve(rootDir, 'node_modules/.bin/tsx');

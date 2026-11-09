@@ -301,6 +301,11 @@
   - Summary: Diagnostic & Live Proof package validating RBAC cases A–E (cross-company 403, inactive membership 403, active member 200, platform_admin 200, missing company 404) and Migration 010 ACL revokes for absent/present `rls_auto_enable` routines.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-MIGRATION-CHECKSUMS-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Implemented SHA-256 checksum system for all database migrations in `migrationRunner.ts` with legacy schema upgrade (`ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT;`), transactional backfill, fail-closed mismatch detection, atomic insertion, and `NOT NULL` constraint enforcement. Wired `test:migration-checksums-1` step into `foundation-ci.yml`.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

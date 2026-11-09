@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **MIGRATION-CHECKSUMS** | Lack of migration checksums allowed risk of untracked SQL changes on applied migrations. | **CLOSED** | Migration Integrity | Implemented SHA-256 file checksum calculation, legacy backfill, and fail-closed mismatch validation in `migrationRunner.ts` (`AN-MIGRATION-CHECKSUMS-1`). |
 | **FIX-ABD-1-LIVE-PROOF** | Need explicit proof harness for RBAC cases A–E and Migration 010 ACL revokes. | **CLOSED** | Security & Verification | Added `scripts/verifyAbd1LiveProof.ts` executing HTTP RBAC cases A–E and Migration 010 ACL revokes (`AN-FIX-ABD-1-LIVE-PROOF`). |
 | **FIX-A-B-D-1** | Dead code in `companySettingsRepository.ts` (A), unauthenticated/unscoped company GET (B), and rigid regex matching in `verifyMigration010.ts` (D). | **CLOSED** | Security & Test Compliance | Removed dead executor import/method (A), added active membership check on `GET /api/companies/:id` (B), and updated `verifyMigration010` to support guarded DO block pattern (D) (`AN-FIX-A-B-D-1`). |
 | **SCRAM-VERIFIER-FORMAT** | `scramSha256Verifier` used colon `:` instead of `$` between salt and StoredKey, causing Postgres authentication failures for `an_app` and `an_prov_*`. | **CLOSED** | Database Authentication | Corrected delimiter to `$` (`SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>`) per PostgreSQL specification (`AN-SCRAM-VERIFIER-FORMAT-1`). |

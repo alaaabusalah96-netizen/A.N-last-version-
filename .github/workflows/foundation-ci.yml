@@ -70,6 +70,15 @@ jobs:
           REQUIRE_DB: "1"
           DATABASE_SSL: disable
 
+      - name: Verify Migration Checksums (AN-MIGRATION-CHECKSUMS-1)
+        run: npm run test:migration-checksums-1
+        env:
+          MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          NODE_ENV: test
+          REQUIRE_DB: "1"
+          DATABASE_SSL: disable
+
       - name: Simulate Managed PG / Data API Guard Prep
         run: npm run ci:simulate-managed-pg
         env:
