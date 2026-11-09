@@ -241,6 +241,11 @@
   - Summary: Wired PostgreSQL integration proof harness (`test:pg-proof-2`) into `.github/workflows/foundation-ci.yml` running with `AN_PG_PROOF_STRICT="1"` against the CI PostgreSQL service container after migrations and role provisioning.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-CI-POSTGRES-SSL-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed local Postgres SSL connection in CI (`foundation-ci.yml`) by setting `DATABASE_SSL: disable` on CI postgres steps and refactoring `migrationRunner.ts` to use `buildPgConfig`, while maintaining strict SSL enforcement in production.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

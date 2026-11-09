@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **CI-PG-SSL** | Local Postgres service in CI encountered SSL error (`The server does not support SSL connections`). | **CLOSED** | CI Connection | Refactored `migrationRunner.ts` to use `buildPgConfig` and set `DATABASE_SSL: disable` in `foundation-ci.yml` (`AN-CI-POSTGRES-SSL-1`). |
 | **CI-PROOF-WIRING** | PostgreSQL integration proof T1–T7 not wired into GitHub Actions CI. | **CLOSED** | CI Automation & Proof | Wired `test:pg-proof-2` with `AN_PG_PROOF_STRICT="1"` in `foundation-ci.yml` (`AN-CI-PROOF-WIRE-1`). |
 | **PG-PROOF-HARNESS** | Smoke tests needed independent T1–T7 case isolation and strict error checking. | **CLOSED** | Test Quality & Proof | Fixed in `AN-PG-INTEGRATION-PROOF-2` (`scripts/verifyPgIntegrationProof2.ts`, migration 018 for search_path). |
 | **MIGRATE-ENV** | Scraped `/proc` for `DATABASE_URL` and fell back to `DATABASE_URL` on migration auth failure. | **CLOSED** | Security & Privileges | Fixed in `AN-FIX-VERIFY-MIGRATE-SCOPE-1`. `/proc` removed. `MIGRATION_DATABASE_URL` is strictly required. No fallback. |

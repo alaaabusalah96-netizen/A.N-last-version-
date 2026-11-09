@@ -61,12 +61,14 @@ jobs:
           DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
           NODE_ENV: test
           REQUIRE_DB: "1"
+          DATABASE_SSL: disable
 
       - name: Simulate Managed PG / Data API Guard Prep
         run: npm run ci:simulate-managed-pg
         env:
           MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
           NODE_ENV: test
+          DATABASE_SSL: disable
 
       - name: Provision App DB Role
         run: npm run db:provision-app-role
@@ -75,6 +77,7 @@ jobs:
           APP_DB_PASSWORD: AppRoleSecurePass123!
           APP_DB_USER: an_app
           NODE_ENV: test
+          DATABASE_SSL: disable
 
       - name: PostgreSQL Integration Proof (T1-T7 strict)
         run: npm run test:pg-proof-2
@@ -84,6 +87,7 @@ jobs:
           MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
           NODE_ENV: test
           CI: "true"
+          DATABASE_SSL: disable
 
       - name: Run Foundation Test Battery
         id: battery
@@ -94,6 +98,7 @@ jobs:
           NODE_ENV: test
           REQUIRE_DB: "1"
           CI: "true"
+          DATABASE_SSL: disable
           ENABLE_TENANT_DEMO: "1"
           CSRF_SECRET: test_csrf_secret_minimum_32_chars_long_key_for_ci
           CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000

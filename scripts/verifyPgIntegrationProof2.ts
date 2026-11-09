@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
+import { buildPgConfig } from '../src/server/db/connection.js';
 
 async function verifyPgIntegrationProof2() {
   console.log('=== VERIFYING AN-PG-INTEGRATION-PROOF-2 ===\n');
@@ -118,10 +119,8 @@ async function verifyPgIntegrationProof2() {
     logTest('T6', 'BLOCKED', reason);
     logTest('T7', 'BLOCKED', reason);
   } else {
-    const client = new pg.Client({
-      connectionString: connStr.replace(/([?&])sslmode=[^&]*&?/, '$1').replace(/[?&]$/, ''),
-      ssl: { rejectUnauthorized: false },
-    });
+    const pgConfig = buildPgConfig(connStr, process.env);
+    const client = new pg.Client(pgConfig);
 
     try {
       await client.connect();

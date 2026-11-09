@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
-import { resolveSslConfig } from './connection.js';
+import { buildPgConfig } from './connection.js';
 
 export async function runMigrations(): Promise<void> {
   const connectionString = process.env.MIGRATION_DATABASE_URL;
@@ -10,18 +10,8 @@ export async function runMigrations(): Promise<void> {
     throw new Error('MIGRATION_DATABASE_URL environment variable is required for running migrations.');
   }
 
-  const cleanConnectionString = (urlStr: string) => {
-    return urlStr.replace(/([?&])sslmode=[^&]*&?/, '$1').replace(/[?&]$/, '');
-  };
-
-  const isProd = process.env.NODE_ENV === 'production';
-  const envSsl = resolveSslConfig(process.env as Record<string, string | undefined>);
-  const ssl = isProd ? envSsl : { rejectUnauthorized: false };
-
-  const client = new pg.Client({
-    connectionString: cleanConnectionString(connectionString),
-    ssl,
-  });
+  const pgConfig = buildPgConfig(connectionString, process.env);
+  const client = new pg.Client(pgConfig);
 
   console.log('[migrate] Connecting to database using MIGRATION_DATABASE_URL...');
   await client.connect();
