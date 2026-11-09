@@ -246,6 +246,11 @@
   - Summary: Fixed local Postgres SSL connection in CI (`foundation-ci.yml`) by setting `DATABASE_SSL: disable` on CI postgres steps and refactoring `migrationRunner.ts` to use `buildPgConfig`, while maintaining strict SSL enforcement in production.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-DB-SSL-POLICY-2**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Implemented dual-mode host-based SSL policy in `connection.ts` (`resolveSslConfig`). Non-production connections to localhost / 127.0.0.1 / ::1 default to no SSL (or honor `DATABASE_SSL=disable`), while remote hosts (Supabase direct / pooler) enable SSL by default even when `sslmode` query parameters are stripped from connection strings. Production strict SSL enforcement is unchanged.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

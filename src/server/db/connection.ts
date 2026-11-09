@@ -1,7 +1,7 @@
 import fs from 'fs';
 import pg from 'pg';
 
-export function resolveSslConfig(env: Record<string, string | undefined>): pg.ConnectionConfig['ssl'] | undefined {
+export function resolveSslConfig(env: Record<string, string | undefined>, connectionString?: string): pg.ConnectionConfig['ssl'] | undefined {
   const isProd = env.NODE_ENV === 'production';
   const caText = env.DATABASE_SSL_CA;
   const caFile = env.DATABASE_SSL_CA_FILE;
@@ -73,6 +73,27 @@ export function resolveSslConfig(env: Record<string, string | undefined>): pg.Co
 
   if (ca) {
     return { rejectUnauthorized: true, ca };
+  }
+
+  // Host-based auto-detection in non-production when connectionString is provided
+  if (connectionString) {
+    try {
+      const parseStr = connectionString.match(/^[a-zA-Z0-9+-.]+:\/\//) ? connectionString : `postgres://${connectionString}`;
+      const u = new URL(parseStr);
+      const hostname = u.hostname.toLowerCase();
+      const isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+      if (isLocal) {
+        return undefined; // Localhost / CI -> no SSL
+      } else {
+        // Remote host (Supabase direct or pooler) -> enable SSL by default in non-prod
+        return {
+          rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false',
+          ...(ca ? { ca } : {}),
+        };
+      }
+    } catch {
+      // Ignore parse errors
+    }
   }
 
   return undefined;
@@ -153,7 +174,7 @@ export function sanitizeConnectionString(connectionString: string): string {
 
 export function buildPgConfig(connectionString: string, env: Record<string, string | undefined> = process.env): { connectionString: string; ssl: pg.ConnectionConfig['ssl'] } {
   const sanitized = sanitizeConnectionString(connectionString);
-  const ssl = resolveSslConfig(env);
+  const ssl = resolveSslConfig(env, connectionString);
   return {
     connectionString: sanitized,
     ssl,
