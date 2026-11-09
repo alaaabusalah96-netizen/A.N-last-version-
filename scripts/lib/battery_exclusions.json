@@ -35,5 +35,6 @@
   "verifyProvisionRoleMissingRolesFix1.ts": "package-specific verification",
   "verifyProvisioningHangGuard1.ts": "package-specific verification",
   "verifyScramVerifierFormat1.ts": "package-specific verification",
-  "verifyFixAbd1.ts": "package-specific verification"
+  "verifyFixAbd1.ts": "package-specific verification",
+  "verifyAbd1LiveProof.ts": "package-specific verification"
 }

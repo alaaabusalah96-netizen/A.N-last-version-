@@ -296,6 +296,11 @@
   - Summary: Removed unused `getDefaultExecutor` import and `getExecutor()` method from `companySettingsRepository.ts` (A); added active membership check for non-platform_admin users in `GET /api/companies/:id` yielding HTTP 403 FORBIDDEN (B); and updated `verifyMigration010.ts` to support guarded DO + pg_proc check pattern for `rls_auto_enable` revokes (D).
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-FIX-ABD-1-LIVE-PROOF**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Diagnostic & Live Proof package validating RBAC cases A–E (cross-company 403, inactive membership 403, active member 200, platform_admin 200, missing company 404) and Migration 010 ACL revokes for absent/present `rls_auto_enable` routines.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
