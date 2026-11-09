@@ -251,6 +251,11 @@
   - Summary: Implemented dual-mode host-based SSL policy in `connection.ts` (`resolveSslConfig`). Non-production connections to localhost / 127.0.0.1 / ::1 default to no SSL (or honor `DATABASE_SSL=disable`), while remote hosts (Supabase direct / pooler) enable SSL by default even when `sslmode` query parameters are stripped from connection strings. Production strict SSL enforcement is unchanged.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-DB-SSL-DISABLE-SCOPE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Scoped `DATABASE_SSL=disable` in `resolveSslConfig` (`connection.ts`) so that global secret disable is honored ONLY for local hosts (`localhost`, `127.0.0.1`, `::1`). For remote hosts (Supabase pooler/direct), `DATABASE_SSL=disable` is ignored and TLS remains enforced.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

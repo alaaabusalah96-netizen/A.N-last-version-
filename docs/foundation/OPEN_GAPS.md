@@ -9,6 +9,7 @@ This document tracks residual technical gaps, open risk items, and recommended f
 
 | ID | Gap / Description | Severity | Impact / Risk Area | Status / Mitigation |
 | :--- | :--- | :--- | :--- | :--- |
+| **DB-SSL-DISABLE-SCOPE** | Global `DATABASE_SSL=disable` secret short-circuited before host detection, inadvertently disabling TLS for remote Supabase connections. | **CLOSED** | Connection SSL Policy | Scoped `DATABASE_SSL=disable` in `resolveSslConfig` (`connection.ts`) to apply exclusively to local hosts (`localhost`, `127.0.0.1`, `::1`) (`AN-DB-SSL-DISABLE-SCOPE-1`). |
 | **DB-SSL-DUAL-POLICY** | Remote non-prod connections (Supabase) failed when `sslmode` was stripped because non-prod defaulted to no SSL. | **CLOSED** | Connection SSL Policy | Implemented host-based auto-detection in `resolveSslConfig` (`connection.ts`) enabling SSL for remote hosts and disabling for localhost in non-production (`AN-DB-SSL-POLICY-2`). |
 | **CI-PG-SSL** | Local Postgres service in CI encountered SSL error (`The server does not support SSL connections`). | **CLOSED** | CI Connection | Refactored `migrationRunner.ts` to use `buildPgConfig` and set `DATABASE_SSL: disable` in `foundation-ci.yml` (`AN-CI-POSTGRES-SSL-1`). |
 | **CI-PROOF-WIRING** | PostgreSQL integration proof T1–T7 not wired into GitHub Actions CI. | **CLOSED** | CI Automation & Proof | Wired `test:pg-proof-2` with `AN_PG_PROOF_STRICT="1"` in `foundation-ci.yml` (`AN-CI-PROOF-WIRE-1`). |

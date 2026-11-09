@@ -1,6 +1,17 @@
 import fs from 'fs';
 import pg from 'pg';
 
+function parseHostname(connectionString?: string): string | null {
+  if (!connectionString) return null;
+  try {
+    const parseStr = connectionString.match(/^[a-zA-Z0-9+-.]+:\/\//) ? connectionString : `postgres://${connectionString}`;
+    const u = new URL(parseStr);
+    return u.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 export function resolveSslConfig(env: Record<string, string | undefined>, connectionString?: string): pg.ConnectionConfig['ssl'] | undefined {
   const isProd = env.NODE_ENV === 'production';
   const caText = env.DATABASE_SSL_CA;
@@ -43,7 +54,12 @@ export function resolveSslConfig(env: Record<string, string | undefined>, connec
     if (isProd) {
       throw new Error('Insecure database connection rejected: DATABASE_SSL=disable is strictly forbidden in production');
     }
-    return undefined;
+    const hostname = parseHostname(connectionString);
+    const isLocal = !hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    if (isLocal) {
+      return undefined;
+    }
+    console.warn('[db] WARNING: DATABASE_SSL=disable ignored for remote host; TLS required');
   }
 
   if (isProd) {

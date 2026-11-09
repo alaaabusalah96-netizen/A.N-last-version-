@@ -63,6 +63,7 @@
     "test:ci-proof-wire-1": "tsx scripts/verifyCiProofWire1.ts",
     "test:ci-postgres-ssl-1": "tsx scripts/verifyCiPostgresSsl1.ts",
     "test:db-ssl-policy-2": "tsx scripts/verifyDbSslPolicy2.ts",
+    "test:db-ssl-disable-scope-1": "tsx scripts/verifyDbSslDisableScope1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"
