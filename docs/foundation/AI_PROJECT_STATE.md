@@ -256,6 +256,11 @@
   - Summary: Scoped `DATABASE_SSL=disable` in `resolveSslConfig` (`connection.ts`) so that global secret disable is honored ONLY for local hosts (`localhost`, `127.0.0.1`, `::1`). For remote hosts (Supabase pooler/direct), `DATABASE_SSL=disable` is ignored and TLS remains enforced.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-CI-BOOTSTRAP-ROLES-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Added CI pre-migration bootstrap step (`scripts/ciBootstrapRoles.ts` and `npm run ci:bootstrap-roles`) in `.github/workflows/foundation-ci.yml` to create stub Supabase roles (`anon`, `authenticated` with `NOLOGIN`) in vanilla PostgreSQL CI container before migrations run, without altering historical migrations 010–014.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

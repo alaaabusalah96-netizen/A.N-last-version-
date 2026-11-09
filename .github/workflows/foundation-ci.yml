@@ -54,6 +54,13 @@ jobs:
       - name: Build Application
         run: npm run build
 
+      - name: Bootstrap stub Supabase roles (anon, authenticated)
+        run: npm run ci:bootstrap-roles
+        env:
+          MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          DATABASE_SSL: disable
+          NODE_ENV: test
+
       - name: Run Database Migrations
         run: npm run migrate
         env:
