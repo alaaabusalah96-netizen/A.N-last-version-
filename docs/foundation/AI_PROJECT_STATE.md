@@ -306,6 +306,11 @@
   - Summary: Implemented SHA-256 checksum system for all database migrations in `migrationRunner.ts` with legacy schema upgrade (`ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT;`), transactional backfill, fail-closed mismatch detection, atomic insertion, and `NOT NULL` constraint enforcement. Wired `test:migration-checksums-1` step into `foundation-ci.yml`.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-CHECKSUMS-CI-ROLE-ORDER-FIX-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Moved `Verify Migration Checksums` step after `Provision App DB Role` in `foundation-ci.yml`, configured `DATABASE_URL` with provisioned `an_app` credentials and `MIGRATION_DATABASE_URL` with `an_test`, updated C11 to verify `an_app` real blocked mutations, and updated C12 to verify `an_test` owner full privileges vs `an_app` select-only privileges.
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

@@ -139,12 +139,22 @@ async function runTests() {
     }
 
     // C11: App role (an_app / DATABASE_URL) privilege checks on schema_migrations
-    if (dbUrl && dbUrl.trim() !== '') {
-      const appExecutor = await getDefaultExecutor();
-      if (appExecutor) {
+    if (!dbUrl || dbUrl.trim() === '') {
+      blocked('DATABASE_URL is not configured for an_app privilege checks (C11).');
+    } else {
+      let appExecutor = null;
+      try {
+        appExecutor = await getDefaultExecutor();
+      } catch (err) {
+        console.error('Failed to initialize app executor for C11:', err);
+      }
+
+      if (!appExecutor) {
+        blocked('Failed to connect via DATABASE_URL for an_app privilege checks (C11).');
+      } else {
         let insertBlocked = false;
         try {
-          await appExecutor.query("INSERT INTO schema_migrations (version, checksum) VALUES ('v_test', 'hash');");
+          await appExecutor.query("INSERT INTO schema_migrations (version, checksum) VALUES ('v_test_c11', 'hash');");
         } catch {
           insertBlocked = true;
         }
@@ -152,7 +162,7 @@ async function runTests() {
 
         let updateBlocked = false;
         try {
-          await appExecutor.query("UPDATE schema_migrations SET checksum = 'tampered';");
+          await appExecutor.query("UPDATE schema_migrations SET checksum = 'tampered' WHERE version = '001_initial.sql';");
         } catch {
           updateBlocked = true;
         }
@@ -160,7 +170,7 @@ async function runTests() {
 
         let deleteBlocked = false;
         try {
-          await appExecutor.query('DELETE FROM schema_migrations;');
+          await appExecutor.query("DELETE FROM schema_migrations WHERE version = '001_initial.sql';");
         } catch {
           deleteBlocked = true;
         }
@@ -168,12 +178,40 @@ async function runTests() {
       }
     }
 
-    // C12: Migration Owner DDL/DML verification
-    const ownerInsertRes = await ownerClient.query<{ has_priv: boolean }>(
-      "SELECT has_table_privilege($1, 'schema_migrations', 'INSERT') as has_priv;",
-      [process.env.APP_DB_USER || 'an_test']
+    // C12: Migration Owner & Application Role DDL/DML table privilege verification
+    const currentUserRes = await ownerClient.query<{ user: string }>("SELECT current_user as user;");
+    const migrationOwner = currentUserRes.rows[0]?.user || 'an_test';
+    const appRoleName = process.env.APP_DB_USER || 'an_app';
+
+    const ownerPrivRes = await ownerClient.query<{ has_insert: boolean; has_update: boolean; has_delete: boolean; has_select: boolean }>(
+      "SELECT has_table_privilege($1, 'schema_migrations', 'INSERT') as has_insert, " +
+      "has_table_privilege($1, 'schema_migrations', 'UPDATE') as has_update, " +
+      "has_table_privilege($1, 'schema_migrations', 'DELETE') as has_delete, " +
+      "has_table_privilege($1, 'schema_migrations', 'SELECT') as has_select;",
+      [migrationOwner]
     );
-    await check('C12: Migration owner has full privileges on schema_migrations', ownerInsertRes.rows[0]?.has_priv === true);
+    const ownerHasFullPrivs = Boolean(
+      ownerPrivRes.rows[0]?.has_insert &&
+      ownerPrivRes.rows[0]?.has_update &&
+      ownerPrivRes.rows[0]?.has_delete &&
+      ownerPrivRes.rows[0]?.has_select
+    );
+    await check(`C12-1: Migration owner (${migrationOwner}) has full privileges (INSERT/UPDATE/DELETE/SELECT) on schema_migrations`, ownerHasFullPrivs);
+
+    const appPrivRes = await ownerClient.query<{ has_insert: boolean; has_update: boolean; has_delete: boolean; has_select: boolean }>(
+      "SELECT has_table_privilege($1, 'schema_migrations', 'INSERT') as has_insert, " +
+      "has_table_privilege($1, 'schema_migrations', 'UPDATE') as has_update, " +
+      "has_table_privilege($1, 'schema_migrations', 'DELETE') as has_delete, " +
+      "has_table_privilege($1, 'schema_migrations', 'SELECT') as has_select;",
+      [appRoleName]
+    );
+    const appRoleHasOnlySelect = Boolean(
+      !appPrivRes.rows[0]?.has_insert &&
+      !appPrivRes.rows[0]?.has_update &&
+      !appPrivRes.rows[0]?.has_delete &&
+      appPrivRes.rows[0]?.has_select
+    );
+    await check(`C12-2: App role (${appRoleName}) has SELECT only (no INSERT/UPDATE/DELETE) on schema_migrations`, appRoleHasOnlySelect);
 
   } finally {
     await ownerClient.end();
