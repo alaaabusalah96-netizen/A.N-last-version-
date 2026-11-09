@@ -75,6 +75,7 @@
     "test:fix-a-b-d-1": "tsx scripts/verifyFixAbd1.ts",
     "test:abd-1-live-proof": "tsx scripts/verifyAbd1LiveProof.ts",
     "test:migration-checksums-1": "tsx scripts/verifyMigrationChecksums1.ts",
+    "test:foundation-gate-close-1": "tsx scripts/verifyFoundationGateClose1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

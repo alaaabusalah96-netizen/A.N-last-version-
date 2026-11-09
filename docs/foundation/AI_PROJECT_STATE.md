@@ -292,36 +292,45 @@
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
 - **AN-FIX-A-B-D-1**: `IMPLEMENTED`
-  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
   - Summary: Removed unused `getDefaultExecutor` import and `getExecutor()` method from `companySettingsRepository.ts` (A); added active membership check for non-platform_admin users in `GET /api/companies/:id` yielding HTTP 403 FORBIDDEN (B); and updated `verifyMigration010.ts` to support guarded DO + pg_proc check pattern for `rls_auto_enable` revokes (D).
   - P05_STARTED: `YES`
-  - CI_STATUS: `PENDING`
+  - CI_STATUS: `GREEN`
 - **AN-FIX-ABD-1-LIVE-PROOF**: `IMPLEMENTED`
-  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
   - Summary: Diagnostic & Live Proof package validating RBAC cases A–E (cross-company 403, inactive membership 403, active member 200, platform_admin 200, missing company 404) and Migration 010 ACL revokes for absent/present `rls_auto_enable` routines.
   - P05_STARTED: `YES`
-  - CI_STATUS: `PENDING`
+  - CI_STATUS: `GREEN`
 - **AN-MIGRATION-CHECKSUMS-1**: `IMPLEMENTED`
-  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
   - Summary: Implemented SHA-256 checksum system for all database migrations in `migrationRunner.ts` with legacy schema upgrade (`ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT;`), transactional backfill, fail-closed mismatch detection, atomic insertion, and `NOT NULL` constraint enforcement. Wired `test:migration-checksums-1` step into `foundation-ci.yml`.
   - P05_STARTED: `YES`
-  - CI_STATUS: `PENDING`
+  - CI_STATUS: `GREEN`
 - **AN-CHECKSUMS-CI-ROLE-ORDER-FIX-1**: `IMPLEMENTED`
-  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
   - Summary: Moved `Verify Migration Checksums` step after `Provision App DB Role` in `foundation-ci.yml`, configured `DATABASE_URL` with provisioned `an_app` credentials and `MIGRATION_DATABASE_URL` with `an_test`, updated C11 to verify `an_app` real blocked mutations, and updated C12 to verify `an_test` owner full privileges vs `an_app` select-only privileges.
   - P05_STARTED: `YES`
-  - CI_STATUS: `PENDING`
+  - CI_STATUS: `GREEN`
 - **AN-RBAC-FORBIDDEN-RESPONSE-CODE-FIX-1**: `IMPLEMENTED`
-  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
   - Summary: Standardized `requirePermission` middleware JSON response on 403 Forbidden to include `code: 'FORBIDDEN'`, resolving assertion code checks in `verifyRbacHttp.ts` Test B and Test H.
   - P05_STARTED: `YES`
-  - CI_STATUS: `PENDING`
+  - CI_STATUS: `GREEN`
+- **AN-FOUNDATION-GATE-CLOSE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`, `FOUNDATION_CI_GATE=CLOSED`
+  - GREEN_CI_SHA: `a1d1197abf78b38c7a7b123e5527b704d77bf871`
+  - GREEN_CI_NOTE: Foundation CI succeeded (operator-confirmed Actions run #72 green on main)
+  - FOUNDATION_CI_GATE: `CLOSED`
+  - P0A_STATUS: `CLOSED_FOR_CI_GATE`
+  - MODULES_STARTED: `NO`
+  - NEXT: Operator live smoke checklist (`OPERATOR_LIVE_SMOKE_CHECKLIST.md`) or first deliberate product slice package.
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
 - Live DB: operator-configured via environment secrets
 - P05 Accounting Core: IMPLEMENTED & UI WIRED
-- Next gate: green CI on main OR explicit approval for subsequent P05 slices
+- Foundation CI Gate: CLOSED (`a1d1197abf78b38c7a7b123e5527b704d77bf871`, Actions Run #72)
+- Business ERP Modules: NOT STARTED
 - Forbidden: running foundation battery against live DB
 
 ---
