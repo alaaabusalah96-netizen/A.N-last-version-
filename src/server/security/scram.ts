@@ -7,5 +7,5 @@ export function scramSha256Verifier(password: string): string {
   const storedKey = createHash('sha256').update(clientKey).digest();
   const serverKey = createHmac('sha256', salted).update('Server Key').digest();
 
-  return `SCRAM-SHA-256$4096:${salt.toString('base64')}:${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
+  return `SCRAM-SHA-256$4096:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
 }

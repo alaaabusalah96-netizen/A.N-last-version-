@@ -286,6 +286,11 @@
   - Summary: Diagnosed and hardened `scripts/verifyProvisioning.ts` with explicit connection timeouts, statement timeouts, spawnSync timeouts, full stage timing instrumentation, and fail-safe pg.Client cleanup in finally blocks.
   - P05_STARTED: `YES`
   - CI_STATUS: `PENDING`
+- **AN-SCRAM-VERIFIER-FORMAT-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed SCRAM-SHA-256 verifier generation in `src/server/security/scram.ts` to use PostgreSQL-compliant delimiter `$` between salt and StoredKey (`SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>`), resolving password authentication failures for provisioned roles (`an_app`, `an_prov_*`).
+  - P05_STARTED: `YES`
+  - CI_STATUS: `PENDING`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
