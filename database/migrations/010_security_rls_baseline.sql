@@ -109,8 +109,23 @@ GRANT SELECT ON TABLE schema_migrations TO an_app;
 -- 5. Revoke execution privileges on sensitive routines from PUBLIC, anon, and authenticated
 REVOKE EXECUTE ON FUNCTION public.audit_logs_block_mutation() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.audit_logs_block_mutation() FROM anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon, authenticated;
+
+-- rls_auto_enable is a Supabase-managed routine (not created by app migrations).
+-- Guard so vanilla Postgres CI can apply 010; when present, revoke Data API execute.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'rls_auto_enable'
+  ) THEN
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon, authenticated';
+  END IF;
+END
+$$;
 
 -- 6. Pin search_path on audit trigger function
 ALTER FUNCTION public.audit_logs_block_mutation() SET search_path = pg_catalog;
