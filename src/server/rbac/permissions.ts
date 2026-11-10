@@ -35,6 +35,11 @@ export const PERMISSIONS = {
   // Company Settings
   COMPANY_SETTINGS_READ: 'company:settings:read',
   COMPANY_SETTINGS_WRITE: 'company:settings:write',
+
+  // Inventory Core permissions
+  INVENTORY_READ: 'inventory:read',
+  INVENTORY_WRITE: 'inventory:write',
+  INVENTORY_MOVEMENT: 'inventory:movement',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;

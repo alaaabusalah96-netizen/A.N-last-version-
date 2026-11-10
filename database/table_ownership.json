@@ -78,5 +78,25 @@
     "table": "user_org_scope",
     "scope": "tenant",
     "reason": "Per-company user organizational unit access scopes"
+  },
+  {
+    "table": "inv_warehouses",
+    "scope": "tenant",
+    "reason": "Per-company warehouses master"
+  },
+  {
+    "table": "inv_items",
+    "scope": "tenant",
+    "reason": "Per-company items/products master"
+  },
+  {
+    "table": "inv_stock_balances",
+    "scope": "tenant",
+    "reason": "Per-company warehouse item stock balances"
+  },
+  {
+    "table": "inv_stock_movements",
+    "scope": "tenant",
+    "reason": "Per-company stock movement ledger (receives and issues)"
   }
 ]

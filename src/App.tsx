@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { LoginForm } from './components/LoginForm.js';
 import { CompaniesPanel } from './components/CompaniesPanel.js';
 import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
+import { InventoryWorkspace } from './components/inventory/InventoryWorkspace.js';
 import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
 import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
@@ -20,7 +21,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'users' | 'company_settings' | 'org_units'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'users' | 'company_settings' | 'org_units'>('companies');
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -97,6 +98,8 @@ export default function App() {
                 ? 'الشركات'
                 : activeNav === 'accounting'
                 ? 'المحاسبة'
+                : activeNav === 'inventory'
+                ? 'المخزون'
                 : activeNav === 'users'
                 ? 'المستخدمون'
                 : activeNav === 'org_units'
@@ -108,6 +111,8 @@ export default function App() {
                 ? 'إدارة الشركات والمستأجرين'
                 : activeNav === 'accounting'
                 ? 'الدليل المحاسبي والقيود'
+                : activeNav === 'inventory'
+                ? 'المستودعات والأصناف والأرصدة والحركات'
                 : activeNav === 'users'
                 ? 'إدارة الحسابات وصلاحيات الوصول'
                 : activeNav === 'org_units'
@@ -124,6 +129,8 @@ export default function App() {
           <CompaniesPanel userRole={currentUser.role} />
         ) : activeNav === 'accounting' ? (
           <AccountingWorkspace userRole={currentUser.role} />
+        ) : activeNav === 'inventory' ? (
+          <InventoryWorkspace userRole={currentUser.role} />
         ) : activeNav === 'users' ? (
           <UsersAdminWorkspace />
         ) : activeNav === 'org_units' ? (

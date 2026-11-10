@@ -11,6 +11,7 @@ import { authRoutes } from './routes/authRoutes.js';
 import { companyRoutes } from './routes/companyRoutes.js';
 import { accountingRoutes } from './routes/accountingRoutes.js';
 import { userAdminRoutes } from './routes/userAdminRoutes.js';
+import { inventoryRoutes } from './routes/inventoryRoutes.js';
 import { tenantDemoRoutes } from './routes/tenantDemoRoutes.js';
 
 export function createApp(): Express {
@@ -52,6 +53,7 @@ export function createApp(): Express {
   app.use('/api/companies', companyRoutes);
   app.use('/api/accounting', accountingRoutes);
   app.use('/api/users', userAdminRoutes);
+  app.use('/api/inventory', inventoryRoutes);
 
   // Tenant Demo Routes (Development & Test environments only)
   if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_TENANT_DEMO === '1') {

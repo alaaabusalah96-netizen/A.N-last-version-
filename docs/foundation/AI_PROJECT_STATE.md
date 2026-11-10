@@ -349,6 +349,11 @@
   - Summary: Hardened and automated live PostgreSQL integration smoke verification. Wired `npm run test:pg-smoke-1` into `foundation-ci.yml` with `SMOKE_ALLOW_DISPOSABLE: "1"`, `MIGRATION_DATABASE_URL`, and `DATABASE_URL` after migrations and role provisioning. Hardened `verifyPgIntegrationSmoke1.ts` with host-based safety guard (`isProductionOrSupabaseDb`) refusing execution on Supabase/production hosts unless `SMOKE_ALLOW_DISPOSABLE=1`, standardized connection setup via `buildPgConfig`, isolated live cases T1–T7 with individual savepoints and strict error matching, guaranteed client closure in finally blocks, and fail-closed exit policy in CI environments. Updated `OPEN_GAPS.md` marking `PG-SMOKE-LIVE` as `CLOSED` for the automated CI gate.
   - P05_STARTED: `YES` (Accounting Core slice)
   - MODULES_STARTED: `NO` (external modules remain unstarted)
+- **AN-INV-CORE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered the first operational business module slice — **Inventory Core**. (1) Migration 019 (`019_inventory_core.sql`): Created `inv_warehouses`, `inv_items`, `inv_stock_balances`, and `inv_stock_movements` tables with forced RLS and isolation policies for role `an_app`, registered in `table_ownership.json`. (2) Backend Services: Modular repositories and services (`warehouseRepository/Service`, `itemRepository/Service`, `stockRepository/Service`). Enforced atomic transactional stock updates (`withTenantTransaction`) with row locking (`FOR UPDATE`) and strict non-negative stock validation in `issueStock`. (3) HTTP API & Security: Mounted `inventoryRoutes` at `/api/inventory` with `requireAuth`, `requirePermission` (`inventory:read`, `inventory:write`, `inventory:movement`), and active tenant membership scoping. (4) UI & Sidebar: Created `InventoryWorkspace.tsx` with tabs for Warehouses, Items, Balances, and Movements + Receive/Issue modal dialogs; added "المخزون" link to `AppSidebar.tsx` and `App.tsx`.
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES` (Inventory Core slice active)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
