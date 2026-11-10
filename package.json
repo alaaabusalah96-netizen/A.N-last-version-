@@ -66,6 +66,7 @@
     "test:fix-n2-composite-fk-inv-purch-1": "tsx scripts/verifyFixN2CompositeFkInvPurch1.ts",
     "test:fix-grn-sequence-1": "tsx scripts/verifyFixGrnSequence1.ts",
     "test:fix-grn-gl-post-1": "tsx scripts/verifyFixGrnGlPost1.ts",
+    "test:config-platform-arch-1": "tsx scripts/verifyConfigPlatformArch1.ts",
     "test:pg-proof-2": "tsx scripts/verifyPgIntegrationProof2.ts",
     "test:org-scope-on-ledger-1": "tsx scripts/verifyOrgScopeOnLedger1.ts",
     "test:p1-foundation-close-1": "tsx scripts/verifyP1FoundationClose1.ts",
