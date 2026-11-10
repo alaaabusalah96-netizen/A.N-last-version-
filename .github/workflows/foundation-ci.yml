@@ -106,6 +106,16 @@ jobs:
           CI: "true"
           DATABASE_SSL: disable
 
+      - name: PostgreSQL Integration Smoke (AN-PG-SMOKE-LIVE-CI-1)
+        run: npm run test:pg-smoke-1
+        env:
+          SMOKE_ALLOW_DISPOSABLE: "1"
+          MIGRATION_DATABASE_URL: postgresql://an_test:an_test_pass@localhost:5432/an_foundation
+          DATABASE_URL: postgresql://an_app:AppRoleSecurePass123!@localhost:5432/an_foundation
+          NODE_ENV: test
+          CI: "true"
+          DATABASE_SSL: disable
+
       - name: Verify C2 HTTP User-Admin Proof (AN-C2-HTTP-PROOF-1)
         run: npm run test:c2-http-proof-1
         env:

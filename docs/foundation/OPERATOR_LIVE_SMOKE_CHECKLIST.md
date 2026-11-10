@@ -26,6 +26,12 @@ This checklist provides a manual, non-destructive smoke verification procedure f
      ```sql
      SELECT version, checksum, applied_at FROM schema_migrations ORDER BY version;
      ```
+6. **PostgreSQL Integration Smoke (`test:pg-smoke-1`)**:
+   - When executing the live integration smoke test on an isolated disposable test database, pass `SMOKE_ALLOW_DISPOSABLE=1`:
+     ```bash
+     SMOKE_ALLOW_DISPOSABLE=1 MIGRATION_DATABASE_URL="postgresql://an_test:pass@host:5432/db" npm run test:pg-smoke-1
+     ```
+   - The test harness strictly refuses to execute live write operations against Supabase or production hosts unless `SMOKE_ALLOW_DISPOSABLE=1` is explicitly set.
 
 ---
 
@@ -55,3 +61,9 @@ This checklist provides a manual, non-destructive smoke verification procedure f
      ```sql
      SELECT version, checksum, applied_at FROM schema_migrations ORDER BY version;
      ```
+6. **الفحص الدخاني الحي لقاعدة البيانات (`test:pg-smoke-1`)**:
+   - عند تشغيل الفحص على قاعدة بيانات تجريبية معزولة، يتم تمرير متغير البيئة `SMOKE_ALLOW_DISPOSABLE=1`:
+     ```bash
+     SMOKE_ALLOW_DISPOSABLE=1 MIGRATION_DATABASE_URL="postgresql://an_test:pass@host:5432/db" npm run test:pg-smoke-1
+     ```
+   - يرفض سكريبت الفحص قطعيًا تنفيذ أي عمليات كتابة أو اختبارات حية ضد استضافة Supabase أو الإنتاج ما لم يُعيّن `SMOKE_ALLOW_DISPOSABLE=1` صراحة.

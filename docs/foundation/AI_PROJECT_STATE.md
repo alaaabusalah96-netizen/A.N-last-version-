@@ -344,6 +344,11 @@
   - Summary: Hardened accounting period controls. (1) Overlap prevention on create: periodService.createPeriod queries findOverlapping and rejects date range overlap for the same company_id with clear Arabic error. (2) Date range boundary validation: postEntry checks entryDate falls strictly within [startDate, endDate] of resolved period when periodId is specified, failing closed with ValidationError. (3) Concurrency locking: periodRepository introduces findByIdForUpdate and findCoveringDateForUpdate using SELECT ... FOR UPDATE; closePeriod, reopenPeriod, and postEntry/reverseEntry lock the target period row inside the tenant transaction and re-read is_closed before state transitions.
   - P05_STARTED: `YES` (Accounting Core slice)
   - MODULES_STARTED: `NO` (external modules remain unstarted)
+- **AN-PG-SMOKE-LIVE-CI-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Hardened and automated live PostgreSQL integration smoke verification. Wired `npm run test:pg-smoke-1` into `foundation-ci.yml` with `SMOKE_ALLOW_DISPOSABLE: "1"`, `MIGRATION_DATABASE_URL`, and `DATABASE_URL` after migrations and role provisioning. Hardened `verifyPgIntegrationSmoke1.ts` with host-based safety guard (`isProductionOrSupabaseDb`) refusing execution on Supabase/production hosts unless `SMOKE_ALLOW_DISPOSABLE=1`, standardized connection setup via `buildPgConfig`, isolated live cases T1–T7 with individual savepoints and strict error matching, guaranteed client closure in finally blocks, and fail-closed exit policy in CI environments. Updated `OPEN_GAPS.md` marking `PG-SMOKE-LIVE` as `CLOSED` for the automated CI gate.
+  - P05_STARTED: `YES` (Accounting Core slice)
+  - MODULES_STARTED: `NO` (external modules remain unstarted)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
