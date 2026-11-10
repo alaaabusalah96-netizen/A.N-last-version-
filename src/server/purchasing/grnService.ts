@@ -4,6 +4,7 @@ import { defaultWarehouseRepository, WarehouseRepository } from '../inventory/wa
 import { defaultItemRepository, ItemRepository } from '../inventory/itemRepository.js';
 import { defaultStockRepository, StockRepository } from '../inventory/stockRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
+import { defaultJournalRepository, JournalRepository } from '../accounting/journalRepository.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
@@ -15,7 +16,8 @@ export class GrnService {
     private warehouseRepo: WarehouseRepository = defaultWarehouseRepository,
     private itemRepo: ItemRepository = defaultItemRepository,
     private stockRepo: StockRepository = defaultStockRepository,
-    private auditService: AuditService = defaultAuditService
+    private auditService: AuditService = defaultAuditService,
+    private journalRepo: JournalRepository = defaultJournalRepository
   ) {}
 
   async listGrns(companyId: string): Promise<GrnHeader[]> {
@@ -142,7 +144,7 @@ export class GrnService {
         throw new ValidationError('مستودع الاستلام غير موجود أو غير نشط');
       }
 
-      const grnNo = `GRN-${Date.now().toString().slice(-6)}`;
+      const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
 
       // 3. Post each line to stock inventory atomically
       for (const line of grn.lines) {
