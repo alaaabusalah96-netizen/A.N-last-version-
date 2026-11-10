@@ -334,6 +334,11 @@
   - Summary: Closed C2-LIVE gap by establishing live HTTP and static proof harness (`scripts/verifyC2HttpProof1.ts`) proving userAdminRoutes RBAC boundaries: unauthenticated 401, company_user 403, company_admin escalation protection 403, platform_admin allowed actions 200/201, platform_admin target protection 403, and zero password hash leakage. Wired proof into CI workflow.
   - P05_STARTED: `YES` (Accounting Core slice)
   - MODULES_STARTED: `NO` (external modules remain unstarted)
+- **AN-C2-HTTP-PROOF-FIX-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING` (awaiting CI run on new SHA)
+  - Summary: Fixed verifyC2HttpProof1 Case A contract to accept 401 GET and 401 or 403-CSRF on unauthenticated POST (reflecting global csrfProtection middleware order without altering security). Added FK-safe cleanup of all created test users, companies, and memberships in finally block. Added hard guard `isProductionOrSupabaseDb` blocking test execution against production/Supabase DATABASE_URL unless `C2_ALLOW_DISPOSABLE=1`, and added `C2_ALLOW_DISPOSABLE: "1"` to CI C2 step.
+  - P05_STARTED: `YES` (Accounting Core slice)
+  - MODULES_STARTED: `NO` (external modules remain unstarted)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

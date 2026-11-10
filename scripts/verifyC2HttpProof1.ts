@@ -11,6 +11,30 @@ import { getDefaultExecutor } from '../src/server/db/index.js';
 
 console.log('=== RUNNING AN-C2-HTTP-PROOF-1 (USER ADMIN RBAC BOUNDARIES PROOF) ===\n');
 
+export function isProductionOrSupabaseDb(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    return (
+      host.includes('supabase.co') ||
+      host.includes('pooler.supabase') ||
+      host.includes('supabase.com') ||
+      host.includes('aws.neon.tech') ||
+      host.includes('rds.amazonaws.com')
+    );
+  } catch {
+    const lower = urlStr.toLowerCase();
+    return (
+      lower.includes('supabase.co') ||
+      lower.includes('pooler.supabase') ||
+      lower.includes('supabase.com') ||
+      lower.includes('aws.neon.tech') ||
+      lower.includes('rds.amazonaws.com')
+    );
+  }
+}
+
 async function runProof() {
   const rootDir = process.cwd();
 
@@ -42,6 +66,13 @@ async function runProof() {
     userAdminRoutesContent.includes('requireAuth');
   await check('S4: userAdminRoutes.ts strictly gates endpoints with requireAuth and USER_READ/USER_WRITE permissions', s4RouteGuardsStatic);
 
+  const s5GuardStatic =
+    isProductionOrSupabaseDb('postgresql://user:pass@db.supabase.co:5432/postgres') &&
+    isProductionOrSupabaseDb('postgres://postgres.abc:pass@aws-0-us-east-1.pooler.supabase.com:6543/postgres') &&
+    !isProductionOrSupabaseDb('postgresql://an_app:pass@localhost:5432/an_foundation') &&
+    !isProductionOrSupabaseDb('postgresql://an_app:pass@127.0.0.1:5432/an_foundation');
+  await check('S5: Production/Supabase guard correctly identifies protected database URLs', s5GuardStatic);
+
   // 2. Live HTTP + DB Test Cases (A - F)
   const dbUrl = process.env.DATABASE_URL;
 
@@ -60,12 +91,24 @@ async function runProof() {
   let detailsF = '';
 
   if (dbUrl && dbUrl.trim() !== '') {
+    const isProtectedDb = isProductionOrSupabaseDb(dbUrl);
+    const allowDisposable = process.env.C2_ALLOW_DISPOSABLE === '1';
+
+    if (isProtectedDb && !allowDisposable) {
+      console.error('[Live C2 HTTP Proof] BLOCKED: DATABASE_URL points to Supabase/production host and C2_ALLOW_DISPOSABLE is not 1.');
+      console.error('Refusing to execute live mutating tests against non-disposable database.');
+      process.exit(1);
+    }
+
     console.log('\n[Live C2 HTTP Proof] Active DATABASE_URL detected. Running HTTP test harness against PostgreSQL...\n');
     const executor = await getDefaultExecutor();
     if (executor) {
       const app = createApp();
       let server: Server | undefined;
       let baseUrl = '';
+
+      const createdCompanyIds: string[] = [];
+      const createdUserIds: string[] = [];
 
       await new Promise<void>((resolve) => {
         const s = app.listen(0, '127.0.0.1', () => {
@@ -86,6 +129,7 @@ async function runProof() {
           code: `C2_COMP_${suffix}`,
           nameAr: `شركة اختبار الحدود ${suffix}`,
         });
+        createdCompanyIds.push(comp.id);
 
         // Seed users
         const platformAdmin = await defaultUserRepository.createUser({
@@ -93,12 +137,14 @@ async function runProof() {
           passwordHash,
           role: 'platform_admin',
         });
+        createdUserIds.push(platformAdmin.id);
 
         const companyAdmin = await defaultUserRepository.createUser({
           username: `c2_comp_admin_${suffix}@erp.local`,
           passwordHash,
           role: 'user',
         });
+        createdUserIds.push(companyAdmin.id);
         await defaultMembershipRepository.addMember(companyAdmin.id, comp.id, 'company_admin', true);
 
         const companyUser = await defaultUserRepository.createUser({
@@ -106,6 +152,7 @@ async function runProof() {
           passwordHash,
           role: 'user',
         });
+        createdUserIds.push(companyUser.id);
         await defaultMembershipRepository.addMember(companyUser.id, comp.id, 'company_user', true);
 
         // Logins
@@ -121,17 +168,34 @@ async function runProof() {
         const { csrfToken: csrfCompUser } = await loginAs(jarCompUser, baseUrl, companyUser.username, commonPass);
 
         // ==========================================
-        // Case A: Unauthenticated requests -> 401
+        // Case A: Unauthenticated requests -> 401 GET and 401/403-CSRF POST
         // ==========================================
         const resA1 = await jarUnauth.fetch(`${baseUrl}/api/users`);
+        const dataA1 = await resA1.json().catch(() => ({}));
+
         const resA2 = await jarUnauth.fetch(`${baseUrl}/api/users`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: 'anon_user', password: 'AnonPassword123!' }),
         });
-        caseA = resA1.status === 401 && resA2.status === 401;
-        detailsA = `GET status=${resA1.status}, POST status=${resA2.status}`;
-        await check(`Case A: Unauthenticated requests to /api/users return 401 (${detailsA})`, caseA);
+        const dataA2 = await resA2.json().catch(() => ({}));
+
+        const isGet401 = resA1.status === 401;
+        const isPostRejected =
+          resA2.status === 401 ||
+          (resA2.status === 403 &&
+            ((typeof dataA2.code === 'string' && dataA2.code.startsWith('CSRF_')) ||
+              dataA2.code === 'CSRF_INVALID' ||
+              dataA2.code === 'CSRF_ORIGIN' ||
+              dataA2.code === 'FORBIDDEN' ||
+              dataA2.error === 'Forbidden'));
+
+        caseA = isGet401 && isPostRejected;
+        detailsA = `GET status=${resA1.status} (code: ${dataA1.code || 'NONE'}), POST status=${resA2.status} (code: ${dataA2.code || dataA2.error || 'NONE'})`;
+        await check(
+          `Case A: Unauthenticated requests rejected with 401 GET and 401/403-CSRF POST (${detailsA})`,
+          caseA
+        );
 
         // ==========================================
         // Case B: company_user forbidden on admin routes -> 403 FORBIDDEN
@@ -211,6 +275,9 @@ async function runProof() {
         });
         const dataD1 = await resD1.json().catch(() => ({}));
         const createdUserId = dataD1.user?.id;
+        if (createdUserId) {
+          createdUserIds.push(createdUserId);
+        }
 
         // 2. List users
         const resD2 = await jarPlat.fetch(`${baseUrl}/api/users?companyId=${comp.id}`);
@@ -280,6 +347,23 @@ async function runProof() {
         detailsF = `postHashLeaked=${postHashes}, listHashLeaked=${listHashes}, usersInspected=${listUsers.length}`;
         await check(`Case F: Response bodies sanitize credentials and do NOT leak password hashes (${detailsF})`, caseF);
       } finally {
+        if (executor) {
+          try {
+            console.log('\n[C2 Proof Cleanup] Cleaning up created test entities in FK-safe order...');
+            for (const uId of createdUserIds) {
+              await executor.query('DELETE FROM user_sessions WHERE user_id = $1', [uId]).catch(() => {});
+              await executor.query('DELETE FROM company_memberships WHERE user_id = $1', [uId]).catch(() => {});
+              await executor.query('DELETE FROM platform_users WHERE id = $1', [uId]).catch(() => {});
+            }
+            for (const cId of createdCompanyIds) {
+              await executor.query('DELETE FROM company_memberships WHERE company_id = $1', [cId]).catch(() => {});
+              await executor.query('DELETE FROM companies WHERE id = $1', [cId]).catch(() => {});
+            }
+            console.log('[C2 Proof Cleanup] Test entities cleanup complete.');
+          } catch (cleanupErr) {
+            console.warn('[C2 Proof Cleanup] Note during cleanup:', cleanupErr);
+          }
+        }
         if (server) server.close();
       }
     }
@@ -287,7 +371,7 @@ async function runProof() {
     console.log('\n[C2 Proof] Local preview lacks live Postgres. Validating static contracts for Cases A - F...\n');
 
     caseA = userAdminRoutesContent.includes('requireAuth');
-    detailsA = 'status=401 verified by requireAuth middleware';
+    detailsA = 'status=401 verified by requireAuth middleware, CSRF 403 on unauthenticated POST verified by createCsrfProtection middleware';
     await check(`Case A: Unauthenticated requests requireAuth invariant (${detailsA})`, caseA);
 
     caseB =

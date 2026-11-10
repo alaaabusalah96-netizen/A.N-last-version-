@@ -115,6 +115,7 @@ jobs:
           REQUIRE_DB: "1"
           CI: "true"
           DATABASE_SSL: disable
+          C2_ALLOW_DISPOSABLE: "1"
 
       - name: Run Foundation Test Battery
         id: battery
