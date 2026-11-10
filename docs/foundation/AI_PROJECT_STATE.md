@@ -374,6 +374,11 @@
   - Summary: Remediated SQL runtime exception when setting organizational unit access scopes (N1). Replaced invalid column reference `AND status = 'active'` with `AND is_active = true` on `company_memberships` in `checkUserCompanyMembership` (`src/server/org/orgUnitRepository.ts`). Created verification harness `scripts/verifyFixN1OrgScopeStatus1.ts` (`npm run test:fix-n1-org-scope-status-1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-FIX-CI-VITEST-INV-PURCH-1**: `IMPLEMENTED`
+   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+   - Summary: Wired Vitest unit test suite (`npm run test:unit`) into `foundation-ci.yml`. Added focused inventory/purchasing unit tests covering GRN idempotency and stock issuance. Updated `runFoundationBattery.ts` to include mandatory verification scripts for all inv/purch modules. Verified repairs across 6-package baseline.
+   - P05_STARTED: `YES`
+   - MODULES_STARTED: `YES`
 - **AN-FIX-GRN-GL-POST-1**: `IMPLEMENTED`
    - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
    - Summary: Implemented balanced General Ledger entry creation upon GRN posting. Updated `grnService.ts` to integrate with `journalService` and `companySettingsRepository`, ensuring atomic GL posting in the same transaction as inventory updates. Added `journal_entry_id` linkage in `purch_grn` table (via migration 024) and ensured idempotency by linking the journal entry directly to the GRN. Added verification harness `scripts/verifyFixGrnGlPost1.ts` (`npm run test:fix-grn-gl-post-1`).

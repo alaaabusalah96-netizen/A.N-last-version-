@@ -54,6 +54,12 @@ jobs:
       - name: Build Application
         run: npm run build
 
+      - name: Unit Tests
+        run: npm run test:unit
+        env:
+          NODE_ENV: test
+          DATABASE_SSL: disable
+
       - name: Bootstrap stub Supabase roles (anon, authenticated)
         run: npm run ci:bootstrap-roles
         env:
