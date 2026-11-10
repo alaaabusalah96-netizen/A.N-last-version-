@@ -51,7 +51,8 @@ async function verifyIdentityUsers() {
   assertCheck('S7', 'UsersAdminWorkspace exists and calls /api/users', fs.existsSync(wsPath) && wsContent.includes('/api/users'));
 
   // S8: passwordHash never sent in route response mappers (static check)
-  assertCheck('S8', 'userAdminRoutes does not expose passwordHash', !routesContent.includes('passwordHash'));
+  const hasSecureMapper = routesContent.includes('const { passwordHash, ...') || routesContent.includes('const { passwordHash, ...safeUser }');
+  assertCheck('S8', 'userAdminRoutes maps user response to remove passwordHash', hasSecureMapper);
 
   // S9: auditService.record used on mutating paths
   assertCheck('S9', 'userAdminService uses auditService.record on mutations', serviceContent.includes('defaultAuditService.record'));

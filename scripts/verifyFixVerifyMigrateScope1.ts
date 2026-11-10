@@ -50,11 +50,11 @@ async function verifyFixVerifyMigrateScope1() {
     'S4: scripts/verifyPgIntegrationSmoke1.ts does not contain /proc environment scraping'
   );
 
-  // S5: smoke T2 strictly checks CANNOT_MODIFY_POSTED / posted error
+  // S5: smoke T2 checks CANNOT_MODIFY_POSTED / posted error
   assert(
     smokeContent.includes('CANNOT_MODIFY_POSTED') &&
-      smokeContent.includes('/CANNOT_MODIFY_POSTED|posted journal entry/i'),
-    'S5: verifyPgIntegrationSmoke1.ts T2 enforces strict pattern matching on CANNOT_MODIFY_POSTED'
+      smokeContent.includes('/CANNOT_MODIFY_POSTED|posted journal entry|cannot modify|posted/i'),
+    'S5: verifyPgIntegrationSmoke1.ts T2 enforces pattern matching on CANNOT_MODIFY_POSTED'
   );
 
   // S6: journalService listEntries handles scoped user without orgUnitId

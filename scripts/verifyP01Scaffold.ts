@@ -32,11 +32,11 @@ const checks: Check[] = [
     },
   },
   {
-    name: 'GET /api/health endpoint present in server.ts',
+    name: 'GET /api/health endpoint present in src/server/app.ts',
     run: () => {
-      const serverPath = path.join(rootDir, 'server.ts');
-      if (!fs.existsSync(serverPath)) return false;
-      const content = fs.readFileSync(serverPath, 'utf8');
+      const appPath = path.join(rootDir, 'src/server/app.ts');
+      if (!fs.existsSync(appPath)) return false;
+      const content = fs.readFileSync(appPath, 'utf8');
       return content.includes('/api/health');
     },
   },

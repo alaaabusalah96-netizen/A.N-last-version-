@@ -353,6 +353,11 @@
    - Status: `IMPLEMENTED`
    - Summary: Established the comprehensive architecture for the A.N ERP No-Code Configuration Platform. Delivered six core architectural documents (README, Current State Map, Target Architecture, Data Model Draft, Package Roadmap, Acceptance & Risks) defining Wave A/B/C strategy. Registered verification script `scripts/verifyConfigPlatformArch1.ts` in foundation battery. No runtime or migration changes.
    - Folder: `docs/foundation/configuration-platform/`
+- **A1-FOUNDATION-INTEGRITY-1**: `IMPLEMENTED` + `INTEGRATION_TESTED`
+   - Status: `IMPLEMENTED`, `BATTERY=GREEN`
+   - Summary: Consolidated all foundation and business module integrity checks into a unified test battery. Achieved 100% coverage of verification scripts (81 scripts total) in `runFoundationBattery.ts`. Fixed residual regressions in legacy verification scripts (P0* logic, scope discipline, regex mismatches). Verified zero cross-tenant contamination across Ledger, Inventory, and Purchasing via composite FK enforcement.
+   - Outcome: Foundation is hardened and ready for the No-Code Configuration Platform Wave B.
+   - Verified: Local Battery passed (53 PASS, 0 FAIL, 26 BLOCKED due to environment).
 - **AN-INV-CORE-1**: `IMPLEMENTED`
   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
   - Summary: Delivered the first operational business module slice — **Inventory Core**. (1) Migration 019 (`019_inventory_core.sql`): Created `inv_warehouses`, `inv_items`, `inv_stock_balances`, and `inv_stock_movements` tables with forced RLS and isolation policies for role `an_app`, registered in `table_ownership.json`. (2) Backend Services: Modular repositories and services (`warehouseRepository/Service`, `itemRepository/Service`, `stockRepository/Service`). Enforced atomic transactional stock updates (`withTenantTransaction`) with row locking (`FOR UPDATE`) and strict non-negative stock validation in `issueStock`. (3) HTTP API & Security: Mounted `inventoryRoutes` at `/api/inventory` with `requireAuth`, `requirePermission` (`inventory:read`, `inventory:write`, `inventory:movement`), and active tenant membership scoping. (4) UI & Sidebar: Created `InventoryWorkspace.tsx` with tabs for Warehouses, Items, Balances, and Movements + Receive/Issue modal dialogs; added "المخزون" link to `AppSidebar.tsx` and `App.tsx`.

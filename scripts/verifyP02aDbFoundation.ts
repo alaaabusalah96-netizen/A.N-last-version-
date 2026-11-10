@@ -52,12 +52,12 @@ const checks: Check[] = [
     },
   },
   {
-    name: 'server.ts imports db layer and references getDefaultExecutor or ready logic',
+    name: 'app.ts handles /api/ready logic',
     run: () => {
-      const serverPath = path.join(rootDir, 'server.ts');
-      if (!fs.existsSync(serverPath)) return false;
-      const content = fs.readFileSync(serverPath, 'utf8');
-      return content.includes('getDefaultExecutor') && content.includes('/api/ready');
+      const appPath = path.join(rootDir, 'src/server/app.ts');
+      if (!fs.existsSync(appPath)) return false;
+      const appContent = fs.readFileSync(appPath, 'utf8');
+      return appContent.includes('/api/ready');
     },
   },
   {

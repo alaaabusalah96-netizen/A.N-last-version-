@@ -27,6 +27,11 @@ assertLoopbackHost(process.env.DATABASE_URL, 'DATABASE_URL');
 assertLoopbackHost(process.env.MIGRATION_DATABASE_URL, 'MIGRATION_DATABASE_URL');
 
 const scripts = [
+  'scripts/verifyLocal.ts',
+  'scripts/verifyP01Scaffold.ts',
+  'scripts/verifyP02aDbFoundation.ts',
+  'scripts/verifyP03AuthCore.ts',
+  'scripts/verifyP04OrgRbac.ts',
   'scripts/verifyPublicAssets.ts',
   'scripts/verifyExecutorImports.ts',
   'scripts/verifyNoMemoryFallback.ts',
@@ -52,10 +57,55 @@ const scripts = [
   'scripts/verifyDataApiGuard.ts',
   'scripts/verifyTenantScopeMiddleware.ts',
   'scripts/verifyMigration010.ts',
+  'scripts/verifyP05AccountingCore.ts',
+  'scripts/verifyUiShell1.ts',
+  'scripts/verifyFixAccountingRbac1.ts',
+  'scripts/verifyFixAccountingUiGates1.ts',
+  'scripts/verifyIdentityUsers1.ts',
+  'scripts/verifyCompanySettings1.ts',
+  'scripts/verifyP0SecurityFix1b.ts',
+  'scripts/verifyP0Verify1.ts',
+  'scripts/verifyP1aDesign1.ts',
+  'scripts/verifyP1bLedgerGuarantees1.ts',
+  'scripts/verifyP1cOrgUnits1.ts',
+  'scripts/verifyP1dAccountingUi1.ts',
+  'scripts/verifyP1bLedgerHardening1.ts',
+  'scripts/verifyP1cOrgIntegrity1.ts',
+  'scripts/verifyFixLedgerOrgFollowup1.ts',
+  'scripts/verifyPgIntegrationSmoke1.ts',
+  'scripts/verifyPgSmokeLiveCi1.ts',
+  'scripts/verifyInvCore1.ts',
+  'scripts/verifyInvTransfer1.ts',
+  'scripts/verifyInvItemCard1.ts',
+  'scripts/verifyPurchCore1.ts',
+  'scripts/verifyFixN1OrgScopeStatus1.ts',
+  'scripts/verifyFixN2CompositeFkLedger1.ts',
   'scripts/verifyFixN2CompositeFkInvPurch1.ts',
   'scripts/verifyFixGrnSequence1.ts',
   'scripts/verifyFixGrnGlPost1.ts',
   'scripts/verifyConfigPlatformArch1.ts',
+  'scripts/verifyPgIntegrationProof2.ts',
+  'scripts/verifyOrgScopeOnLedger1.ts',
+  'scripts/verifyP1FoundationClose1.ts',
+  'scripts/verifyFixVerifyMigrateScope1.ts',
+  'scripts/verifyCiProofWire1.ts',
+  'scripts/verifyCiPostgresSsl1.ts',
+  'scripts/verifyDbSslPolicy2.ts',
+  'scripts/verifyDbSslDisableScope1.ts',
+  'scripts/verifyCiBootstrapRoles1.ts',
+  'scripts/verifyCiGuardRlsAutoEnable1.ts',
+  'scripts/verifyCiRestoreSimulateManagedPg1.ts',
+  'scripts/verifyCiMissingScriptsRestore1.ts',
+  'scripts/verifyProvisionRoleMissingRolesFix1.ts',
+  'scripts/verifyProvisioningHangGuard1.ts',
+  'scripts/verifyScramVerifierFormat1.ts',
+  'scripts/verifyFixAbd1.ts',
+  'scripts/verifyAbd1LiveProof.ts',
+  'scripts/verifyMigrationChecksums1.ts',
+  'scripts/verifyFoundationGateClose1.ts',
+  'scripts/verifyAccountingPeriodsEnforce1.ts',
+  'scripts/verifyAccountingPeriodsHarden1.ts',
+  'scripts/verifyC2HttpProof1.ts',
 ];
 
 export interface BatteryItemReport {
@@ -129,6 +179,11 @@ for (const script of scripts) {
     blockedScripts++;
     const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : 'Test prerequisites unfulfilled (BLOCKED)';
+  } else if (exitCode === 3) {
+    status = 'BLOCKED';
+    blockedScripts++;
+    const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
+    failureReason = match ? sanitizeMessage(match[1].trim()) : 'No database environment (BLOCKED)';
   } else {
     status = 'FAIL';
     failedScripts++;

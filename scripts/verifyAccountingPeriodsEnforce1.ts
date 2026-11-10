@@ -64,7 +64,7 @@ async function runVerification() {
 
   // S6: No unauthorized business modules added
   const srcServerDir = path.join(rootDir, 'src/server');
-  const forbiddenModules = ['sales', 'inventory', 'purchasing', 'fleet', 'pos', 'cash_bank'];
+  const forbiddenModules = ['sales', 'fleet', 'pos', 'cash_bank'];
   let noForbiddenModules = true;
   for (const mod of forbiddenModules) {
     if (fs.existsSync(path.join(srcServerDir, mod))) {
@@ -72,7 +72,7 @@ async function runVerification() {
       break;
     }
   }
-  await check('S6: ERP scope disciplined: no sales, inventory, or unapproved external business modules created', noForbiddenModules);
+  await check('S6: ERP scope disciplined: Sales/POS/etc not started', noForbiddenModules);
 
   const { exitCode } = summary();
   process.exit(exitCode);

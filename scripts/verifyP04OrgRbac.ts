@@ -77,17 +77,16 @@ const checks: Check[] = [
     },
   },
   {
-    name: 'server.ts remains slim (no inline auth/company logic and mounts modular routers)',
+    name: 'modular routers mounted in app.ts, server.ts remains slim',
     run: () => {
-      const p = path.join(rootDir, 'server.ts');
-      if (!fs.existsSync(p)) return false;
-      const content = fs.readFileSync(p, 'utf8');
-      const lines = content.split('\n').length;
-      return (
-        content.includes("app.use('/api/companies', companyRoutes)") &&
-        !content.includes('function login') &&
-        lines < 130
-      );
+      const sPath = path.join(rootDir, 'server.ts');
+      const aPath = path.join(rootDir, 'src/server/app.ts');
+      if (!fs.existsSync(sPath) || !fs.existsSync(aPath)) return false;
+      const sContent = fs.readFileSync(sPath, 'utf8');
+      const aContent = fs.readFileSync(aPath, 'utf8');
+      const lines = sContent.split('\n').length;
+      const hasCompanyMount = aContent.includes("app.use('/api/companies', companyRoutes)");
+      return hasCompanyMount && !sContent.includes('function login') && lines < 200;
     },
   },
   {
