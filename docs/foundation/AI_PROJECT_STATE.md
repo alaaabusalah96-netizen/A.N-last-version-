@@ -329,6 +329,11 @@
   - Summary: Closed PERIODS gap by enforcing open accounting period validation in `journalService.ts` (`postEntry`/`reverseEntry`) with fail-closed behavior for missing or closed periods. Implemented `periodRepository` and `periodService` for CRUD/close/reopen operations, exposed company-scoped endpoints in `accountingRoutes.ts`, and mounted `PeriodsPanel` in `AccountingWorkspace.tsx`.
   - P05_STARTED: `YES` (Accounting Core slice)
   - MODULES_STARTED: `NO` (external modules remain unstarted)
+- **AN-C2-HTTP-PROOF-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
+  - Summary: Closed C2-LIVE gap by establishing live HTTP and static proof harness (`scripts/verifyC2HttpProof1.ts`) proving userAdminRoutes RBAC boundaries: unauthenticated 401, company_user 403, company_admin escalation protection 403, platform_admin allowed actions 200/201, platform_admin target protection 403, and zero password hash leakage. Wired proof into CI workflow.
+  - P05_STARTED: `YES` (Accounting Core slice)
+  - MODULES_STARTED: `NO` (external modules remain unstarted)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
