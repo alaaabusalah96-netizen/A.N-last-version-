@@ -46,5 +46,6 @@
   "verifyInvCore1.ts": "package-specific verification",
   "verifyInvTransfer1.ts": "package-specific verification",
   "verifyInvItemCard1.ts": "package-specific verification",
-  "verifyPurchCore1.ts": "package-specific verification"
+  "verifyPurchCore1.ts": "package-specific verification",
+  "verifyFixN1OrgScopeStatus1.ts": "package-specific verification"
 }

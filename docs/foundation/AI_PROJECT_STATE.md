@@ -369,6 +369,11 @@
   - Summary: Delivered the first purchasing slice integrated with inventory. (1) Migration 021 (`021_purchasing_core.sql`): Created `purch_suppliers`, `purch_grn`, and `purch_grn_lines` with forced RLS and isolation policies for role `an_app`, registered in `table_ownership.json`. (2) Backend Services & Integration: Created `supplierRepository/Service` and `grnRepository/Service`. Implemented `postGrn` executing atomically within `withTenantTransaction`, confirming GRN status and calling stock receive logic (`upsertBalance`, `createMovement` receive) across all lines. (3) HTTP API & Permissions: Registered `PURCHASING_READ/WRITE/POST` permissions, mapped to roles, and mounted `purchasingRoutes` at `/api/purchasing`. (4) UI & Sidebar: Created `PurchasingWorkspace.tsx` with tabs for Suppliers and GRNs + modals for creating suppliers and GRNs; added "المشتريات" link to `AppSidebar.tsx` and `App.tsx`. (5) Verification: Created static test harness `scripts/verifyPurchCore1.ts` (`npm run test:purch-core-1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES` (Purchasing Core slice active)
+- **AN-FIX-N1-ORG-SCOPE-STATUS-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Remediated SQL runtime exception when setting organizational unit access scopes (N1). Replaced invalid column reference `AND status = 'active'` with `AND is_active = true` on `company_memberships` in `checkUserCompanyMembership` (`src/server/org/orgUnitRepository.ts`). Created verification harness `scripts/verifyFixN1OrgScopeStatus1.ts` (`npm run test:fix-n1-org-scope-status-1`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

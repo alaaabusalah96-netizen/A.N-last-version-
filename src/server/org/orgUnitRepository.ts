@@ -261,7 +261,7 @@ export class OrgUnitRepository {
       const sql = `
         SELECT 1 
         FROM company_memberships 
-        WHERE company_id = $1 AND user_id = $2 AND status = 'active'
+        WHERE company_id = $1 AND user_id = $2 AND is_active = true
       `;
       const res = await tx.query(sql, [companyId, userId]);
       return res.rows.length > 0;
