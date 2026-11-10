@@ -52,6 +52,8 @@ const scripts = [
   'scripts/verifyDataApiGuard.ts',
   'scripts/verifyTenantScopeMiddleware.ts',
   'scripts/verifyMigration010.ts',
+  'scripts/verifyFixN2CompositeFkInvPurch1.ts',
+  'scripts/verifyFixGrnSequence1.ts',
 ];
 
 export interface BatteryItemReport {

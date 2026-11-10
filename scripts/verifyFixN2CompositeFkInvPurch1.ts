@@ -28,7 +28,7 @@ export function isProductionOrSupabaseDb(urlStr: string): boolean {
 }
 
 async function runVerification() {
-  console.log('=== RUNNING INVENTORY & PURCHASING COMPOSITE FOREIGN KEY VERIFICATION (AN-FIX-N2-COMPOSITE-FK-INV-PURCH-1) ===');
+  console.log('=== RUNNING INVENTORY & PURCHASING COMPOSITE FOREIGN KEY VERIFICATION (AN-FIX-N2-INV-PURCH-TEST-1) ===');
   let passed = 0;
   let failed = 0;
   let skipped = 0;
@@ -81,17 +81,17 @@ async function runVerification() {
   // S5: AI_PROJECT_STATE.md records package
   const statePath = path.join(root, 'docs/foundation/AI_PROJECT_STATE.md');
   const stateContent = fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '';
-  const hasStateRecord = stateContent.includes('AN-FIX-N2-COMPOSITE-FK-INV-PURCH-1');
-  assert(hasStateRecord, 'S5: AI_PROJECT_STATE.md records AN-FIX-N2-COMPOSITE-FK-INV-PURCH-1');
+  const hasStateRecord = stateContent.includes('AN-FIX-N2-COMPOSITE-FK-INV-PURCH-1') || stateContent.includes('AN-FIX-N2-INV-PURCH-TEST-1');
+  assert(hasStateRecord, 'S5: AI_PROJECT_STATE.md records composite FK verification package');
 
-  // Live Database Proof (T1–T4) if disposable DB provided and N2_ALLOW_DISPOSABLE=1
+  // Live Database Proof (T1–T4) with SAVEPOINT isolation and SQLSTATE 23503 verification
   const dbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
   if (!dbUrl) {
     reportSkipped('Live FK rejection proof skipped: No DATABASE_URL or MIGRATION_DATABASE_URL configured');
   } else if (isProductionOrSupabaseDb(dbUrl) && process.env.N2_ALLOW_DISPOSABLE !== '1') {
     reportSkipped('Live FK rejection proof skipped: Protected database URL detected and N2_ALLOW_DISPOSABLE is not set to 1');
   } else {
-    console.log('[Live Proof] Connecting to test database to verify inventory & purchasing composite FK cross-tenant rejection...');
+    console.log('[Live Proof] Connecting to test database to verify inventory & purchasing composite FK cross-tenant rejection with SAVEPOINTs...');
     const pgConfig = buildPgConfig(dbUrl, process.env);
     const client = new pg.Client(pgConfig);
     try {
@@ -99,102 +99,125 @@ async function runVerification() {
       await client.query('BEGIN;');
 
       // Create two temporary test companies
-      const comp1Res = await client.query("INSERT INTO companies (code, name_ar) VALUES ('N2-INV-A', 'شركة مخزون أ') RETURNING id;");
+      const comp1Res = await client.query("INSERT INTO companies (code, name_ar) VALUES ('TEST-COMP-A', 'شركة اختبار أ') RETURNING id;");
       const comp1Id = comp1Res.rows[0].id;
 
-      const comp2Res = await client.query("INSERT INTO companies (code, name_ar) VALUES ('N2-INV-B', 'شركة مخزون ب') RETURNING id;");
+      const comp2Res = await client.query("INSERT INTO companies (code, name_ar) VALUES ('TEST-COMP-B', 'شركة اختبار ب') RETURNING id;");
       const comp2Id = comp2Res.rows[0].id;
 
-      // Create warehouse and item in Company 1
+      // Create warehouse and item in Company 1 (using correct column 'uom')
       const wh1Res = await client.query(
-        "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, 'WH-A', 'مستودع أ') RETURNING id;",
+        "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, 'WH-A1', 'مستودع اختبار أ') RETURNING id;",
         [comp1Id]
       );
       const wh1Id = wh1Res.rows[0].id;
 
       const item1Res = await client.query(
-        "INSERT INTO inv_items (company_id, code, name_ar, unit) VALUES ($1, 'ITEM-A', 'صنف أ', 'pcs') RETURNING id;",
+        "INSERT INTO inv_items (company_id, code, name_ar, uom) VALUES ($1, 'ITEM-A1', 'صنف اختبار أ', 'pcs') RETURNING id;",
         [comp1Id]
       );
       const item1Id = item1Res.rows[0].id;
 
       // Create supplier in Company 1
       const supp1Res = await client.query(
-        "INSERT INTO purch_suppliers (company_id, code, name_ar) VALUES ($1, 'SUPP-A', 'مورد أ') RETURNING id;",
+        "INSERT INTO purch_suppliers (company_id, code, name_ar) VALUES ($1, 'SUPP-A1', 'مورد اختبار أ') RETURNING id;",
         [comp1Id]
       );
       const supp1Id = supp1Res.rows[0].id;
 
       // Create GRN in Company 1
       const grn1Res = await client.query(
-        "INSERT INTO purch_grn (company_id, grn_no, supplier_id, warehouse_id, status) VALUES ($1, 'GRN-001', $2, $3, 'draft') RETURNING id;",
+        "INSERT INTO purch_grn (company_id, grn_no, supplier_id, warehouse_id, status) VALUES ($1, 'GRN-TEST-001', $2, $3, 'draft') RETURNING id;",
         [comp1Id, supp1Id, wh1Id]
       );
       const grn1Id = grn1Res.rows[0].id;
 
-      // T1: Try inserting inv_stock_balances in Company 2 pointing to warehouse in Company 1 -> must fail FK violation
+      // T1: Try inserting inv_stock_balances (using 'qty') in Company 2 pointing to warehouse in Company 1 -> must fail with SQLSTATE 23503
       let t1Failed = false;
+      await client.query('SAVEPOINT sp_t1;');
       try {
         await client.query(
-          "INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, quantity) VALUES ($1, $2, $3, 10);",
+          "INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty) VALUES ($1, $2, $3, 10);",
           [comp2Id, wh1Id, item1Id]
         );
       } catch (err: any) {
-        if (err.code === '23503' || err.message.includes('foreign key')) {
+        if (err.code === '23503') {
           t1Failed = true;
         } else {
           throw err;
         }
       }
-      assert(t1Failed, 'T1: Inserting inv_stock_balance with cross-company warehouse_id correctly rejected by composite FK');
+      await client.query('ROLLBACK TO SAVEPOINT sp_t1;');
+      assert(t1Failed, 'T1: Inserting inv_stock_balance with cross-company warehouse_id correctly rejected with SQLSTATE 23503');
 
-      // T2: Try inserting inv_stock_movements in Company 2 pointing to item in Company 1 -> must fail FK violation
+      // T2: Try inserting inv_stock_movements (using 'qty') in Company 2 pointing to item in Company 1 -> must fail with SQLSTATE 23503
       let t2Failed = false;
+      await client.query('SAVEPOINT sp_t2;');
       try {
         await client.query(
-          "INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, quantity) VALUES ($1, $2, $3, 'receive', 10);",
+          "INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty) VALUES ($1, $2, $3, 'receive', 10);",
           [comp2Id, wh1Id, item1Id]
         );
       } catch (err: any) {
-        if (err.code === '23503' || err.message.includes('foreign key')) {
+        if (err.code === '23503') {
           t2Failed = true;
         } else {
           throw err;
         }
       }
-      assert(t2Failed, 'T2: Inserting inv_stock_movement with cross-company item_id correctly rejected by composite FK');
+      await client.query('ROLLBACK TO SAVEPOINT sp_t2;');
+      assert(t2Failed, 'T2: Inserting inv_stock_movement with cross-company item_id correctly rejected with SQLSTATE 23503');
 
-      // T3: Try inserting purch_grn in Company 2 pointing to supplier in Company 1 -> must fail FK violation
+      // T3: Try inserting purch_grn in Company 2 pointing to supplier in Company 1 -> must fail with SQLSTATE 23503
       let t3Failed = false;
+      await client.query('SAVEPOINT sp_t3;');
       try {
         await client.query(
-          "INSERT INTO purch_grn (company_id, grn_no, supplier_id, warehouse_id, status) VALUES ($1, 'GRN-002', $2, $3, 'draft');",
+          "INSERT INTO purch_grn (company_id, grn_no, supplier_id, warehouse_id, status) VALUES ($1, 'GRN-TEST-002', $2, $3, 'draft');",
           [comp2Id, supp1Id, wh1Id]
         );
       } catch (err: any) {
-        if (err.code === '23503' || err.message.includes('foreign key')) {
+        if (err.code === '23503') {
           t3Failed = true;
         } else {
           throw err;
         }
       }
-      assert(t3Failed, 'T3: Inserting purch_grn with cross-company supplier_id correctly rejected by composite FK');
+      await client.query('ROLLBACK TO SAVEPOINT sp_t3;');
+      assert(t3Failed, 'T3: Inserting purch_grn with cross-company supplier_id correctly rejected with SQLSTATE 23503');
 
-      // T4: Try inserting purch_grn_lines in Company 2 pointing to GRN in Company 1 -> must fail FK violation
+      // T4: Try inserting purch_grn_lines (using 'qty') in Company 2 pointing to GRN in Company 1 -> must fail with SQLSTATE 23503
       let t4Failed = false;
+      await client.query('SAVEPOINT sp_t4;');
       try {
         await client.query(
-          "INSERT INTO purch_grn_lines (company_id, grn_id, item_id, received_quantity, unit_cost) VALUES ($1, $2, $3, 5, 10);",
+          "INSERT INTO purch_grn_lines (company_id, grn_id, item_id, qty, unit_cost) VALUES ($1, $2, $3, 5, 10);",
           [comp2Id, grn1Id, item1Id]
         );
       } catch (err: any) {
-        if (err.code === '23503' || err.message.includes('foreign key')) {
+        if (err.code === '23503') {
           t4Failed = true;
         } else {
           throw err;
         }
       }
-      assert(t4Failed, 'T4: Inserting purch_grn_lines with cross-company grn_id correctly rejected by composite FK');
+      await client.query('ROLLBACK TO SAVEPOINT sp_t4;');
+      assert(t4Failed, 'T4: Inserting purch_grn_lines with cross-company grn_id correctly rejected with SQLSTATE 23503');
+
+      // T5: Positive same-company insert succeeds
+      let t5Success = false;
+      await client.query('SAVEPOINT sp_t5;');
+      try {
+        await client.query(
+          "INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty) VALUES ($1, $2, $3, 10);",
+          [comp1Id, wh1Id, item1Id]
+        );
+        t5Success = true;
+      } catch (err: any) {
+        console.error('Positive insert error:', err);
+      }
+      await client.query('ROLLBACK TO SAVEPOINT sp_t5;');
+      assert(t5Success, 'T5: Valid same-company insert succeeded successfully');
 
       await client.query('ROLLBACK;');
       await client.end();

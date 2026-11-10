@@ -374,6 +374,11 @@
   - Summary: Remediated SQL runtime exception when setting organizational unit access scopes (N1). Replaced invalid column reference `AND status = 'active'` with `AND is_active = true` on `company_memberships` in `checkUserCompanyMembership` (`src/server/org/orgUnitRepository.ts`). Created verification harness `scripts/verifyFixN1OrgScopeStatus1.ts` (`npm run test:fix-n1-org-scope-status-1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-FIX-N2-INV-PURCH-TEST-1**: `IMPLEMENTED`
+   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+   - Summary: Fixed Foundation CI test suite and verification script `verifyFixN2CompositeFkInvPurch1.ts`. Aligned SQL column names with migrations 019/021 (`uom` for items, `qty` for balances/movements/grn lines), added `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` isolation between negative tests T1–T4, enforced strict SQLSTATE `23503` foreign key rejection matching, validated positive same-company inserts (T5), and registered the verification script in `runFoundationBattery.ts` without using battery exclusions.
+   - P05_STARTED: `YES`
+   - MODULES_STARTED: `YES`
 - **AN-FIX-GRN-SEQUENCE-1**: `IMPLEMENTED`
    - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
    - Summary: Replaced non-atomic `Date.now()` based GRN numbering in `postGrn` with atomic per-company sequence allocation (`allocateSequenceNumber` with `goods_receipt`, `GRN`) inside the tenant transaction using `FOR UPDATE` on `accounting_sequences`. Created verification harness `scripts/verifyFixGrnSequence1.ts` (`npm run test:fix-grn-sequence-1`).
