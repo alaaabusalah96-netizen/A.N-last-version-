@@ -54,6 +54,7 @@ const scripts = [
   'scripts/verifyMigration010.ts',
   'scripts/verifyFixN2CompositeFkInvPurch1.ts',
   'scripts/verifyFixGrnSequence1.ts',
+  'scripts/verifyFixGrnGlPost1.ts',
 ];
 
 export interface BatteryItemReport {

@@ -6,6 +6,8 @@ export interface CompanySettings {
   fiscalYearStartDay: number;
   displayNameFinance?: string | null;
   locale?: string | null;
+  inventoryAccountId?: string | null;
+  purchasesClearingAccountId?: string | null;
   updatedAt: string;
   updatedBy?: string | null;
 }
@@ -17,4 +19,6 @@ export interface UpsertCompanySettingsInput {
   fiscalYearStartDay?: number;
   displayNameFinance?: string | null;
   locale?: string | null;
+  inventoryAccountId?: string | null;
+  purchasesClearingAccountId?: string | null;
 }

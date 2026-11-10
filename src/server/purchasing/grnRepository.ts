@@ -190,14 +190,15 @@ export class GrnRepository {
     grnId: string,
     grnNo: string,
     postedBy: string,
+    journalEntryId: string,
     executor: DbExecutor
   ): Promise<void> {
     const sql = `
       UPDATE purch_grn
-      SET status = 'posted', grn_no = $3, posted_at = NOW(), posted_by = $4
+      SET status = 'posted', grn_no = $3, posted_at = NOW(), posted_by = $4, journal_entry_id = $5
       WHERE id = $1 AND company_id = $2
     `;
-    await executor.query(sql, [grnId, companyId, grnNo, postedBy]);
+    await executor.query(sql, [grnId, companyId, grnNo, postedBy, journalEntryId]);
   }
 }
 

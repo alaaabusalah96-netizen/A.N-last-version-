@@ -14,6 +14,8 @@ export class CompanySettingsRepository {
           fiscal_year_start_day as "fiscalYearStartDay",
           display_name_finance as "displayNameFinance",
           locale,
+          inventory_account_id as "inventoryAccountId",
+          purchases_clearing_account_id as "purchasesClearingAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -35,6 +37,8 @@ export class CompanySettingsRepository {
           fiscal_year_start_day, 
           display_name_finance, 
           locale, 
+          inventory_account_id,
+          purchases_clearing_account_id,
           updated_at, 
           updated_by
         )
@@ -46,6 +50,8 @@ export class CompanySettingsRepository {
           COALESCE($5, 1), 
           $6, 
           COALESCE($7, 'ar-EG'), 
+          $9,
+          $10,
           NOW(), 
           $8
         )
@@ -56,6 +62,8 @@ export class CompanySettingsRepository {
           fiscal_year_start_day = COALESCE(EXCLUDED.fiscal_year_start_day, company_settings.fiscal_year_start_day),
           display_name_finance = COALESCE(EXCLUDED.display_name_finance, company_settings.display_name_finance),
           locale = COALESCE(EXCLUDED.locale, company_settings.locale),
+          inventory_account_id = COALESCE(EXCLUDED.inventory_account_id, company_settings.inventory_account_id),
+          purchases_clearing_account_id = COALESCE(EXCLUDED.purchases_clearing_account_id, company_settings.purchases_clearing_account_id),
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -66,6 +74,8 @@ export class CompanySettingsRepository {
           fiscal_year_start_day as "fiscalYearStartDay",
           display_name_finance as "displayNameFinance",
           locale,
+          inventory_account_id as "inventoryAccountId",
+          purchases_clearing_account_id as "purchasesClearingAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -78,7 +88,9 @@ export class CompanySettingsRepository {
         input.fiscalYearStartDay || null,
         input.displayNameFinance || null,
         input.locale || null,
-        actorId
+        actorId,
+        input.inventoryAccountId || null,
+        input.purchasesClearingAccountId || null
       ]);
 
       return res.rows[0];

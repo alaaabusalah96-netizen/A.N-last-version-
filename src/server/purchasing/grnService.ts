@@ -5,6 +5,8 @@ import { defaultItemRepository, ItemRepository } from '../inventory/itemReposito
 import { defaultStockRepository, StockRepository } from '../inventory/stockRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { defaultJournalRepository, JournalRepository } from '../accounting/journalRepository.js';
+import { defaultJournalService } from '../accounting/journalService.js';
+import { defaultCompanySettingsRepository, CompanySettingsRepository } from '../org/companySettingsRepository.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
@@ -17,7 +19,8 @@ export class GrnService {
     private itemRepo: ItemRepository = defaultItemRepository,
     private stockRepo: StockRepository = defaultStockRepository,
     private auditService: AuditService = defaultAuditService,
-    private journalRepo: JournalRepository = defaultJournalRepository
+    private journalRepo: JournalRepository = defaultJournalRepository,
+    private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository
   ) {}
 
   async listGrns(companyId: string): Promise<GrnHeader[]> {
@@ -144,9 +147,11 @@ export class GrnService {
         throw new ValidationError('مستودع الاستلام غير موجود أو غير نشط');
       }
 
+      // 4. Mark GRN as posted
       const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
 
       // 3. Post each line to stock inventory atomically
+      let totalAmount = 0;
       for (const line of grn.lines) {
         const item = await this.itemRepo.findById(companyId, line.itemId, tx);
         if (!item || !item.isActive) {
@@ -185,10 +190,35 @@ export class GrnService {
           undefined,
           tx
         );
+        totalAmount += Number(line.qty) * Number(line.unitCost || 0);
       }
 
-      // 4. Mark GRN as posted
-      await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', tx);
+      // 4. Post to General Ledger
+      const settings = await this.settingsRepo.getByCompanyId(companyId);
+      if (!settings || !settings.inventoryAccountId || !settings.purchasesClearingAccountId) {
+        throw new ValidationError('لم يتم إعداد حسابات المخزون أو حساب المشتريات في إعدادات الشركة');
+      }
+
+      
+      const journalEntry = await defaultJournalService.createDraftEntry(
+        companyId,
+        {
+          entryDate: new Date().toISOString().split('T')[0],
+          memo: `ترحيل سند استلام بضائع رقم ${grnNo}`,
+          lines: [
+            { accountId: settings.inventoryAccountId, debit: totalAmount, credit: 0, lineMemo: `استلام مخزون سند ${grnNo}` },
+            { accountId: settings.purchasesClearingAccountId, debit: 0, credit: totalAmount, lineMemo: `مقابل استلام مخزون سند ${grnNo}` }
+          ],
+          orgUnitId: grn.warehouseId // Using warehouse as org unit context for GL
+        },
+        actorId,
+        true // Assuming platform admin access or context-aware
+      );
+      
+      const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '');
+
+      // 5. Mark GRN as posted and link journal entry
+      await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', postedJournal.id, tx);
 
       await this.auditService.record({
         actorUserId: actorId || null,
