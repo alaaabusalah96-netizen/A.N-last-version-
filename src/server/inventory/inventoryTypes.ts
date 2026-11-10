@@ -45,7 +45,7 @@ export interface StockBalance {
   updatedAt: string;
 }
 
-export type MovementType = 'receive' | 'issue';
+export type MovementType = 'receive' | 'issue' | 'transfer_out' | 'transfer_in' | 'transfer';
 
 export interface StockMovement {
   id: string;
@@ -59,6 +59,7 @@ export interface StockMovement {
   movementType: MovementType;
   qty: number;
   memo?: string | null;
+  transferId?: string | null;
   createdBy?: string | null;
   createdAt: string;
 }
@@ -69,3 +70,12 @@ export interface RecordMovementInput {
   qty: number;
   memo?: string;
 }
+
+export interface TransferInput {
+  itemId: string;
+  sourceWarehouseId: string;
+  destWarehouseId: string;
+  qty: number;
+  memo?: string;
+}
+

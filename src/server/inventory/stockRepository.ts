@@ -83,12 +83,13 @@ export class StockRepository {
     qty: number,
     memo?: string,
     createdBy?: string,
+    transferId?: string,
     customExecutor?: DbExecutor
   ): Promise<StockMovement> {
     const run = async (executor: DbExecutor) => {
       const sql = `
-        INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo, created_by, transfer_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING 
           id, 
           company_id as "companyId", 
@@ -97,6 +98,7 @@ export class StockRepository {
           movement_type as "movementType", 
           qty::float as "qty", 
           memo, 
+          transfer_id as "transferId",
           created_by as "createdBy", 
           created_at as "createdAt"
       `;
@@ -108,6 +110,7 @@ export class StockRepository {
         qty,
         memo || null,
         createdBy || null,
+        transferId || null,
       ]);
       return res.rows[0];
     };
@@ -131,6 +134,7 @@ export class StockRepository {
           m.movement_type as "movementType", 
           m.qty::float as "qty", 
           m.memo, 
+          m.transfer_id as "transferId",
           m.created_by as "createdBy", 
           m.created_at as "createdAt"
         FROM inv_stock_movements m

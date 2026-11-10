@@ -5,6 +5,7 @@ import {
   Building2,
   TrendingDown,
   TrendingUp,
+  ArrowRightLeft,
   Plus,
   RefreshCw,
   AlertCircle,
@@ -54,9 +55,10 @@ interface StockMovement {
   warehouseNameAr?: string;
   itemCode?: string;
   itemNameAr?: string;
-  movementType: 'receive' | 'issue';
+  movementType: 'receive' | 'issue' | 'transfer_out' | 'transfer_in' | 'transfer';
   qty: number;
   memo?: string;
+  transferId?: string;
   createdAt: string;
 }
 
@@ -67,7 +69,7 @@ interface InventoryWorkspaceProps {
 export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers'>('balances');
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -84,6 +86,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [showItemModal, setShowItemModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
 
   // Form states
   const [whCode, setWhCode] = useState('');
@@ -97,6 +100,13 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [movementItemId, setMovementItemId] = useState('');
   const [movementQty, setMovementQty] = useState('');
   const [movementMemo, setMovementMemo] = useState('');
+
+  // Transfer form state
+  const [transferSourceWhId, setTransferSourceWhId] = useState('');
+  const [transferDestWhId, setTransferDestWhId] = useState('');
+  const [transferItemId, setTransferItemId] = useState('');
+  const [transferQty, setTransferQty] = useState('');
+  const [transferMemo, setTransferMemo] = useState('');
 
   const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
 
@@ -247,6 +257,46 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
     }
   };
 
+  const handleTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canWrite) return;
+    setActionLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      if (transferSourceWhId === transferDestWhId) {
+        throw new Error('مستودع المصدر ومستودع الوجهة هما نفس المستودع');
+      }
+      const res = await apiFetch('/api/inventory/transfers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: selectedCompanyId,
+          sourceWarehouseId: transferSourceWhId,
+          destWarehouseId: transferDestWhId,
+          itemId: transferItemId,
+          qty: Number(transferQty),
+          memo: transferMemo,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'فشل عملية التحويل بين المستودعين');
+
+      setSuccess(`تم تحويل كمية (${transferQty}) بنجاح بين المستودعين وتحديث الأرصدة`);
+      setShowTransferModal(false);
+      setTransferSourceWhId('');
+      setTransferDestWhId('');
+      setTransferItemId('');
+      setTransferQty('');
+      setTransferMemo('');
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'خطأ أثناء تنفيذ التحويل المخزني');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6" dir="rtl">
       {/* Header & Controls */}
@@ -303,6 +353,14 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
               >
                 <TrendingDown className="w-3.5 h-3.5" />
                 <span>إذن صرف</span>
+              </button>
+
+              <button
+                onClick={() => setShowTransferModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>إذن تحويل</span>
               </button>
             </div>
           )}
@@ -371,6 +429,18 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
         >
           <History className="w-4 h-4" />
           <span>سجل الحركات ({movements.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('transfers')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'transfers'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <ArrowRightLeft className="w-4 h-4" />
+          <span>التحويلات بين المستودعات</span>
         </button>
       </div>
 
@@ -548,10 +618,20 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                           <TrendingUp className="w-3 h-3" />
                           <span>إستلام (+)</span>
                         </span>
-                      ) : (
+                      ) : m.movementType === 'issue' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-950/60 border border-rose-800/80 text-rose-400">
                           <TrendingDown className="w-3 h-3" />
                           <span>صرف (-)</span>
+                        </span>
+                      ) : m.movementType === 'transfer_out' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-950/60 border border-amber-800/80 text-amber-400">
+                          <ArrowRightLeft className="w-3 h-3" />
+                          <span>تحويل صادر (-)</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-indigo-950/60 border border-indigo-800/80 text-indigo-400">
+                          <ArrowRightLeft className="w-3 h-3" />
+                          <span>تحويل وارد (+)</span>
                         </span>
                       )}
                     </td>
@@ -566,6 +646,79 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {activeTab === 'transfers' && (
+        <div className="flex flex-col gap-4">
+          <div className="flex justify-end">
+            {canWrite && (
+              <button
+                onClick={() => setShowTransferModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>إجراء تحويل جديد بين المستودعات</span>
+              </button>
+            )}
+          </div>
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+            <table className="w-full text-right text-xs">
+              <thead>
+                <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                  <th className="py-3.5 px-4">التاريخ والوقت</th>
+                  <th className="py-3.5 px-4">معرّف التحويل (Transfer ID)</th>
+                  <th className="py-3.5 px-4">نوع الحركة</th>
+                  <th className="py-3.5 px-4">المستودع</th>
+                  <th className="py-3.5 px-4">الصنف</th>
+                  <th className="py-3.5 px-4 text-center">الكمية</th>
+                  <th className="py-3.5 px-4">ملاحظات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                {movements.filter((m) => m.transferId || m.movementType === 'transfer_out' || m.movementType === 'transfer_in').length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                      لا توجد عمليات تحويل مخزني مسجلة حتى الآن.
+                    </td>
+                  </tr>
+                ) : (
+                  movements
+                    .filter((m) => m.transferId || m.movementType === 'transfer_out' || m.movementType === 'transfer_in')
+                    .map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-800/30 transition">
+                        <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px]">
+                          {new Date(m.createdAt).toLocaleString('ar-EG')}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-indigo-300 text-[11px]">
+                          {m.transferId ? `${m.transferId.slice(0, 8)}...` : '—'}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {m.movementType === 'transfer_out' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-950/60 border border-amber-800/80 text-amber-400">
+                              <ArrowRightLeft className="w-3 h-3" />
+                              <span>تحويل صادر (-)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-indigo-950/60 border border-indigo-800/80 text-indigo-400">
+                              <ArrowRightLeft className="w-3 h-3" />
+                              <span>تحويل وارد (+)</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300">{m.warehouseNameAr}</td>
+                        <td className="py-3.5 px-4 text-slate-300">
+                          {m.itemNameAr} ({m.itemCode})
+                        </td>
+                        <td className="py-3.5 px-4 text-center font-mono font-bold text-white">{m.qty}</td>
+                        <td className="py-3.5 px-4 text-slate-400">{m.memo || '—'}</td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -785,6 +938,116 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                   }`}
                 >
                   {actionLoading ? 'جاري التنفيذ...' : showReceiveModal ? 'تأكيد الاستلام' : 'تأكيد الصرف'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-bold text-white text-sm">إذن تحويل بين مستودعين</h4>
+              <button onClick={() => setShowTransferModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleTransfer} className="flex flex-col gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">مستودع المصدر (من) *</label>
+                <select
+                  required
+                  value={transferSourceWhId}
+                  onChange={(e) => setTransferSourceWhId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">-- اختر مستودع المصدر --</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.nameAr} ({w.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">مستودع الوجهة (إلى) *</label>
+                <select
+                  required
+                  value={transferDestWhId}
+                  onChange={(e) => setTransferDestWhId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">-- اختر مستودع الوجهة --</option>
+                  {warehouses
+                    .filter((w) => w.id !== transferSourceWhId)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.nameAr} ({w.code})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">الصنف *</label>
+                <select
+                  required
+                  value={transferItemId}
+                  onChange={(e) => setTransferItemId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">-- اختر الصنف --</option>
+                  {items.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.nameAr} ({i.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">الكمية المراد تحويلها *</label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0.0001"
+                  required
+                  placeholder="مثال: 5"
+                  value={transferQty}
+                  onChange={(e) => setTransferQty(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">ملاحظات / سبب التحويل</label>
+                <input
+                  type="text"
+                  placeholder="ملاحظات اختيارية"
+                  value={transferMemo}
+                  onChange={(e) => setTransferMemo(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                >
+                  {actionLoading ? 'جاري التحويل...' : 'تأكيد التحويل'}
                 </button>
               </div>
             </form>

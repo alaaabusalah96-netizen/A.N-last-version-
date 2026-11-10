@@ -171,3 +171,24 @@ inventoryRoutes.post(
     return res.status(201).json({ status: 'ok', ...result });
   })
 );
+
+inventoryRoutes.post(
+  '/transfers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
+
+    const { sourceWarehouseId, destWarehouseId, itemId, qty, memo } = req.body;
+    const result = await defaultStockService.transfer(
+      companyId,
+      { sourceWarehouseId, destWarehouseId, itemId, qty: Number(qty), memo },
+      user.id
+    );
+
+    return res.status(201).json({ status: 'ok', ...result });
+  })
+);
+
