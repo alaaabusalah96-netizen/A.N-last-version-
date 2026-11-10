@@ -374,6 +374,11 @@
   - Summary: Remediated SQL runtime exception when setting organizational unit access scopes (N1). Replaced invalid column reference `AND status = 'active'` with `AND is_active = true` on `company_memberships` in `checkUserCompanyMembership` (`src/server/org/orgUnitRepository.ts`). Created verification harness `scripts/verifyFixN1OrgScopeStatus1.ts` (`npm run test:fix-n1-org-scope-status-1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-FIX-N2-COMPOSITE-FK-LEDGER-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Closed cross-tenant journal contamination at the database level for ledger. Created migration `022_ledger_composite_fk.sql` executing pre-migration orphan & cross-company mismatch checks with explicit `RAISE EXCEPTION`, adding composite unique constraints `UNIQUE (company_id, id)` on `accounts` and `journal_entries`, and composite foreign keys on `journal_lines` (`(entry_id, company_id)` and `(account_id, company_id)`). Created verification harness `scripts/verifyFixN2CompositeFkLedger1.ts` (`npm run test:fix-n2-composite-fk-ledger-1`) with disposable DB guard (`N2_ALLOW_DISPOSABLE=1`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

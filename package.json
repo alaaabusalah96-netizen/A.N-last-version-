@@ -62,6 +62,7 @@
     "test:inv-item-card-1": "tsx scripts/verifyInvItemCard1.ts",
     "test:purch-core-1": "tsx scripts/verifyPurchCore1.ts",
     "test:fix-n1-org-scope-status-1": "tsx scripts/verifyFixN1OrgScopeStatus1.ts",
+    "test:fix-n2-composite-fk-ledger-1": "tsx scripts/verifyFixN2CompositeFkLedger1.ts",
     "test:pg-proof-2": "tsx scripts/verifyPgIntegrationProof2.ts",
     "test:org-scope-on-ledger-1": "tsx scripts/verifyOrgScopeOnLedger1.ts",
     "test:p1-foundation-close-1": "tsx scripts/verifyP1FoundationClose1.ts",
