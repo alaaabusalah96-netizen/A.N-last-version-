@@ -4,6 +4,7 @@ import { LoginForm } from './components/LoginForm.js';
 import { CompaniesPanel } from './components/CompaniesPanel.js';
 import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
 import { InventoryWorkspace } from './components/inventory/InventoryWorkspace.js';
+import { PurchasingWorkspace } from './components/purchasing/PurchasingWorkspace.js';
 import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
 import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
@@ -21,7 +22,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'users' | 'company_settings' | 'org_units'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'company_settings' | 'org_units'>('companies');
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -100,6 +101,8 @@ export default function App() {
                 ? 'المحاسبة'
                 : activeNav === 'inventory'
                 ? 'المخزون'
+                : activeNav === 'purchasing'
+                ? 'المشتريات'
                 : activeNav === 'users'
                 ? 'المستخدمون'
                 : activeNav === 'org_units'
@@ -113,6 +116,8 @@ export default function App() {
                 ? 'الدليل المحاسبي والقيود'
                 : activeNav === 'inventory'
                 ? 'المستودعات والأصناف والأرصدة والحركات'
+                : activeNav === 'purchasing'
+                ? 'الموردون وسندات استلام البضائع GRN'
                 : activeNav === 'users'
                 ? 'إدارة الحسابات وصلاحيات الوصول'
                 : activeNav === 'org_units'
@@ -131,6 +136,8 @@ export default function App() {
           <AccountingWorkspace userRole={currentUser.role} />
         ) : activeNav === 'inventory' ? (
           <InventoryWorkspace userRole={currentUser.role} />
+        ) : activeNav === 'purchasing' ? (
+          <PurchasingWorkspace userRole={currentUser.role} />
         ) : activeNav === 'users' ? (
           <UsersAdminWorkspace />
         ) : activeNav === 'org_units' ? (

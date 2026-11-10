@@ -364,6 +364,11 @@
   - Summary: Delivered Inventory Item Card (بطاقة صنف) API and UI workspace. (1) Backend Services & Routes: Added `getItem` in `itemService.ts`, `listBalancesByItem` and `listMovementsByItem` (with warehouse/date/movementType filters) in `stockService.ts` and `stockRepository.ts`. Exposed `GET /api/inventory/items/:id`, `GET /api/inventory/items/:id/stock`, and `GET /api/inventory/items/:id/movements` guarded by `INVENTORY_READ` permission and tenant company scoping. (2) UI: Created `ItemCardPanel.tsx` component presenting item master details, stock balances across warehouses, and filtered movement history with quick action shortcuts (receive, issue, transfer). Integrated open-from-list state (`setCardItemId`) in `InventoryWorkspace.tsx`. (3) Verification: Created test harness `scripts/verifyInvItemCard1.ts` (`npm run test:inv-item-card-1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES` (Inventory Item Card active)
+- **AN-PURCH-CORE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered the first purchasing slice integrated with inventory. (1) Migration 021 (`021_purchasing_core.sql`): Created `purch_suppliers`, `purch_grn`, and `purch_grn_lines` with forced RLS and isolation policies for role `an_app`, registered in `table_ownership.json`. (2) Backend Services & Integration: Created `supplierRepository/Service` and `grnRepository/Service`. Implemented `postGrn` executing atomically within `withTenantTransaction`, confirming GRN status and calling stock receive logic (`upsertBalance`, `createMovement` receive) across all lines. (3) HTTP API & Permissions: Registered `PURCHASING_READ/WRITE/POST` permissions, mapped to roles, and mounted `purchasingRoutes` at `/api/purchasing`. (4) UI & Sidebar: Created `PurchasingWorkspace.tsx` with tabs for Suppliers and GRNs + modals for creating suppliers and GRNs; added "المشتريات" link to `AppSidebar.tsx` and `App.tsx`. (5) Verification: Created static test harness `scripts/verifyPurchCore1.ts` (`npm run test:purch-core-1`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES` (Purchasing Core slice active)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

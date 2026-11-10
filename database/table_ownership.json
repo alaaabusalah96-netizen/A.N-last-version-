@@ -98,5 +98,20 @@
     "table": "inv_stock_movements",
     "scope": "tenant",
     "reason": "Per-company stock movement ledger (receives and issues)"
+  },
+  {
+    "table": "purch_suppliers",
+    "scope": "tenant",
+    "reason": "Per-company purchasing suppliers master"
+  },
+  {
+    "table": "purch_grn",
+    "scope": "tenant",
+    "reason": "Per-company goods receipt notes header"
+  },
+  {
+    "table": "purch_grn_lines",
+    "scope": "tenant",
+    "reason": "Per-company goods receipt notes item lines"
   }
 ]

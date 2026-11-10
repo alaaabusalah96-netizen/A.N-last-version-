@@ -40,6 +40,11 @@ export const PERMISSIONS = {
   INVENTORY_READ: 'inventory:read',
   INVENTORY_WRITE: 'inventory:write',
   INVENTORY_MOVEMENT: 'inventory:movement',
+
+  // Purchasing Core permissions
+  PURCHASING_READ: 'purchasing:read',
+  PURCHASING_WRITE: 'purchasing:write',
+  PURCHASING_POST: 'purchasing:post',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;
