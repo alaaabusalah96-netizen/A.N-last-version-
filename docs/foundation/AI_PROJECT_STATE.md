@@ -324,6 +324,11 @@
   - P0A_STATUS: `CLOSED_FOR_CI_GATE`
   - MODULES_STARTED: `NO`
   - NEXT: Operator live smoke checklist (`OPERATOR_LIVE_SMOKE_CHECKLIST.md`) or first deliberate product slice package.
+- **AN-ACCOUNTING-PERIODS-ENFORCE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=GREEN`
+  - Summary: Closed PERIODS gap by enforcing open accounting period validation in `journalService.ts` (`postEntry`/`reverseEntry`) with fail-closed behavior for missing or closed periods. Implemented `periodRepository` and `periodService` for CRUD/close/reopen operations, exposed company-scoped endpoints in `accountingRoutes.ts`, and mounted `PeriodsPanel` in `AccountingWorkspace.tsx`.
+  - P05_STARTED: `YES` (Accounting Core slice)
+  - MODULES_STARTED: `NO` (external modules remain unstarted)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

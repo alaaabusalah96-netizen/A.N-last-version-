@@ -1,5 +1,6 @@
 import { defaultJournalRepository, JournalRepository } from './journalRepository.js';
 import { defaultAccountRepository, AccountRepository } from './accountRepository.js';
+import { defaultPeriodRepository, PeriodRepository } from './periodRepository.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import { defaultOrgUnitService } from '../org/orgUnitService.js';
@@ -13,7 +14,8 @@ import {
 export class JournalService {
   constructor(
     private journalRepo: JournalRepository = defaultJournalRepository,
-    private accountRepo: AccountRepository = defaultAccountRepository
+    private accountRepo: AccountRepository = defaultAccountRepository,
+    private periodRepo: PeriodRepository = defaultPeriodRepository
   ) {}
 
   /**
@@ -189,6 +191,27 @@ export class JournalService {
         );
       }
 
+      // 1. Period Enforcement: Resolve and validate accounting period for entry
+      let period = null;
+      if (entry.periodId) {
+        period = await this.periodRepo.findById(companyId, entry.periodId, tx);
+      }
+      if (!period) {
+        period = await this.periodRepo.findCoveringDate(companyId, entry.entryDate, tx);
+      }
+
+      if (!period) {
+        throw new ValidationError(
+          `لا توجد فترة محاسبية مسجلة تغطي تاريخ القيد (${entry.entryDate}). يجب إنشاء فترة محاسبية مفتوحة أولاً.`
+        );
+      }
+
+      if (period.isClosed) {
+        throw new ValidationError(
+          `الفترة المحاسبية (${period.code}) مغلقة. لا يمكن ترحيل قيود محاسبية إلى فترة مالية مغلقة.`
+        );
+      }
+
       // Allocate unique monotonic entry number from sequence
       const entryNo = await this.journalRepo.allocateSequenceNumber(
         companyId,
@@ -202,6 +225,7 @@ export class JournalService {
         entryId,
         entryNo,
         actorId,
+        period.id,
         tx
       );
 
@@ -217,6 +241,8 @@ export class JournalService {
         entityId: entryId,
         metadata: {
           entryNo,
+          periodId: period.id,
+          periodCode: period.code,
           totalAmount: totalDebit / 100,
         },
       });
@@ -276,6 +302,21 @@ export class JournalService {
         throw new ValidationError('Source entry has no lines to reverse');
       }
 
+      const today = new Date().toISOString().split('T')[0];
+
+      // Period Enforcement for reversal entry
+      const revPeriod = await this.periodRepo.findCoveringDate(companyId, today, tx);
+      if (!revPeriod) {
+        throw new ValidationError(
+          `لا توجد فترة محاسبية مسجلة تغطي تاريخ اليوم (${today}) لعكس القيد. يجب إنشاء فترة محاسبية مفتوحة أولاً.`
+        );
+      }
+      if (revPeriod.isClosed) {
+        throw new ValidationError(
+          `الفترة المحاسبية (${revPeriod.code}) الخاصة بتاريخ اليوم مغلقة. لا يمكن عكس القيد في فترة محاسبية مغلقة.`
+        );
+      }
+
       // Build reversing lines with swapped debit and credit
       const reversingLines: CreateJournalLineInput[] = sourceLines.map((l) => ({
         accountId: l.accountId,
@@ -284,7 +325,6 @@ export class JournalService {
         lineMemo: l.lineMemo ? `[عكس] ${l.lineMemo}` : `عكس قيد ${source.entryNo || source.id}`,
       }));
 
-      const today = new Date().toISOString().split('T')[0];
       const memo = reversalMemo || `عكس القيد المحاسبي رقم ${source.entryNo || source.id}: ${source.memo || ''}`;
 
       // 1. Create reversing draft
@@ -306,12 +346,13 @@ export class JournalService {
         tx
       );
 
-      // 3. Post reversal entry
+      // 3. Post reversal entry with verified open period
       await this.journalRepo.updateStatusToPosted(
         companyId,
         draftReversal.id,
         reversalEntryNo,
         actorId,
+        revPeriod.id,
         tx
       );
 
@@ -333,6 +374,8 @@ export class JournalService {
           originalEntryNo: source.entryNo,
           reversalEntryId: draftReversal.id,
           reversalEntryNo,
+          periodId: revPeriod.id,
+          periodCode: revPeriod.code,
         },
       });
 

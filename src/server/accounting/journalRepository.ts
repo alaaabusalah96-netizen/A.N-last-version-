@@ -253,13 +253,14 @@ export class JournalRepository {
   }
 
   /**
-   * Mark an entry as posted, setting entry_no, posted_at, posted_by, and status='posted'.
+   * Mark an entry as posted, setting entry_no, posted_at, posted_by, period_id, and status='posted'.
    */
   async updateStatusToPosted(
     companyId: string,
     entryId: string,
     entryNo: string,
     actorId: string,
+    periodId?: string | null,
     customExecutor?: DbExecutor
   ): Promise<boolean> {
     const run = async (executor: DbExecutor) => {
@@ -269,10 +270,11 @@ export class JournalRepository {
           status = 'posted',
           entry_no = $3,
           posted_at = NOW(),
-          posted_by = $4
+          posted_by = $4,
+          period_id = COALESCE($5::uuid, period_id)
         WHERE id = $1 AND company_id = $2 AND status = 'draft'
       `;
-      const res = await executor.query(sql, [entryId, companyId, entryNo, actorId]);
+      const res = await executor.query(sql, [entryId, companyId, entryNo, actorId, periodId || null]);
       return (res.rowCount ?? 0) === 1;
     };
 

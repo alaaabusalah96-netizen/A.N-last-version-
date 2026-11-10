@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale } from 'lucide-react';
+import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale, Calendar } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountsPanel } from './AccountsPanel.js';
 import { JournalWorkspace } from './JournalWorkspace.js';
 import { TrialBalancePanel } from './TrialBalancePanel.js';
+import { PeriodsPanel } from './PeriodsPanel.js';
 
 interface Company {
   id: string;
@@ -22,7 +23,7 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb'>('coa');
+  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods'>('coa');
 
   const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
 
@@ -135,6 +136,18 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
               <Scale className="w-4 h-4" />
               <span>ميزان المراجعة (Trial Balance)</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('periods')}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeTab === 'periods'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              <span>الفترات المالية (Accounting Periods)</span>
+            </button>
           </div>
         )}
       </div>
@@ -166,8 +179,10 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
           canWrite={canWrite}
           canPost={userRole === 'platform_admin' || userRole === 'company_admin'}
         />
-      ) : (
+      ) : activeTab === 'tb' ? (
         <TrialBalancePanel companyId={selectedCompanyId} />
+      ) : (
+        <PeriodsPanel companyId={selectedCompanyId} canManage={canWrite} />
       )}
     </div>
   );

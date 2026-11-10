@@ -38,5 +38,6 @@
   "verifyFixAbd1.ts": "package-specific verification",
   "verifyAbd1LiveProof.ts": "package-specific verification",
   "verifyMigrationChecksums1.ts": "package-specific verification",
-  "verifyFoundationGateClose1.ts": "package-specific verification"
+  "verifyFoundationGateClose1.ts": "package-specific verification",
+  "verifyAccountingPeriodsEnforce1.ts": "package-specific verification"
 }

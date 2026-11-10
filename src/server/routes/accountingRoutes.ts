@@ -252,3 +252,90 @@ accountingRoutes.get(
     return res.status(200).json({ status: 'ok', summary });
   })
 );
+
+// ==========================================
+// Accounting Periods Endpoints
+// ==========================================
+
+// GET /api/accounting/periods?companyId=...
+accountingRoutes.get(
+  '/periods',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+
+    const { defaultPeriodService } = await import('../accounting/periodService.js');
+    const periods = await defaultPeriodService.listPeriods(companyId);
+    return res.status(200).json({ status: 'ok', periods });
+  })
+);
+
+// POST /api/accounting/periods — Create period
+accountingRoutes.post(
+  '/periods',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { companyId, code, startDate, endDate } = req.body || {};
+
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_POST, companyId);
+
+    const { defaultPeriodService } = await import('../accounting/periodService.js');
+    const period = await defaultPeriodService.createPeriod(
+      companyId,
+      { code, startDate, endDate },
+      user.id
+    );
+    return res.status(201).json({ status: 'ok', period });
+  })
+);
+
+// POST /api/accounting/periods/:id/close — Close an open period
+accountingRoutes.post(
+  '/periods/:id/close',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    const { companyId } = req.body || {};
+
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_POST, companyId);
+
+    const { defaultPeriodService } = await import('../accounting/periodService.js');
+    const period = await defaultPeriodService.closePeriod(companyId, id, user.id);
+    return res.status(200).json({ status: 'ok', period });
+  })
+);
+
+// POST /api/accounting/periods/:id/reopen — Reopen a closed period
+accountingRoutes.post(
+  '/periods/:id/reopen',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    const { companyId } = req.body || {};
+
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_POST, companyId);
+
+    const { defaultPeriodService } = await import('../accounting/periodService.js');
+    const period = await defaultPeriodService.reopenPeriod(companyId, id, user.id);
+    return res.status(200).json({ status: 'ok', period });
+  })
+);
+
