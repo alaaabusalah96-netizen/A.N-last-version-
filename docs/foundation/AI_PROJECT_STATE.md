@@ -375,6 +375,11 @@
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
 - **AN-FIX-N2-COMPOSITE-FK-LEDGER-1**: `IMPLEMENTED`
+ - **AN-FIX-N2-COMPOSITE-FK-INV-PURCH-1**: `IMPLEMENTED`
+   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+   - Summary: Extended composite foreign key data-integrity hardening to inventory and purchasing tables. Created migration `023_inv_purch_composite_fk.sql` with pre-migration orphan/mismatch checks (`RAISE EXCEPTION`), composite unique constraints `UNIQUE (company_id, id)` on parent tables (`inv_warehouses`, `inv_items`, `purch_suppliers`, `purch_grn`), and composite foreign keys on child tables (`inv_stock_balances`, `inv_stock_movements`, `purch_grn`, `purch_grn_lines`) preventing cross-tenant contamination. Created verification harness `scripts/verifyFixN2CompositeFkInvPurch1.ts` (`npm run test:fix-n2-composite-fk-inv-purch-1`) with disposable DB guard (`N2_ALLOW_DISPOSABLE=1`).
+   - P05_STARTED: `YES`
+   - MODULES_STARTED: `YES`
   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
   - Summary: Closed cross-tenant journal contamination at the database level for ledger. Created migration `022_ledger_composite_fk.sql` executing pre-migration orphan & cross-company mismatch checks with explicit `RAISE EXCEPTION`, adding composite unique constraints `UNIQUE (company_id, id)` on `accounts` and `journal_entries`, and composite foreign keys on `journal_lines` (`(entry_id, company_id)` and `(account_id, company_id)`). Created verification harness `scripts/verifyFixN2CompositeFkLedger1.ts` (`npm run test:fix-n2-composite-fk-ledger-1`) with disposable DB guard (`N2_ALLOW_DISPOSABLE=1`).
   - P05_STARTED: `YES`
