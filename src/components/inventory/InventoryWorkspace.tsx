@@ -12,8 +12,10 @@ import {
   CheckCircle2,
   X,
   History,
+  FileText,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { ItemCardPanel } from './ItemCardPanel.js';
 
 interface Company {
   id: string;
@@ -70,6 +72,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers'>('balances');
+  const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -296,6 +299,30 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
       setActionLoading(false);
     }
   };
+
+  if (cardItemId) {
+    return (
+      <ItemCardPanel
+        companyId={selectedCompanyId}
+        itemId={cardItemId}
+        warehouses={warehouses}
+        onClose={() => setCardItemId(null)}
+        onQuickAction={(actionType, selectedItemId) => {
+          if (actionType === 'receive') {
+            setMovementItemId(selectedItemId);
+            setShowReceiveModal(true);
+          } else if (actionType === 'issue') {
+            setMovementItemId(selectedItemId);
+            setShowIssueModal(true);
+          } else if (actionType === 'transfer') {
+            setTransferItemId(selectedItemId);
+            setShowTransferModal(true);
+          }
+          setCardItemId(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6" dir="rtl">
@@ -557,25 +584,42 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                   <th className="py-3.5 px-4">اسم الصنف</th>
                   <th className="py-3.5 px-4 text-center">وحدة القياس</th>
                   <th className="py-3.5 px-4 text-center">الحالة</th>
+                  <th className="py-3.5 px-4 text-center">بطاقة الصنف</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-12 text-center text-slate-500">
+                    <td colSpan={5} className="py-12 text-center text-slate-500">
                       لا توجد أصناف مسجلة في دليل المنتجات حتى الآن.
                     </td>
                   </tr>
                 ) : (
                   items.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-800/30 transition">
-                      <td className="py-3.5 px-4 font-mono font-bold text-indigo-300">{item.code}</td>
+                      <td className="py-3.5 px-4 font-mono font-bold text-indigo-300">
+                        <button
+                          onClick={() => setCardItemId(item.id)}
+                          className="hover:underline cursor-pointer text-indigo-300 hover:text-indigo-200"
+                        >
+                          {item.code}
+                        </button>
+                      </td>
                       <td className="py-3.5 px-4 text-slate-200">{item.nameAr}</td>
                       <td className="py-3.5 px-4 text-center text-slate-400 font-mono">{item.uom}</td>
                       <td className="py-3.5 px-4 text-center">
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/80 text-emerald-400">
                           نشط
                         </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <button
+                          onClick={() => setCardItemId(item.id)}
+                          className="px-2.5 py-1 bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:text-white hover:bg-indigo-600 rounded-lg text-xs font-semibold transition cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>عرض البطاقة</span>
+                        </button>
                       </td>
                     </tr>
                   ))

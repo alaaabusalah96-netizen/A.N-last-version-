@@ -1,6 +1,6 @@
 import { defaultItemRepository, ItemRepository } from './itemRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
-import { ValidationError } from '../http/errors.js';
+import { ValidationError, NotFoundError } from '../http/errors.js';
 import { Item, CreateItemInput } from './inventoryTypes.js';
 
 export class ItemService {
@@ -14,6 +14,20 @@ export class ItemService {
       throw new ValidationError('companyId is required');
     }
     return await this.itemRepo.listByCompany(companyId);
+  }
+
+  async getItem(companyId: string, itemId: string): Promise<Item> {
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+    if (!itemId || typeof itemId !== 'string') {
+      throw new ValidationError('itemId is required');
+    }
+    const item = await this.itemRepo.findById(companyId, itemId);
+    if (!item) {
+      throw new NotFoundError('الصنف المحدد غير موجود');
+    }
+    return item;
   }
 
   async createItem(
@@ -54,3 +68,4 @@ export class ItemService {
 }
 
 export const defaultItemService = new ItemService();
+

@@ -151,6 +151,102 @@ export class StockRepository {
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);
   }
+
+  async listBalancesByItem(
+    companyId: string,
+    itemId: string,
+    customExecutor?: DbExecutor
+  ): Promise<StockBalance[]> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        SELECT 
+          b.company_id as "companyId", 
+          b.warehouse_id as "warehouseId", 
+          w.code as "warehouseCode",
+          w.name_ar as "warehouseNameAr",
+          b.item_id as "itemId", 
+          i.code as "itemCode",
+          i.name_ar as "itemNameAr",
+          i.uom as "itemUom",
+          b.qty::float as "qty", 
+          b.updated_at as "updatedAt"
+        FROM inv_stock_balances b
+        INNER JOIN inv_warehouses w ON w.id = b.warehouse_id AND w.company_id = b.company_id
+        INNER JOIN inv_items i ON i.id = b.item_id AND i.company_id = b.company_id
+        WHERE b.company_id = $1 AND b.item_id = $2
+        ORDER BY w.code ASC
+      `;
+      const res = await executor.query<StockBalance>(sql, [companyId, itemId]);
+      return res.rows;
+    };
+
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
+
+  async listMovementsByItem(
+    companyId: string,
+    itemId: string,
+    filters?: {
+      warehouseId?: string;
+      fromDate?: string;
+      toDate?: string;
+      movementType?: string;
+    },
+    customExecutor?: DbExecutor
+  ): Promise<StockMovement[]> {
+    const run = async (executor: DbExecutor) => {
+      const params: any[] = [companyId, itemId];
+      let whereClause = 'WHERE m.company_id = $1 AND m.item_id = $2';
+
+      if (filters?.warehouseId) {
+        params.push(filters.warehouseId);
+        whereClause += ` AND m.warehouse_id = $${params.length}`;
+      }
+      if (filters?.fromDate) {
+        params.push(filters.fromDate);
+        whereClause += ` AND m.created_at >= $${params.length}`;
+      }
+      if (filters?.toDate) {
+        params.push(filters.toDate);
+        whereClause += ` AND m.created_at <= $${params.length}`;
+      }
+      if (filters?.movementType) {
+        params.push(filters.movementType);
+        whereClause += ` AND m.movement_type = $${params.length}`;
+      }
+
+      const sql = `
+        SELECT 
+          m.id, 
+          m.company_id as "companyId", 
+          m.warehouse_id as "warehouseId", 
+          w.code as "warehouseCode",
+          w.name_ar as "warehouseNameAr",
+          m.item_id as "itemId", 
+          i.code as "itemCode",
+          i.name_ar as "itemNameAr",
+          m.movement_type as "movementType", 
+          m.qty::float as "qty", 
+          m.memo, 
+          m.transfer_id as "transferId",
+          m.created_by as "createdBy", 
+          m.created_at as "createdAt"
+        FROM inv_stock_movements m
+        INNER JOIN inv_warehouses w ON w.id = m.warehouse_id AND w.company_id = m.company_id
+        INNER JOIN inv_items i ON i.id = m.item_id AND i.company_id = m.company_id
+        ${whereClause}
+        ORDER BY m.created_at DESC
+        LIMIT 200
+      `;
+      const res = await executor.query<StockMovement>(sql, params);
+      return res.rows;
+    };
+
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
 }
 
 export const defaultStockRepository = new StockRepository();
+

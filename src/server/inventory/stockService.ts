@@ -29,6 +29,35 @@ export class StockService {
     return await this.stockRepo.listMovementsByCompany(companyId);
   }
 
+  async listStockBalancesByItem(companyId: string, itemId: string): Promise<StockBalance[]> {
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+    if (!itemId || typeof itemId !== 'string') {
+      throw new ValidationError('itemId is required');
+    }
+    return await this.stockRepo.listBalancesByItem(companyId, itemId);
+  }
+
+  async listStockMovementsByItem(
+    companyId: string,
+    itemId: string,
+    filters?: {
+      warehouseId?: string;
+      fromDate?: string;
+      toDate?: string;
+      movementType?: string;
+    }
+  ): Promise<StockMovement[]> {
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+    if (!itemId || typeof itemId !== 'string') {
+      throw new ValidationError('itemId is required');
+    }
+    return await this.stockRepo.listMovementsByItem(companyId, itemId, filters);
+  }
+
   /**
    * Receive stock (إستلام بضاعة/أصناف)
    * Increases warehouse item balance and records movement in a single transaction.

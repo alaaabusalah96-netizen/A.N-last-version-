@@ -359,6 +359,11 @@
   - Summary: Delivered same-company warehouse stock transfer module. (1) Migration 020 (`020_inventory_transfer.sql`): Extended `inv_stock_movements.movement_type` constraint with `transfer_out`, `transfer_in`, `transfer`, added `transfer_id UUID NULL` column, and created `idx_inv_stock_movements_transfer`. (2) Backend Services: Implemented `stockService.transfer` executing in a single tenant transaction (`withTenantTransaction`) with deterministic deadlock-safe lock ordering on `inv_stock_balances` (`FOR UPDATE`), non-negative source balance validation, and validation rejecting identical source/destination warehouses or cross-company warehouses. Created paired `transfer_out` and `transfer_in` movement records linked by `transferId`. (3) HTTP API: Exposed `POST /api/inventory/transfers` route guarded by `INVENTORY_MOVEMENT` permission. (4) UI: Added Transfer action button, "التحويلات بين المستودعات" tab, and transfer modal dialog in `InventoryWorkspace.tsx`. (5) Verification: Created static test harness `scripts/verifyInvTransfer1.ts` (`npm run test:inv-transfer-1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES` (Inventory Core & Transfer active)
+- **AN-INV-ITEM-CARD-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered Inventory Item Card (بطاقة صنف) API and UI workspace. (1) Backend Services & Routes: Added `getItem` in `itemService.ts`, `listBalancesByItem` and `listMovementsByItem` (with warehouse/date/movementType filters) in `stockService.ts` and `stockRepository.ts`. Exposed `GET /api/inventory/items/:id`, `GET /api/inventory/items/:id/stock`, and `GET /api/inventory/items/:id/movements` guarded by `INVENTORY_READ` permission and tenant company scoping. (2) UI: Created `ItemCardPanel.tsx` component presenting item master details, stock balances across warehouses, and filtered movement history with quick action shortcuts (receive, issue, transfer). Integrated open-from-list state (`setCardItemId`) in `InventoryWorkspace.tsx`. (3) Verification: Created test harness `scripts/verifyInvItemCard1.ts` (`npm run test:inv-item-card-1`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES` (Inventory Item Card active)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

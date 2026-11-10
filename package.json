@@ -59,6 +59,7 @@
     "test:pg-smoke-live-ci-1": "tsx scripts/verifyPgSmokeLiveCi1.ts",
     "test:inv-core-1": "tsx scripts/verifyInvCore1.ts",
     "test:inv-transfer-1": "tsx scripts/verifyInvTransfer1.ts",
+    "test:inv-item-card-1": "tsx scripts/verifyInvItemCard1.ts",
     "test:pg-proof-2": "tsx scripts/verifyPgIntegrationProof2.ts",
     "test:org-scope-on-ledger-1": "tsx scripts/verifyOrgScopeOnLedger1.ts",
     "test:p1-foundation-close-1": "tsx scripts/verifyP1FoundationClose1.ts",

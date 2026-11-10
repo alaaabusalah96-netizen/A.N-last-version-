@@ -102,6 +102,61 @@ inventoryRoutes.post(
   })
 );
 
+inventoryRoutes.get(
+  '/items/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const itemId = req.params.id;
+
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+
+    const item = await defaultItemService.getItem(companyId, itemId);
+    return res.status(200).json({ status: 'ok', item });
+  })
+);
+
+inventoryRoutes.get(
+  '/items/:id/stock',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const itemId = req.params.id;
+
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+
+    const balances = await defaultStockService.listStockBalancesByItem(companyId, itemId);
+    return res.status(200).json({ status: 'ok', balances });
+  })
+);
+
+inventoryRoutes.get(
+  '/items/:id/movements',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const itemId = req.params.id;
+
+    const warehouseId = (req.query.warehouseId as string) || undefined;
+    const fromDate = (req.query.from as string) || (req.query.fromDate as string) || undefined;
+    const toDate = (req.query.to as string) || (req.query.toDate as string) || undefined;
+    const movementType = (req.query.type as string) || (req.query.movementType as string) || undefined;
+
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+
+    const movements = await defaultStockService.listStockMovementsByItem(companyId, itemId, {
+      warehouseId,
+      fromDate,
+      toDate,
+      movementType,
+    });
+    return res.status(200).json({ status: 'ok', movements });
+  })
+);
+
 // 3. Stock Balances API
 inventoryRoutes.get(
   '/balances',
