@@ -63,6 +63,36 @@ export class PeriodRepository {
   }
 
   /**
+   * Find period by its ID with row lock (FOR UPDATE).
+   */
+  async findByIdForUpdate(companyId: string, periodId: string, customExecutor?: DbExecutor): Promise<AccountingPeriod | null> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        SELECT 
+          id, 
+          company_id as "companyId", 
+          code, 
+          start_date::text as "startDate", 
+          end_date::text as "endDate", 
+          is_closed as "isClosed", 
+          closed_at as "closedAt", 
+          closed_by as "closedBy", 
+          created_at as "createdAt"
+        FROM accounting_periods
+        WHERE id = $1 AND company_id = $2
+        FOR UPDATE
+      `;
+      const res = await executor.query<AccountingPeriod>(sql, [periodId, companyId]);
+      return res.rows[0] || null;
+    };
+
+    if (customExecutor) {
+      return await run(customExecutor);
+    }
+    return await withTenantTransaction(companyId, run);
+  }
+
+  /**
    * Find period covering a specific entry date (start_date <= entryDate <= end_date).
    */
   async findCoveringDate(companyId: string, entryDate: string, customExecutor?: DbExecutor): Promise<AccountingPeriod | null> {
@@ -86,6 +116,84 @@ export class PeriodRepository {
         LIMIT 1
       `;
       const res = await executor.query<AccountingPeriod>(sql, [companyId, entryDate]);
+      return res.rows[0] || null;
+    };
+
+    if (customExecutor) {
+      return await run(customExecutor);
+    }
+    return await withTenantTransaction(companyId, run);
+  }
+
+  /**
+   * Find period covering a specific entry date with row lock (FOR UPDATE).
+   */
+  async findCoveringDateForUpdate(companyId: string, entryDate: string, customExecutor?: DbExecutor): Promise<AccountingPeriod | null> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        SELECT 
+          id, 
+          company_id as "companyId", 
+          code, 
+          start_date::text as "startDate", 
+          end_date::text as "endDate", 
+          is_closed as "isClosed", 
+          closed_at as "closedAt", 
+          closed_by as "closedBy", 
+          created_at as "createdAt"
+        FROM accounting_periods
+        WHERE company_id = $1 
+          AND start_date <= $2::date 
+          AND end_date >= $2::date
+        ORDER BY is_closed ASC, created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+      const res = await executor.query<AccountingPeriod>(sql, [companyId, entryDate]);
+      return res.rows[0] || null;
+    };
+
+    if (customExecutor) {
+      return await run(customExecutor);
+    }
+    return await withTenantTransaction(companyId, run);
+  }
+
+  /**
+   * Find overlapping period for a company given start and end dates.
+   * Two periods overlap if: existing.start_date <= new.end_date AND existing.end_date >= new.start_date
+   */
+  async findOverlapping(
+    companyId: string,
+    startDate: string,
+    endDate: string,
+    excludePeriodId?: string,
+    customExecutor?: DbExecutor
+  ): Promise<AccountingPeriod | null> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        SELECT 
+          id, 
+          company_id as "companyId", 
+          code, 
+          start_date::text as "startDate", 
+          end_date::text as "endDate", 
+          is_closed as "isClosed", 
+          closed_at as "closedAt", 
+          closed_by as "closedBy", 
+          created_at as "createdAt"
+        FROM accounting_periods
+        WHERE company_id = $1 
+          AND start_date <= $3::date 
+          AND end_date >= $2::date
+          ${excludePeriodId ? 'AND id != $4' : ''}
+        ORDER BY start_date ASC
+        LIMIT 1
+      `;
+      const params = excludePeriodId
+        ? [companyId, startDate, endDate, excludePeriodId]
+        : [companyId, startDate, endDate];
+      const res = await executor.query<AccountingPeriod>(sql, params);
       return res.rows[0] || null;
     };
 

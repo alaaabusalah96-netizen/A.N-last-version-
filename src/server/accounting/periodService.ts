@@ -1,5 +1,6 @@
 import { defaultPeriodRepository, PeriodRepository } from './periodRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
+import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { AccountingPeriod, CreatePeriodInput } from './periodTypes.js';
 
@@ -21,7 +22,7 @@ export class PeriodService {
 
   /**
    * Create a new accounting period.
-   * Validates non-empty code, valid start/end dates, and start <= end.
+   * Validates non-empty code, valid start/end dates, start <= end, and no overlapping dates for the company.
    */
   async createPeriod(
     companyId: string,
@@ -54,6 +55,18 @@ export class PeriodService {
       throw new ValidationError(`رمز الفترة (${input.code.trim()}) مستخدم مسبقاً لهذه الشركة`);
     }
 
+    // A. Overlap check: Reject when date range overlaps an existing period for the same company_id
+    const overlapping = await this.periodRepo.findOverlapping(
+      companyId,
+      input.startDate,
+      input.endDate
+    );
+    if (overlapping) {
+      throw new ValidationError(
+        `تتعارض تواريخ الفترة الجديدة (${input.startDate} إلى ${input.endDate}) مع فترة محاسبية قائمة (${overlapping.code}: من ${overlapping.startDate} إلى ${overlapping.endDate}). لا يمكن تداخل الفترات المالية لنفس الشركة.`
+      );
+    }
+
     const period = await this.periodRepo.create(companyId, {
       code: input.code.trim(),
       startDate: input.startDate,
@@ -78,6 +91,7 @@ export class PeriodService {
 
   /**
    * Close an open accounting period.
+   * Locks target period row (FOR UPDATE) inside tenant transaction so close and post cannot race.
    */
   async closePeriod(
     companyId: string,
@@ -88,36 +102,39 @@ export class PeriodService {
       throw new ValidationError('companyId and periodId are required');
     }
 
-    const existing = await this.periodRepo.findById(companyId, periodId);
-    if (!existing) {
-      throw new NotFoundError('الفترة المحاسبية غير موجودة');
-    }
+    return await withTenantTransaction(companyId, async (tx) => {
+      const existing = await this.periodRepo.findByIdForUpdate(companyId, periodId, tx);
+      if (!existing) {
+        throw new NotFoundError('الفترة المحاسبية غير موجودة');
+      }
 
-    if (existing.isClosed) {
-      throw new ValidationError(`الفترة المحاسبية (${existing.code}) مغلقة بالفعل`);
-    }
+      if (existing.isClosed) {
+        throw new ValidationError(`الفترة المحاسبية (${existing.code}) مغلقة بالفعل`);
+      }
 
-    const updated = await this.periodRepo.setClosed(companyId, periodId, true, actorId);
-    if (!updated) {
-      throw new NotFoundError('تعذر إغلاق الفترة المحاسبية');
-    }
+      const updated = await this.periodRepo.setClosed(companyId, periodId, true, actorId, tx);
+      if (!updated) {
+        throw new NotFoundError('تعذر إغلاق الفترة المحاسبية');
+      }
 
-    await this.auditService.record({
-      actorUserId: actorId || null,
-      companyId,
-      action: 'PERIOD_CLOSE',
-      entityType: 'accounting_period',
-      entityId: updated.id,
-      metadata: {
-        code: updated.code,
-      },
+      await this.auditService.record({
+        actorUserId: actorId || null,
+        companyId,
+        action: 'PERIOD_CLOSE',
+        entityType: 'accounting_period',
+        entityId: updated.id,
+        metadata: {
+          code: updated.code,
+        },
+      });
+
+      return updated;
     });
-
-    return updated;
   }
 
   /**
    * Reopen a closed accounting period.
+   * Locks target period row (FOR UPDATE) inside tenant transaction.
    */
   async reopenPeriod(
     companyId: string,
@@ -128,32 +145,34 @@ export class PeriodService {
       throw new ValidationError('companyId and periodId are required');
     }
 
-    const existing = await this.periodRepo.findById(companyId, periodId);
-    if (!existing) {
-      throw new NotFoundError('الفترة المحاسبية غير موجودة');
-    }
+    return await withTenantTransaction(companyId, async (tx) => {
+      const existing = await this.periodRepo.findByIdForUpdate(companyId, periodId, tx);
+      if (!existing) {
+        throw new NotFoundError('الفترة المحاسبية غير موجودة');
+      }
 
-    if (!existing.isClosed) {
-      throw new ValidationError(`الفترة المحاسبية (${existing.code}) مفتوحة بالفعل`);
-    }
+      if (!existing.isClosed) {
+        throw new ValidationError(`الفترة المحاسبية (${existing.code}) مفتوحة بالفعل`);
+      }
 
-    const updated = await this.periodRepo.setClosed(companyId, periodId, false, actorId);
-    if (!updated) {
-      throw new NotFoundError('تعذر إعادة فتح الفترة المحاسبية');
-    }
+      const updated = await this.periodRepo.setClosed(companyId, periodId, false, actorId, tx);
+      if (!updated) {
+        throw new NotFoundError('تعذر إعادة فتح الفترة المحاسبية');
+      }
 
-    await this.auditService.record({
-      actorUserId: actorId || null,
-      companyId,
-      action: 'PERIOD_REOPEN',
-      entityType: 'accounting_period',
-      entityId: updated.id,
-      metadata: {
-        code: updated.code,
-      },
+      await this.auditService.record({
+        actorUserId: actorId || null,
+        companyId,
+        action: 'PERIOD_REOPEN',
+        entityType: 'accounting_period',
+        entityId: updated.id,
+        metadata: {
+          code: updated.code,
+        },
+      });
+
+      return updated;
     });
-
-    return updated;
   }
 }
 

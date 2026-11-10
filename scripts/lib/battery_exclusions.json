@@ -40,5 +40,6 @@
   "verifyMigrationChecksums1.ts": "package-specific verification",
   "verifyFoundationGateClose1.ts": "package-specific verification",
   "verifyAccountingPeriodsEnforce1.ts": "package-specific verification",
-  "verifyC2HttpProof1.ts": "package-specific verification"
+  "verifyC2HttpProof1.ts": "package-specific verification",
+  "verifyAccountingPeriodsHarden1.ts": "package-specific verification"
 }

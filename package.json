@@ -77,6 +77,7 @@
     "test:migration-checksums-1": "tsx scripts/verifyMigrationChecksums1.ts",
     "test:foundation-gate-close-1": "tsx scripts/verifyFoundationGateClose1.ts",
     "test:accounting-periods-enforce-1": "tsx scripts/verifyAccountingPeriodsEnforce1.ts",
+    "test:accounting-periods-harden-1": "tsx scripts/verifyAccountingPeriodsHarden1.ts",
     "test:c2-http-proof-1": "tsx scripts/verifyC2HttpProof1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",

@@ -191,13 +191,21 @@ export class JournalService {
         );
       }
 
-      // 1. Period Enforcement: Resolve and validate accounting period for entry
+      // 1. Period Enforcement: Resolve and lock accounting period row (FOR UPDATE)
       let period = null;
       if (entry.periodId) {
-        period = await this.periodRepo.findById(companyId, entry.periodId, tx);
+        period = await this.periodRepo.findByIdForUpdate(companyId, entry.periodId, tx);
+        if (period) {
+          // B. Validate entryDate is within [startDate, endDate] of the specified period
+          if (entry.entryDate < period.startDate || entry.entryDate > period.endDate) {
+            throw new ValidationError(
+              `تاريخ القيد (${entry.entryDate}) يقع خارج نطاق الفترة المحاسبية المحددة (${period.code}: من ${period.startDate} إلى ${period.endDate}).`
+            );
+          }
+        }
       }
       if (!period) {
-        period = await this.periodRepo.findCoveringDate(companyId, entry.entryDate, tx);
+        period = await this.periodRepo.findCoveringDateForUpdate(companyId, entry.entryDate, tx);
       }
 
       if (!period) {
@@ -206,6 +214,7 @@ export class JournalService {
         );
       }
 
+      // Re-read is_closed on locked row (FOR UPDATE)
       if (period.isClosed) {
         throw new ValidationError(
           `الفترة المحاسبية (${period.code}) مغلقة. لا يمكن ترحيل قيود محاسبية إلى فترة مالية مغلقة.`
@@ -304,8 +313,8 @@ export class JournalService {
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Period Enforcement for reversal entry
-      const revPeriod = await this.periodRepo.findCoveringDate(companyId, today, tx);
+      // Period Enforcement for reversal entry with row lock (FOR UPDATE)
+      const revPeriod = await this.periodRepo.findCoveringDateForUpdate(companyId, today, tx);
       if (!revPeriod) {
         throw new ValidationError(
           `لا توجد فترة محاسبية مسجلة تغطي تاريخ اليوم (${today}) لعكس القيد. يجب إنشاء فترة محاسبية مفتوحة أولاً.`

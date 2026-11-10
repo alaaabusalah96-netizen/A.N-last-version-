@@ -339,6 +339,11 @@
   - Summary: Fixed verifyC2HttpProof1 Case A contract to accept 401 GET and 401 or 403-CSRF on unauthenticated POST (reflecting global csrfProtection middleware order without altering security). Added FK-safe cleanup of all created test users, companies, and memberships in finally block. Added hard guard `isProductionOrSupabaseDb` blocking test execution against production/Supabase DATABASE_URL unless `C2_ALLOW_DISPOSABLE=1`, and added `C2_ALLOW_DISPOSABLE: "1"` to CI C2 step.
   - P05_STARTED: `YES` (Accounting Core slice)
   - MODULES_STARTED: `NO` (external modules remain unstarted)
+- **AN-ACCOUNTING-PERIODS-HARDEN-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Hardened accounting period controls. (1) Overlap prevention on create: periodService.createPeriod queries findOverlapping and rejects date range overlap for the same company_id with clear Arabic error. (2) Date range boundary validation: postEntry checks entryDate falls strictly within [startDate, endDate] of resolved period when periodId is specified, failing closed with ValidationError. (3) Concurrency locking: periodRepository introduces findByIdForUpdate and findCoveringDateForUpdate using SELECT ... FOR UPDATE; closePeriod, reopenPeriod, and postEntry/reverseEntry lock the target period row inside the tenant transaction and re-read is_closed before state transitions.
+  - P05_STARTED: `YES` (Accounting Core slice)
+  - MODULES_STARTED: `NO` (external modules remain unstarted)
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)
