@@ -1171,8 +1171,18 @@ async function runVerification() {
       `T9.7: Exact transfer movement proof verified: captured source move (${capturedSourceMoveId}), dest move (${capturedDestMoveId}), transfer ID (${capturedTransferId}), and audit record (${capturedAuditId}) all existed in-transaction, failed with intentional error, and zero operation records survived rollback (source: ${postRbSourceQty}, dest: ${postRbDestQty})`
     );
 
-    // --- T9.8: VERIFICATION SUMMARY ASSERTION ---
-    assert(passed >= 25, `T9.8: Verification summary confirmed >= 25 live proof assertions passed`);
+    // --- T9.8: INDEPENDENT T9.7 OUTCOME ASSERTIONS ---
+    assert(faultingServiceFailed === true, 'T9.8: faultingServiceFailed must be true');
+    assert(faultingErrMsg === 'INTENTIONAL_AUDIT_SERVICE_TEST_FAILURE', 'T9.8: faultingErrMsg must be exact INTENTIONAL_AUDIT_SERVICE_TEST_FAILURE');
+    assert(preRbSourceQty >= 5, 'T9.8: preRbSourceQty must be >= 5');
+    assert(postRbSourceQty === preRbSourceQty, 'T9.8: postRbSourceQty must equal preRbSourceQty after rollback');
+    assert(postRbDestQty === preRbDestQty, 'T9.8: postRbDestQty must equal preRbDestQty after rollback');
+    assert(!moveSurvived, 'T9.8: zero stock movement records must survive rollback');
+    assert(!auditSurvived, 'T9.8: zero audit log records must survive rollback');
+    assert(Boolean(capturedTransferId), 'T9.8: capturedTransferId must be defined');
+    assert(Boolean(capturedSourceMoveId), 'T9.8: capturedSourceMoveId must be defined');
+    assert(Boolean(capturedDestMoveId), 'T9.8: capturedDestMoveId must be defined');
+    assert(Boolean(capturedAuditId), 'T9.8: capturedAuditId must be defined');
 
   } finally {
     // --- TASK 1: PRECISE TEST-OWNED CLEANUP GUARANTEE & POST-TEARDOWN VERIFICATION ---
