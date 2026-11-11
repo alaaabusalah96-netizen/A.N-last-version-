@@ -5,6 +5,7 @@ import { defaultMembershipStore } from '../org/membershipStore.js';
 import { defaultCompanyService } from '../org/companyService.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { requirePermission } from '../rbac/requirePermission.js';
+import { defaultRbacService } from '../rbac/rbacService.js';
 import { requirePlatformAdmin } from '../rbac/requirePlatformAdmin.js';
 import { wrap } from '../http/asyncHandler.js';
 import { isUuid, isValidCompanyCode } from '../http/validators.js';
@@ -76,11 +77,10 @@ companyRoutes.post(
   })
 );
 
-// GET /api/companies/:id — requireAuth + membership or platform_admin
+// GET /api/companies/:id — requireAuth + existence check -> permission check
 companyRoutes.get(
   '/:id',
   requireAuth,
-  requirePermission(PERMISSIONS.COMPANY_READ),
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
 
@@ -94,12 +94,12 @@ companyRoutes.get(
       throw new NotFoundError('Company not found');
     }
 
+    // Verify user has active membership and COMPANY_READ permission (replaces standalone hasMembership check)
+    // Note: defaultRbacService.hasPermission internally validates active hasMembership and role permissions
     const user = req.user!;
-    if (user.role !== 'platform_admin') {
-      const hasMembership = await defaultMembershipStore.hasMembership(user.id, id);
-      if (!hasMembership) {
-        throw new ForbiddenError('Forbidden');
-      }
+    const allowed = await defaultRbacService.hasPermission(user, PERMISSIONS.COMPANY_READ, id);
+    if (!allowed) {
+      throw new ForbiddenError('Forbidden');
     }
 
     return res.status(200).json({ status: 'ok', company });

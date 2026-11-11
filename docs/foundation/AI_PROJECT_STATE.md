@@ -418,6 +418,15 @@
   - Summary: Hardened `scripts/verifyFixN2CompositeFkLedger1.ts` live proof suite with SAVEPOINT and ROLLBACK TO SAVEPOINT isolation around negative composite FK assertions (T1, T2) using strict SQLSTATE 23503 validation, verified transaction post-rollback recovery, positive same-company insert, and guaranteed outer transaction rollback with safe client cleanup.
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-FIX-CI-RBAC404-LOCAL-VERIFY-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Remediated Foundation CI Run #92 failure causes and hardened test harness contracts.
+    1. RBAC Case E 404 Fix: In `src/server/routes/companyRoutes.ts` `GET /api/companies/:id`, reordered the route logic to validate UUID and check company existence with `defaultCompanyStore.getById(id)` first, throwing `NotFoundError('Company not found')` (404 NOT_FOUND) for non-existent companies before evaluating `defaultRbacService.hasPermission(user, PERMISSIONS.COMPANY_READ, id)` (which throws `ForbiddenError('Forbidden')` 403 FORBIDDEN for unauthorized existing companies).
+    2. Battery Circularity Elimination: Removed `scripts/verifyLocal.ts` from `scripts` array in `scripts/runFoundationBattery.ts` (orchestrator already documented in `scripts/lib/battery_exclusions.json`), eliminating circular orchestration and spurious BLOCKED exits during CI runs.
+    3. Composite FK Ledger Hardening: In `scripts/verifyFixN2CompositeFkLedger1.ts`, enforced strict assertion of both SQLSTATE `23503` and specific constraint names (`fk_journal_lines_entry_company` for T1 and `fk_journal_lines_account_company` for T2), added transaction post-rollback isolation assertions (`SELECT 1`), and verified positive same-company insertion (T3) with explicit `SELECT` read-back within the transaction before savepoint rollback.
+    4. Diagnostic Test Alignment: Updated `scripts/verifyFixAbd1.ts` (S3) and `scripts/verifyAbd1LiveProof.ts` (static contract) to assert the structural order of existence check before permission check.
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

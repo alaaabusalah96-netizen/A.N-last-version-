@@ -22,12 +22,13 @@ async function runProof() {
   const companyRoutesPath = path.join(rootDir, 'src/server/routes/companyRoutes.ts');
   const companyRoutesContent = fs.readFileSync(companyRoutesPath, 'utf8');
 
-  const hasMembershipGate =
-    companyRoutesContent.includes("user.role !== 'platform_admin'") &&
-    companyRoutesContent.includes('hasMembership') &&
+  const hasRbacGate =
+    companyRoutesContent.includes("NotFoundError('Company not found')") &&
+    companyRoutesContent.includes('hasPermission') &&
+    companyRoutesContent.includes('COMPANY_READ') &&
     companyRoutesContent.includes("ForbiddenError('Forbidden')");
 
-  await check('ABD-1 membership gate present at HEAD in companyRoutes.ts', hasMembershipGate);
+  await check('ABD-1 RBAC company existence and permission gate present at HEAD in companyRoutes.ts', hasRbacGate);
 
   const settingsRepoPath = path.join(rootDir, 'src/server/org/companySettingsRepository.ts');
   const settingsRepoContent = fs.readFileSync(settingsRepoPath, 'utf8');
@@ -143,10 +144,10 @@ async function runProof() {
     }
   } else {
     console.log('\n[RBAC Proof] Local preview environment lacks live Postgres connection. Validating HTTP route code invariants statically...');
-    rbacResults.A = hasMembershipGate;
-    rbacResults.B = hasMembershipGate;
-    rbacResults.C = hasMembershipGate;
-    rbacResults.D = hasMembershipGate;
+    rbacResults.A = hasRbacGate;
+    rbacResults.B = hasRbacGate;
+    rbacResults.C = hasRbacGate;
+    rbacResults.D = hasRbacGate;
     rbacResults.E = companyRoutesContent.includes("NotFoundError('Company not found')");
 
     rbacResults.detailsA = 'status=403 code=FORBIDDEN (static code contract verified)';

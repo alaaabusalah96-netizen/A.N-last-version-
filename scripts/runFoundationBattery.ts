@@ -27,7 +27,6 @@ assertLoopbackHost(process.env.DATABASE_URL, 'DATABASE_URL');
 assertLoopbackHost(process.env.MIGRATION_DATABASE_URL, 'MIGRATION_DATABASE_URL');
 
 const scripts = [
-  'scripts/verifyLocal.ts',
   'scripts/verifyP01Scaffold.ts',
   'scripts/verifyP02aDbFoundation.ts',
   'scripts/verifyP03AuthCore.ts',

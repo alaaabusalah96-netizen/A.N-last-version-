@@ -34,14 +34,21 @@ async function verifyFixAbd1() {
     'S2: executor_import_allowlist.json does NOT allowlist companySettingsRepository.ts'
   );
 
-  // S3: B) GET /api/companies/:id in companyRoutes.ts checks membership for non-platform_admin
+  // S3: B) GET /api/companies/:id in companyRoutes.ts checks existence first (404), then checks COMPANY_READ permission (403)
   const routesPath = path.join(rootDir, 'src/server/routes/companyRoutes.ts');
   const routesContent = fs.readFileSync(routesPath, 'utf8');
+  const notFoundIdx = routesContent.indexOf("NotFoundError('Company not found')");
+  const permCheckIdx = routesContent.indexOf("hasPermission(user, PERMISSIONS.COMPANY_READ, id)");
+  const forbiddenIdx = routesContent.indexOf("ForbiddenError('Forbidden')");
+  const s3Valid =
+    notFoundIdx !== -1 &&
+    permCheckIdx !== -1 &&
+    forbiddenIdx !== -1 &&
+    notFoundIdx < permCheckIdx &&
+    permCheckIdx < forbiddenIdx;
   assert(
-    routesContent.includes("user.role !== 'platform_admin'") &&
-      routesContent.includes('hasMembership') &&
-      routesContent.includes("ForbiddenError('Forbidden')"),
-    'S3: companyRoutes.get("/:id") enforces active membership check with 403 Forbidden for non-platform_admin users'
+    s3Valid,
+    'S3: companyRoutes.get("/:id") enforces existence check (404) before COMPANY_READ permission check (403)'
   );
 
   // S4: D) verifyMigration010.ts checks 14 & 15 allow guarded DO block pattern
