@@ -115,6 +115,7 @@ export interface ServerIdentity {
   server_addr: string | null;
   server_port: number | null;
   server_version: string;
+  system_identifier: string | null;
   data_directory: string | null;
 }
 
@@ -132,17 +133,23 @@ export async function fetchServerIdentity(client: pg.Client): Promise<ServerIden
       version() as server_version;
   `);
   let data_directory: string | null = null;
+  let system_identifier: string | null = null;
   try {
     const dirRes = await client.query<{ data_directory: string }>(`
       SELECT current_setting('data_directory', true) as data_directory;
     `);
     data_directory = dirRes.rows[0]?.data_directory || null;
+    const sysRes = await client.query<{ system_identifier: string }>(`
+      SELECT system_identifier::text FROM pg_control_system();
+    `);
+    system_identifier = sysRes.rows[0]?.system_identifier || null;
   } catch {
-    data_directory = null;
+    // Permission denied expected on some environments
   }
   return {
     ...baseRes.rows[0],
     data_directory,
+    system_identifier,
   };
 }
 
@@ -171,10 +178,17 @@ export function checkDatabaseIdentity(
       return { match: false, reason: `Server IP address mismatch: app='${appAddr}', admin='${adminAddr}'` };
     }
   } else if (!appAddr && !adminAddr) {
-    if (appServer.data_directory && adminServer.data_directory) {
-      if (appServer.data_directory !== adminServer.data_directory) {
-        return { match: false, reason: `Data directory mismatch on socket connections: app='${appServer.data_directory}', admin='${adminServer.data_directory}'` };
+    const hasDataDirMatch = appServer.data_directory && adminServer.data_directory && appServer.data_directory === adminServer.data_directory;
+    const hasSysIdMatch = appServer.system_identifier && adminServer.system_identifier && appServer.system_identifier === adminServer.system_identifier;
+
+    if (!hasDataDirMatch && !hasSysIdMatch) {
+      if (appServer.data_directory && adminServer.data_directory && appServer.data_directory !== adminServer.data_directory) {
+         return { match: false, reason: `Data directory mismatch on socket connections: app='${appServer.data_directory}', admin='${adminServer.data_directory}'` };
       }
+      if (appServer.system_identifier && adminServer.system_identifier && appServer.system_identifier !== adminServer.system_identifier) {
+         return { match: false, reason: `System identifier mismatch on socket connections` };
+      }
+      return { match: false, reason: 'Insufficient identity evidence on socket connections (need matching data_directory or system_identifier)' };
     }
   } else {
     return { match: false, reason: `Server address type mismatch (one socket, one TCP): app='${appAddr}', admin='${adminAddr}'` };
@@ -445,6 +459,7 @@ function runDatabaseIdentityFailFastTests(assert: (cond: boolean, msg: string) =
     server_port: 5432,
     server_version: 'PostgreSQL 16.1',
     data_directory: '/var/lib/postgresql/data',
+    system_identifier: 'sys_1',
   };
 
   const res1 = checkDatabaseIdentity(base, { ...base });
@@ -462,12 +477,18 @@ function runDatabaseIdentityFailFastTests(assert: (cond: boolean, msg: string) =
   const res5 = checkDatabaseIdentity(base, { ...base, server_addr: null });
   assert(!res5.match && Boolean(res5.reason?.includes('Server address type mismatch')), 'DB Identity 5 (one NULL server_addr): Fail-fast rejected');
 
-  const nullAddrBase: ServerIdentity = { ...base, server_addr: null, data_directory: null };
+  const nullAddrBase: ServerIdentity = { ...base, server_addr: null, data_directory: null, system_identifier: null };
   const res6 = checkDatabaseIdentity(nullAddrBase, { ...nullAddrBase });
-  assert(res6.match, 'DB Identity 6 (both NULL or unreadable data_directory): Allowed');
+  assert(!res6.match, 'DB Identity 6 (both NULL/unreadable directory/identifier): Fail-closed (rejected)');
 
-  const res7 = checkDatabaseIdentity({ ...nullAddrBase, data_directory: '/var/lib/postgresql/data' }, { ...nullAddrBase, data_directory: '/other/pg/data' });
+  const res6b = checkDatabaseIdentity({ ...nullAddrBase, data_directory: '/var/lib/pg' }, { ...nullAddrBase, data_directory: '/var/lib/pg' });
+  assert(res6b.match, 'DB Identity 6b (both matching directory): Allowed');
+
+  const res7 = checkDatabaseIdentity({ ...nullAddrBase, data_directory: '/var/lib/pg' }, { ...nullAddrBase, data_directory: '/other/pg' });
   assert(!res7.match && Boolean(res7.reason?.includes('Data directory mismatch')), 'DB Identity 7 (both non-null different data_directory): Fail-fast rejected');
+
+  const resSysId = checkDatabaseIdentity({ ...nullAddrBase, system_identifier: 'id_1' }, { ...nullAddrBase, system_identifier: 'id_1' });
+  assert(resSysId.match, 'DB Identity SysId (both matching identifier): Allowed');
 
   const res8 = checkDatabaseIdentity(base, null as any);
   assert(!res8.match && Boolean(res8.reason?.includes('Unavailable identity metadata')), 'DB Identity 8 (unavailable metadata): Fail-fast rejected');
