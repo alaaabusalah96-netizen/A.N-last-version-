@@ -3,32 +3,57 @@ import path from 'node:path';
 import pg from 'pg';
 import { buildPgConfig } from '../src/server/db/connection.js';
 
-export function isProductionOrSupabaseDb(urlStr: string): boolean {
-  if (!urlStr || typeof urlStr !== 'string') return false;
+export function isAllowedTestDb(urlStr: string): { allowed: boolean; reason?: string; host?: string } {
+  if (!urlStr || typeof urlStr !== 'string' || urlStr.trim() === '') {
+    return { allowed: false, reason: 'Empty or missing database URL' };
+  }
   try {
     const parsed = new URL(urlStr);
     const host = parsed.hostname.toLowerCase();
-    return (
+
+    // 1. Unconditionally reject known hosted / cloud DB providers
+    if (
       host.includes('supabase.co') ||
       host.includes('pooler.supabase') ||
       host.includes('supabase.com') ||
       host.includes('aws.neon.tech') ||
-      host.includes('rds.amazonaws.com')
-    );
+      host.includes('rds.amazonaws.com') ||
+      host.includes('cockroachlabs.cloud') ||
+      host.includes('elephantsql.com') ||
+      host.includes('render.com') ||
+      host.includes('railway.app')
+    ) {
+      return { allowed: false, reason: `Hosted cloud database prohibited for live tests: ${host}`, host };
+    }
+
+    // 2. Strict allowlist of allowed local / CI disposable loopback hosts
+    const allowedHosts = new Set([
+      'localhost',
+      '127.0.0.1',
+      '::1',
+      '[::1]',
+      'postgres', // Standard Docker service host in CI pipelines
+      'host.docker.internal',
+      'local-pg',
+    ]);
+
+    if (allowedHosts.has(host)) {
+      return { allowed: true, host };
+    }
+
+    return { allowed: false, reason: `Host '${host}' is not in the explicit allowed test DB allowlist`, host };
   } catch {
-    const lower = urlStr.toLowerCase();
-    return (
-      lower.includes('supabase.co') ||
-      lower.includes('pooler.supabase') ||
-      lower.includes('supabase.com') ||
-      lower.includes('aws.neon.tech') ||
-      lower.includes('rds.amazonaws.com')
-    );
+    return { allowed: false, reason: 'Invalid database URL format' };
   }
 }
 
+// Deprecated alias for backwards compatibility
+export function isProductionOrSupabaseDb(urlStr: string): boolean {
+  return !isAllowedTestDb(urlStr).allowed;
+}
+
 async function runVerification() {
-  console.log('=== RUNNING INVENTORY ATOMIC BALANCE VERIFICATION (AN-FIX-INVENTORY-ATOMIC-PROOF-1) ===\n');
+  console.log('=== RUNNING INVENTORY ATOMIC BALANCE VERIFICATION (AN-FIX-INVENTORY-ATOMIC-PROOF-2) ===\n');
   let passed = 0;
   let failed = 0;
   let skipped = 0;
@@ -104,19 +129,36 @@ async function runVerification() {
   const adminDbUrl = process.env.MIGRATION_DATABASE_URL;
   const isDbRequired = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true' || process.env.CI === 'true';
 
-  if (!appDbUrl || appDbUrl.trim() === '') {
+  const appDbCheck = appDbUrl ? isAllowedTestDb(appDbUrl) : { allowed: false, reason: 'DATABASE_URL is not configured' };
+
+  if (!appDbUrl || appDbUrl.trim() === '' || !appDbCheck.allowed) {
     if (isDbRequired) {
-      console.error('[FAIL] DATABASE_URL environment variable is required for application role (an_app) tests when REQUIRE_DB=1 or CI=true');
-      assert(false, 'DATABASE_URL environment variable is required for an_app application role tests');
+      console.error(`[FAIL] DATABASE_URL validation failed: ${appDbCheck.reason}`);
+      assert(false, `DATABASE_URL validation failed: ${appDbCheck.reason}`);
       process.exit(1);
     } else {
-      reportSkipped('T1-T7 Live PostgreSQL integration proof SKIPPED: DATABASE_URL is not configured.');
-      console.log('[INFO] Static invariant checks verified. Disposable PostgreSQL environment with DATABASE_URL needed for live concurrency proof.');
+      reportSkipped(`T1-T7 Live PostgreSQL integration proof SKIPPED: ${appDbCheck.reason}`);
+      console.log('[INFO] Static invariant checks verified. Disposable local PostgreSQL environment needed for live concurrency proof.');
     }
-  } else if (isProductionOrSupabaseDb(appDbUrl) && process.env.INV_ALLOW_DISPOSABLE !== '1') {
-    reportSkipped('T1-T7 Live PostgreSQL integration proof SKIPPED: Protected/remote DB detected in DATABASE_URL and INV_ALLOW_DISPOSABLE is not set to 1');
   } else {
-    console.log('[Live Proof] Connecting to disposable PostgreSQL instance using application role (an_app)...');
+    // Validate MIGRATION_DATABASE_URL with same strict allowlist policy
+    let validAdminDbUrl: string | null = null;
+    if (adminDbUrl && adminDbUrl.trim() !== '') {
+      const adminCheck = isAllowedTestDb(adminDbUrl);
+      if (adminCheck.allowed) {
+        validAdminDbUrl = adminDbUrl;
+      } else {
+        console.warn(`[WARNING] MIGRATION_DATABASE_URL rejected for admin cleanup: ${adminCheck.reason}`);
+      }
+    }
+
+    if (!validAdminDbUrl && isDbRequired) {
+      console.error('[FAIL] Valid administrative cleanup connection (MIGRATION_DATABASE_URL) is required when REQUIRE_DB=1 or CI=true');
+      assert(false, 'MIGRATION_DATABASE_URL is required for guaranteed admin cleanup');
+      process.exit(1);
+    }
+
+    console.log(`[Live Proof] Connecting to disposable PostgreSQL instance (${appDbCheck.host}) using application role (an_app)...`);
 
     const appPgConfig = buildPgConfig(appDbUrl, process.env);
     const appClient1 = new pg.Client(appPgConfig);
@@ -124,8 +166,8 @@ async function runVerification() {
     const appClient3 = new pg.Client(appPgConfig);
 
     let adminClient: pg.Client | null = null;
-    if (adminDbUrl && adminDbUrl.trim() !== '') {
-      const adminPgConfig = buildPgConfig(adminDbUrl, process.env);
+    if (validAdminDbUrl) {
+      const adminPgConfig = buildPgConfig(validAdminDbUrl, process.env);
       adminClient = new pg.Client(adminPgConfig);
     }
 
@@ -142,6 +184,11 @@ async function runVerification() {
       await appClient3.connect();
       if (adminClient) {
         await adminClient.connect();
+      }
+
+      // Verify admin connection responsiveness before creating test data
+      if (adminClient) {
+        await adminClient.query('SELECT 1;');
       }
 
       // --- SECTION 3: APPLICATION ROLE IDENTITY ASSERTIONS ---
@@ -171,15 +218,37 @@ async function runVerification() {
       `);
       assert(ownerRes.rows.length === 0, 'Application Role Check: an_app is not the owner of inv_stock_balances or inv_stock_movements');
 
-      // Verify RLS and FORCE RLS are active on inv_stock_balances
-      const rlsRes = await appClient1.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(`
-        SELECT c.relrowsecurity, c.relforcerowsecurity
+      // Verify RLS and FORCE RLS are active on BOTH inv_stock_balances and inv_stock_movements
+      const rlsRes = await appClient1.query<{ tablename: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(`
+        SELECT c.relname as tablename, c.relrowsecurity, c.relforcerowsecurity
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relname = 'inv_stock_balances';
+        WHERE n.nspname = 'public' AND c.relname IN ('inv_stock_balances', 'inv_stock_movements');
       `);
-      const rlsAttrs = rlsRes.rows[0];
-      assert(Boolean(rlsAttrs?.relrowsecurity && rlsAttrs?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS are active on inv_stock_balances');
+      const balRls = rlsRes.rows.find(r => r.tablename === 'inv_stock_balances');
+      const movRls = rlsRes.rows.find(r => r.tablename === 'inv_stock_movements');
+
+      assert(Boolean(balRls?.relrowsecurity && balRls?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS are active on inv_stock_balances');
+      assert(Boolean(movRls?.relrowsecurity && movRls?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS are active on inv_stock_movements');
+
+      // Verify privileges granted to an_app on inv_stock_movements
+      const privsRes = await appClient1.query<{ tablename: string; privilege_type: string }>(`
+        SELECT table_name as tablename, privilege_type
+        FROM information_schema.role_table_grants
+        WHERE grantee = 'an_app' AND table_name IN ('inv_stock_balances', 'inv_stock_movements');
+      `);
+      const movPrivs = new Set(privsRes.rows.filter(r => r.tablename === 'inv_stock_movements').map(r => r.privilege_type));
+      const hasMovGrants = movPrivs.has('SELECT') && movPrivs.has('INSERT') && movPrivs.has('UPDATE') && movPrivs.has('DELETE');
+      assert(hasMovGrants, 'Permissions Check: an_app has explicit SELECT, INSERT, UPDATE, DELETE grants on inv_stock_movements');
+
+      // Verify actual RLS policies on inv_stock_movements
+      const policyRes = await appClient1.query<{ policyname: string }>(`
+        SELECT policyname 
+        FROM pg_policies 
+        WHERE schemaname = 'public' AND tablename = 'inv_stock_movements';
+      `);
+      const hasMovPolicy = policyRes.rows.some(r => r.policyname === 'inv_stock_movements_tenant_isolation');
+      assert(hasMovPolicy, 'Policy Check: inv_stock_movements has tenant isolation policy inv_stock_movements_tenant_isolation');
 
       // Prove independent connections using pg_backend_pid()
       const pidRes1 = await appClient1.query<{ pid: number }>('SELECT pg_backend_pid() as pid;');
@@ -468,8 +537,8 @@ async function runVerification() {
       const totalStock = (balA || 0) + (balB || 0);
       assert(balA === 45 && balB === 55 && totalStock === 100, `T4: Reverse transfers completed without deadlock, stock conserved (WH_A: ${balA}, WH_B: ${balB}, Total: ${totalStock})`);
 
-      // --- T5: TRANSACTION ROLLBACK ATOMICITY ---
-      console.log('\nRunning T5: Transaction rollback atomicity using an_app...');
+      // --- T5: TRANSACTION ROLLBACK ATOMICITY & FK CONSTRAINT PROOF ---
+      console.log('\nRunning T5: Transaction rollback atomicity & explicit FK constraint proof using an_app...');
       await appClient1.query('BEGIN;');
       await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
       const preMovementsRes = await appClient1.query<{ count: number }>("SELECT count(*)::int as count FROM inv_stock_movements WHERE company_id = $1 AND warehouse_id = $2;", [compId, whC]);
@@ -478,9 +547,12 @@ async function runVerification() {
 
       let t5FailedAsExpected = false;
       let t5ErrCode = '';
+      let t5ConstraintName = '';
       try {
         await appClient1.query('BEGIN;');
         await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
+        // 1. Valid balance write
         await appClient1.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, 99, NOW())
@@ -488,12 +560,15 @@ async function runVerification() {
            DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty, updated_at = NOW();`,
           [compId, whC, itemId]
         );
+
+        // 2. Valid movement write
         await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo)
            VALUES ($1, $2, $3, 'receive', 99, 'T5 test');`,
           [compId, whC, itemId]
         );
-        // Force explicit foreign key failure (invalid non-existent item UUID)
+
+        // 3. Failing write: Force explicit foreign key violation on item_id UUID
         await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty)
            VALUES ($1, $2, '00000000-0000-0000-0000-000000000000', 'receive', 50);`,
@@ -502,10 +577,13 @@ async function runVerification() {
         await appClient1.query('COMMIT;');
       } catch (err: any) {
         t5ErrCode = err.code || '';
-        if (err.code === '23503') { // foreign_key_violation
+        t5ConstraintName = err.constraint || '';
+        // Verify SQLSTATE 23503 and explicit item_id FK constraint name or detail
+        const isFkMatch = err.code === '23503' && (t5ConstraintName === 'inv_stock_movements_item_id_fkey' || err.detail?.includes('inv_items'));
+        if (isFkMatch) {
           t5FailedAsExpected = true;
         }
-        await appClient1.query('ROLLBACK;');
+        await appClient1.query('ROLLBACK;').catch(() => {});
       }
 
       await appClient1.query('BEGIN;');
@@ -516,7 +594,10 @@ async function runVerification() {
       const postQty = postBalRes.rows[0]?.qty;
       const postCount = postMovementsRes.rows[0].count;
 
-      assert(t5FailedAsExpected && postQty === undefined && postCount === preCount, `T5: Rollback cleaned up completely on SQLSTATE 23503 (balance row absent, movements count unchanged: ${postCount})`);
+      assert(
+        t5FailedAsExpected && postQty === undefined && postCount === preCount,
+        `T5: Rollback cleaned up completely on SQLSTATE 23503 (constraint: '${t5ConstraintName || 'inv_stock_movements_item_id_fkey'}', balance row absent, movements count unchanged: ${postCount})`
+      );
 
       // --- T6: REPOSITORY & DB VALIDATION ---
       console.log('\nRunning T6: Repository conditional decrement & DB check constraint validation using an_app...');
@@ -622,6 +703,7 @@ async function runVerification() {
       assert(unsetReadRes.rows.length === 0, 'T7.5: appClient3 with empty tenant context returns 0 rows for any company balances');
 
       let unsetInsertRejected = false;
+      let unsetInsertErrCode = '';
       try {
         await appClient3.query('BEGIN;');
         await appClient3.query("SELECT set_config('app.current_tenant_id', '', true);");
@@ -631,45 +713,52 @@ async function runVerification() {
         );
         await appClient3.query('COMMIT;');
       } catch (err: any) {
+        unsetInsertErrCode = err.code || '';
         if (err.code === '42501') {
           unsetInsertRejected = true;
         }
         await appClient3.query('ROLLBACK;');
       }
-      assert(unsetInsertRejected, 'T7.6: appClient3 with empty tenant context inserting balance strictly rejected by SQLSTATE 42501');
+      assert(
+        unsetInsertRejected && unsetInsertErrCode === '42501',
+        `T7.6: appClient3 with empty tenant context inserting balance strictly rejected by SQLSTATE 42501 (actual code: '${unsetInsertErrCode}')`
+      );
 
     } finally {
-      // Safe cleanup in finally block
+      // Guaranteed transactional cleanup in finally block
+      let cleanupErrMessage: string | null = null;
       try {
         await appClient1.query('ROLLBACK;').catch(() => {});
         await appClient2.query('ROLLBACK;').catch(() => {});
         await appClient3.query('ROLLBACK;').catch(() => {});
       } catch {}
 
-      try {
-        await appClient1.end().catch(() => {});
-        await appClient2.end().catch(() => {});
-        await appClient3.end().catch(() => {});
-      } catch {}
-
-      // Targeted cleanup using adminClient if available
-      if (adminClient) {
+      if (adminClient && (compId || comp2Id)) {
+        const targetIds = [compId, comp2Id].filter(Boolean);
         try {
-          if (compId || comp2Id) {
-            const targetIds = [compId, comp2Id].filter(Boolean);
-            await adminClient.query("DELETE FROM inv_stock_movements WHERE company_id = ANY($1);", [targetIds]);
-            await adminClient.query("DELETE FROM inv_stock_balances WHERE company_id = ANY($1);", [targetIds]);
-            await adminClient.query("DELETE FROM inv_items WHERE company_id = ANY($1);", [targetIds]);
-            await adminClient.query("DELETE FROM inv_warehouses WHERE company_id = ANY($1);", [targetIds]);
-            await adminClient.query("DELETE FROM companies WHERE id = ANY($1);", [targetIds]);
-          }
-        } catch (cleanupErr) {
-          console.error('[WARNING] Data cleanup error in adminClient finally:', cleanupErr);
-        } finally {
-          try {
-            await adminClient.end().catch(() => {});
-          } catch {}
+          await adminClient.query('BEGIN;');
+          await adminClient.query("DELETE FROM inv_stock_movements WHERE company_id = ANY($1);", [targetIds]);
+          await adminClient.query("DELETE FROM inv_stock_balances WHERE company_id = ANY($1);", [targetIds]);
+          await adminClient.query("DELETE FROM inv_items WHERE company_id = ANY($1);", [targetIds]);
+          await adminClient.query("DELETE FROM inv_warehouses WHERE company_id = ANY($1);", [targetIds]);
+          await adminClient.query("DELETE FROM companies WHERE id = ANY($1);", [targetIds]);
+          await adminClient.query('COMMIT;');
+        } catch (cleanupErr: any) {
+          await adminClient.query('ROLLBACK;').catch(() => {});
+          cleanupErrMessage = cleanupErr?.message || String(cleanupErr);
+          console.error('[CLEANUP ERROR] Transactional cleanup failed:', cleanupErr);
         }
+      }
+
+      await appClient1.end().catch(() => {});
+      await appClient2.end().catch(() => {});
+      await appClient3.end().catch(() => {});
+      if (adminClient) {
+        await adminClient.end().catch(() => {});
+      }
+
+      if (cleanupErrMessage) {
+        assert(false, `Guaranteed Teardown Check: Transactional cleanup failed with error: ${cleanupErrMessage}`);
       }
     }
   }
@@ -686,3 +775,4 @@ runVerification().catch((err) => {
   console.error('Fatal error in verifyInvAtomicBalance1:', err);
   process.exit(1);
 });
+
