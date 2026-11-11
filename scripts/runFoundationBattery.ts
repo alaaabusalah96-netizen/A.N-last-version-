@@ -150,6 +150,8 @@ function sanitizeMessage(msg: string): string {
     .replace(/secret=[^\s]+/gi, 'secret=[REDACTED]');
 }
 
+import { mapExitCodeToStatus } from './lib/foundationBatteryPolicy.js';
+
 for (const script of scripts) {
   console.log(`\n--- Running: ${script} ---`);
   const fullPath = path.resolve(process.cwd(), script);
@@ -170,24 +172,20 @@ for (const script of scripts) {
   if (stderr) process.stderr.write(stderr);
 
   const exitCode = result.status;
-  let status: 'PASS' | 'FAIL' | 'BLOCKED' | 'SKIPPED' = 'FAIL';
+  const status = mapExitCodeToStatus(exitCode);
   let failureReason: string | undefined = undefined;
 
-  if (exitCode === 0) {
-    status = 'PASS';
+  if (status === 'PASS') {
     passedScripts++;
-  } else if (exitCode === 2) {
-    status = 'BLOCKED';
+  } else if (status === 'BLOCKED') {
     blockedScripts++;
     const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : 'Test prerequisites unfulfilled (BLOCKED)';
-  } else if (exitCode === 3) {
-    status = 'SKIPPED';
+  } else if (status === 'SKIPPED') {
     skippedScripts++;
     const match = combinedOutput.match(/\[SKIPPED\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : 'Permitted test skip condition (SKIPPED)';
   } else {
-    status = 'FAIL';
     failedScripts++;
     const match = combinedOutput.match(/\[FAIL\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : `Script exited with non-zero code ${exitCode}`;

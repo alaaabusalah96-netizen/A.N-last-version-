@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest';
-
-export function mapExitCodeToStatus(exitCode: number | null): 'PASS' | 'FAIL' | 'BLOCKED' | 'SKIPPED' {
-  if (exitCode === 0) return 'PASS';
-  if (exitCode === 2) return 'BLOCKED';
-  if (exitCode === 3) return 'SKIPPED';
-  return 'FAIL';
-}
+import { mapExitCodeToStatus, evaluateCiPolicy as evaluateSingleCiPolicy } from '../../../scripts/lib/foundationBatteryPolicy.js';
 
 export function validateBatterySummary(summary: { total: number; passed: number; failed: number; blocked: number; skipped: number }): boolean {
   return summary.total === (summary.passed + summary.failed + summary.blocked + summary.skipped);
@@ -55,6 +49,15 @@ describe('Foundation Battery Status & CI Policy Mapping', () => {
   it('validates summary counts matching total sum', () => {
     expect(validateBatterySummary({ total: 10, passed: 7, failed: 1, blocked: 1, skipped: 1 })).toBe(true);
     expect(validateBatterySummary({ total: 10, passed: 7, failed: 1, blocked: 1, skipped: 0 })).toBe(false);
+  });
+
+  it('evaluates single script policy from standalone module', () => {
+    const resBlocked = evaluateSingleCiPolicy('BLOCKED', { requireDb: true });
+    expect(resBlocked.allowed).toBe(false);
+    expect(resBlocked.reason).toContain('REQUIRE_DB=1 rejects BLOCKED scripts');
+
+    const resPass = evaluateSingleCiPolicy('PASS', { requireDb: true });
+    expect(resPass.allowed).toBe(true);
   });
 
   it('evaluates CI policy: fails when REQUIRE_DB=true and blocked/skipped exist', () => {
