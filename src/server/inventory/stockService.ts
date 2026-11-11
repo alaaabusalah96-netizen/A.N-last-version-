@@ -100,22 +100,12 @@ export class StockService {
         throw new ValidationError('الصنف المحدد غير نشط');
       }
 
-      // Lock existing balance row
-      const existingBalance = await this.stockRepo.getBalanceForUpdate(
+      // Atomic balance increment in PostgreSQL
+      const balance = await this.stockRepo.incrementBalance(
         companyId,
         input.warehouseId,
         input.itemId,
-        tx
-      );
-
-      const currentQty = existingBalance ? Number(existingBalance.qty) : 0;
-      const newQty = currentQty + input.qty;
-
-      const balance = await this.stockRepo.upsertBalance(
-        companyId,
-        input.warehouseId,
-        input.itemId,
-        newQty,
+        input.qty,
         tx
       );
 
@@ -131,19 +121,22 @@ export class StockService {
         tx
       );
 
-      await this.auditService.record({
-        actorUserId: actorId || null,
-        companyId,
-        action: 'STOCK_RECEIVE',
-        entityType: 'inv_stock_movement',
-        entityId: movement.id,
-        metadata: {
-          warehouseId: input.warehouseId,
-          itemId: input.itemId,
-          receivedQty: input.qty,
-          newQty,
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'STOCK_RECEIVE',
+          entityType: 'inv_stock_movement',
+          entityId: movement.id,
+          metadata: {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            receivedQty: input.qty,
+            newQty: balance.qty,
+          },
         },
-      });
+        { executor: tx }
+      );
 
       return { balance, movement };
     });
@@ -192,32 +185,26 @@ export class StockService {
         throw new ValidationError('الصنف المحدد غير نشط');
       }
 
-      // Lock existing balance row
-      const existingBalance = await this.stockRepo.getBalanceForUpdate(
+      // Conditional atomic decrement in PostgreSQL (ensures qty >= input.qty)
+      const balance = await this.stockRepo.decrementBalance(
         companyId,
         input.warehouseId,
         input.itemId,
+        input.qty,
         tx
       );
 
-      const currentQty = existingBalance ? Number(existingBalance.qty) : 0;
-
-      // STRICT NON-NEGATIVE STOCK GUARD
-      if (currentQty < input.qty) {
-        throw new ValidationError(
-          `رصيد غير كافٍ في المستودع للصنف (${item.code} - ${item.nameAr}). الرصيد الحالي: ${currentQty} ${item.uom}، الكمية المطلوبة للصرف: ${input.qty} ${item.uom}. لا يمكن إتمام العملية برصيد بالسالب.`
-        );
+      if (!balance) {
+        const cur = await this.stockRepo.getBalanceForUpdate(companyId, input.warehouseId, input.itemId, tx);
+        const currentQty = cur ? Number(cur.qty) : 0;
+        // STRICT NON-NEGATIVE STOCK GUARD
+        if (currentQty < input.qty) {
+          throw new ValidationError(
+            `رصيد غير كافٍ في المستودع للصنف (${item.code} - ${item.nameAr}). الرصيد الحالي: ${currentQty} ${item.uom}، الكمية المطلوبة للصرف: ${input.qty} ${item.uom}. لا يمكن إتمام العملية برصيد بالسالب.`
+          );
+        }
+        throw new ValidationError('رصيد غير كافٍ لإتمام عملية الصرف');
       }
-
-      const newQty = currentQty - input.qty;
-
-      const balance = await this.stockRepo.upsertBalance(
-        companyId,
-        input.warehouseId,
-        input.itemId,
-        newQty,
-        tx
-      );
 
       const movement = await this.stockRepo.createMovement(
         companyId,
@@ -231,19 +218,22 @@ export class StockService {
         tx
       );
 
-      await this.auditService.record({
-        actorUserId: actorId || null,
-        companyId,
-        action: 'STOCK_ISSUE',
-        entityType: 'inv_stock_movement',
-        entityId: movement.id,
-        metadata: {
-          warehouseId: input.warehouseId,
-          itemId: input.itemId,
-          issuedQty: input.qty,
-          newQty,
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'STOCK_ISSUE',
+          entityType: 'inv_stock_movement',
+          entityId: movement.id,
+          metadata: {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            issuedQty: input.qty,
+            newQty: balance.qty,
+          },
         },
-      });
+        { executor: tx }
+      );
 
       return { balance, movement };
     });
@@ -313,42 +303,43 @@ export class StockService {
         throw new ValidationError('الصنف المحدد غير نشط');
       }
 
+      // Safely ensure balance rows exist for both warehouses before acquiring row locks
+      await this.stockRepo.ensureBalanceRow(companyId, input.sourceWarehouseId, input.itemId, tx);
+      await this.stockRepo.ensureBalanceRow(companyId, input.destWarehouseId, input.itemId, tx);
+
       // Deadlock-safe lock ordering: lock balance rows in deterministic order sorted by warehouseId
       const [firstWhId, secondWhId] = [input.sourceWarehouseId, input.destWarehouseId].sort();
 
-      const balance1 = await this.stockRepo.getBalanceForUpdate(companyId, firstWhId, input.itemId, tx);
-      const balance2 = await this.stockRepo.getBalanceForUpdate(companyId, secondWhId, input.itemId, tx);
+      await this.stockRepo.getBalanceForUpdate(companyId, firstWhId, input.itemId, tx);
+      await this.stockRepo.getBalanceForUpdate(companyId, secondWhId, input.itemId, tx);
 
-      const sourceBalanceRow = firstWhId === input.sourceWarehouseId ? balance1 : balance2;
-      const destBalanceRow = firstWhId === input.destWarehouseId ? balance1 : balance2;
-
-      const sourceQty = sourceBalanceRow ? Number(sourceBalanceRow.qty) : 0;
-
-      // STRICT NON-NEGATIVE STOCK GUARD FOR SOURCE WAREHOUSE
-      if (sourceQty < input.qty) {
-        throw new ValidationError(
-          `رصيد غير كافٍ في مستودع المصدر (${sourceWh.nameAr}) للصنف (${item.code} - ${item.nameAr}). الرصيد الحالي: ${sourceQty} ${item.uom}، الكمية المطلوبة للتحويل: ${input.qty} ${item.uom}.`
-        );
-      }
-
-      const destQty = destBalanceRow ? Number(destBalanceRow.qty) : 0;
-
-      const newSourceQty = sourceQty - input.qty;
-      const newDestQty = destQty + input.qty;
-
-      const sourceBalance = await this.stockRepo.upsertBalance(
+      // Conditional atomic decrement on source warehouse balance
+      const sourceBalance = await this.stockRepo.decrementBalance(
         companyId,
         input.sourceWarehouseId,
         input.itemId,
-        newSourceQty,
+        input.qty,
         tx
       );
 
-      const destBalance = await this.stockRepo.upsertBalance(
+      if (!sourceBalance) {
+        const curSource = await this.stockRepo.getBalanceForUpdate(companyId, input.sourceWarehouseId, input.itemId, tx);
+        const sourceQty = curSource ? Number(curSource.qty) : 0;
+        // STRICT NON-NEGATIVE STOCK GUARD FOR SOURCE WAREHOUSE
+        if (sourceQty < input.qty) {
+          throw new ValidationError(
+            `رصيد غير كافٍ في مستودع المصدر (${sourceWh.nameAr}) للصنف (${item.code} - ${item.nameAr}). الرصيد الحالي: ${sourceQty} ${item.uom}، الكمية المطلوبة للتحويل: ${input.qty} ${item.uom}.`
+          );
+        }
+        throw new ValidationError('رصيد غير كافٍ في مستودع المصدر');
+      }
+
+      // Atomic increment on destination warehouse balance
+      const destBalance = await this.stockRepo.incrementBalance(
         companyId,
         input.destWarehouseId,
         input.itemId,
-        newDestQty,
+        input.qty,
         tx
       );
 
@@ -378,19 +369,22 @@ export class StockService {
         tx
       );
 
-      await this.auditService.record({
-        actorUserId: actorId || null,
-        companyId,
-        action: 'INVENTORY_TRANSFER',
-        entityType: 'inv_stock_movement',
-        entityId: transferId,
-        metadata: {
-          sourceWarehouseId: input.sourceWarehouseId,
-          destWarehouseId: input.destWarehouseId,
-          itemId: input.itemId,
-          qty: input.qty,
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'INVENTORY_TRANSFER',
+          entityType: 'inv_stock_movement',
+          entityId: transferId,
+          metadata: {
+            sourceWarehouseId: input.sourceWarehouseId,
+            destWarehouseId: input.destWarehouseId,
+            itemId: input.itemId,
+            qty: input.qty,
+          },
         },
-      });
+        { executor: tx }
+      );
 
       return {
         transferId,

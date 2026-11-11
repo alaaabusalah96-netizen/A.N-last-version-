@@ -427,6 +427,24 @@
     4. Diagnostic Test Alignment: Updated `scripts/verifyFixAbd1.ts` (S3) and `scripts/verifyAbd1LiveProof.ts` (static contract) to assert the structural order of existence check before permission check.
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-FIX-INVENTORY-ATOMIC-BALANCE-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Original Concurrency Issue: `stockService.ts` previously read balances via `getBalanceForUpdate`, calculated new quantities in JavaScript, and performed absolute `upsertBalance` updates. For absent balance rows, `getBalanceForUpdate` returned null without acquiring a row lock, leading to lost updates on concurrent receives and transfers, as well as race conditions allowing negative stock during concurrent issues.
+  - Implemented Atomic Operations:
+    1. Atomic Increment (`incrementBalance`): In `stockRepository.ts`, implemented `INSERT INTO inv_stock_balances ... ON CONFLICT (company_id, warehouse_id, item_id) DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty RETURNING ...`, executing addition entirely within PostgreSQL.
+    2. Conditional Decrement (`decrementBalance`): In `stockRepository.ts`, implemented conditional `UPDATE inv_stock_balances SET qty = qty - $4 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND qty >= $4 RETURNING ...`, returning null when stock is insufficient or row is missing without creating negative stock.
+    3. Safe Row Initialization (`ensureBalanceRow`): Implemented `INSERT ... ON CONFLICT DO NOTHING` ensuring balance rows exist prior to locking.
+    4. Atomic Transfer: In `stockService.ts`, ensured balance rows exist, acquired row locks in deterministic sorted warehouse order (`[sourceWh, destWh].sort()`), decremented source conditionally, incremented destination atomically, created paired movements, and recorded audit logs in the same tenant transaction.
+  - Transaction Guarantees: All operations in `receiveStock`, `issueStock`, and `transfer` execute within `withTenantTransaction(companyId, async (tx) => ...)`. Movement and audit writes share the exact same transaction executor (`{ executor: tx }`), guaranteeing atomic rollback on any failure with zero partial state.
+  - Tests & Verification:
+    * S1–S6 static invariant checks: PASSED.
+    * T1–T7 live PostgreSQL concurrency proof harness created in `scripts/verifyInvAtomicBalance1.ts` (independent connections proven via `pg_backend_pid()`, concurrent receive sum 25, concurrent transfer into absent destination sum 50, concurrent issue exactly one winner, reverse transfers deadlock-free, rollback atomicity, repository check constraint, tenant isolation).
+    * Standalone test (`npm run test:inv-atomic-balance-1`): PASSED.
+    * Battery Registration: Justified and registered in `scripts/runFoundationBattery.ts` (proves critical permanent invariant, cleanly skips when local DB is absent, zero conflict with existing battery tests).
+    * Battery Execution: PASSED (79 scripts: 63 PASSED, 0 FAILED, 16 cleanly BLOCKED due to absence of local DB).
+  - Scope Discipline & Deferred Limitations: Stock idempotency, decimal precision refactoring, and GRN atomicity/integrity remain separate deferred items (not marked as fixed).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

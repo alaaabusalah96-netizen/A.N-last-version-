@@ -60,6 +60,7 @@
     "test:inv-core-1": "tsx scripts/verifyInvCore1.ts",
     "test:inv-transfer-1": "tsx scripts/verifyInvTransfer1.ts",
     "test:inv-item-card-1": "tsx scripts/verifyInvItemCard1.ts",
+    "test:inv-atomic-balance-1": "tsx scripts/verifyInvAtomicBalance1.ts",
     "test:purch-core-1": "tsx scripts/verifyPurchCore1.ts",
     "test:fix-n1-org-scope-status-1": "tsx scripts/verifyFixN1OrgScopeStatus1.ts",
     "test:fix-n2-composite-fk-ledger-1": "tsx scripts/verifyFixN2CompositeFkLedger1.ts",

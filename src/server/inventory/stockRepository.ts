@@ -52,6 +52,68 @@ export class StockRepository {
     return res.rows[0] || null;
   }
 
+  async ensureBalanceRow(
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+    executor: DbExecutor
+  ): Promise<void> {
+    const sql = `
+      INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
+      VALUES ($1, $2, $3, 0, NOW())
+      ON CONFLICT (company_id, warehouse_id, item_id) DO NOTHING
+    `;
+    await executor.query(sql, [companyId, warehouseId, itemId]);
+  }
+
+  async incrementBalance(
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+    qty: number,
+    executor: DbExecutor
+  ): Promise<StockBalance> {
+    const sql = `
+      INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (company_id, warehouse_id, item_id)
+      DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty, updated_at = NOW()
+      RETURNING 
+        company_id as "companyId", 
+        warehouse_id as "warehouseId", 
+        item_id as "itemId", 
+        qty::float as "qty", 
+        updated_at as "updatedAt"
+    `;
+    const res = await executor.query<StockBalance>(sql, [companyId, warehouseId, itemId, qty]);
+    return res.rows[0];
+  }
+
+  async decrementBalance(
+    companyId: string,
+    warehouseId: string,
+    itemId: string,
+    qty: number,
+    executor: DbExecutor
+  ): Promise<StockBalance | null> {
+    const sql = `
+      UPDATE inv_stock_balances
+      SET qty = qty - $4, updated_at = NOW()
+      WHERE company_id = $1
+        AND warehouse_id = $2
+        AND item_id = $3
+        AND qty >= $4
+      RETURNING 
+        company_id as "companyId", 
+        warehouse_id as "warehouseId", 
+        item_id as "itemId", 
+        qty::float as "qty", 
+        updated_at as "updatedAt"
+    `;
+    const res = await executor.query<StockBalance>(sql, [companyId, warehouseId, itemId, qty]);
+    return res.rows[0] || null;
+  }
+
   async upsertBalance(
     companyId: string,
     warehouseId: string,
