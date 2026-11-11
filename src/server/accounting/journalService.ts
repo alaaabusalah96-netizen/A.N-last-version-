@@ -124,7 +124,7 @@ export class JournalService {
           entryDate: draft.entryDate,
           linesCount: input.lines.length,
         },
-      });
+      }, { executor: tx });
 
       return draft;
     };
@@ -262,7 +262,7 @@ export class JournalService {
           periodCode: period.code,
           totalAmount: totalDebit / 100,
         },
-      });
+      }, { executor: tx });
 
       const postedEntry = await this.journalRepo.findById(companyId, entryId, tx);
       return postedEntry!;
@@ -399,7 +399,7 @@ export class JournalService {
           periodId: revPeriod.id,
           periodCode: revPeriod.code,
         },
-      });
+      }, { executor: tx });
 
       const finalReversal = await this.journalRepo.findById(companyId, draftReversal.id, tx);
       return finalReversal!;

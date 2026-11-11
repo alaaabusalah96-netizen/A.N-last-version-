@@ -107,7 +107,7 @@ export class GrnService {
         entityType: 'purch_grn',
         entityId: grn.id,
         metadata: { supplierId: input.supplierId, warehouseId: input.warehouseId, lineCount: input.lines.length },
-      });
+      }, { executor: tx });
 
       return grn;
     });
@@ -216,7 +216,7 @@ export class GrnService {
         entityType: 'purch_grn',
         entityId: grnId,
         metadata: { grnNo, warehouseId: grn.warehouseId, lineCount: grn.lines.length },
-      });
+      }, { executor: tx });
 
       const updatedGrn = await this.grnRepo.findById(companyId, grnId, tx);
       return updatedGrn!;
