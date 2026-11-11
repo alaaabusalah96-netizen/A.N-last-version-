@@ -1053,6 +1053,54 @@ async function runVerification() {
     // --- TASK 3: T9.7 EXACT TRANSFER MOVEMENT PROOF ---
     console.log('\n--- TASK 3: T9.7 Exact Transfer Movement Proof ---');
 
+    // 1) Isolated warehouses WH_FAULT_SRC / WH_FAULT_DST (+ register ownership)
+    await appClient1.query('BEGIN;');
+    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
+    const whFaultSrcRes = await appClient1.query<{ id: string }>(
+      "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, $2, 'مستودع الخطأ المصدر') RETURNING id;",
+      [compId, `WH_FAULT_SRC_${suffix}`]
+    );
+    const whFaultSrc = whFaultSrcRes.rows[0].id;
+    registry.registerWarehouse(whFaultSrc);
+
+    const whFaultDstRes = await appClient1.query<{ id: string }>(
+      "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, $2, 'مستودع الخطأ الوجهة') RETURNING id;",
+      [compId, `WH_FAULT_DST_${suffix}`]
+    );
+    const whFaultDst = whFaultDstRes.rows[0].id;
+    registry.registerWarehouse(whFaultDst);
+
+    await appClient1.query('COMMIT;');
+
+    // 2) Seed balance via defaultStockService.receiveStock with qty >= 5 (with movement, no raw balance UPDATE alone)
+    const seedRes = await defaultStockService.receiveStock(compId, {
+      warehouseId: whFaultSrc,
+      itemId,
+      qty: 20,
+      memo: 'T9.7 seed receive'
+    });
+    registry.registerMovement(seedRes.movement.id);
+    registry.registerBalance(compId, whFaultSrc, itemId);
+
+    // 3) Read pre-balances and assert preSourceQty >= 5 before transfer
+    await appClient1.query('BEGIN;');
+    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+    const preRollbackSourceRes = await appClient1.query<{ qty: number }>(
+      "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+      [compId, whFaultSrc, itemId]
+    );
+    const preRollbackDestRes = await appClient1.query<{ qty: number }>(
+      "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+      [compId, whFaultDst, itemId]
+    );
+    await appClient1.query('COMMIT;');
+
+    const preRbSourceQty = preRollbackSourceRes.rows[0]?.qty ?? 0;
+    const preRbDestQty = preRollbackDestRes.rows[0]?.qty ?? 0;
+
+    assert(preRbSourceQty >= 5, `T9.7 Setup: preSourceQty (${preRbSourceQty}) is >= 5`);
+
     const faultingAudit = new FaultingAuditService(defaultAuditRepository);
     const faultingStockService = new StockService(
       defaultStockRepository,
@@ -1061,33 +1109,34 @@ async function runVerification() {
       faultingAudit
     );
 
-    await appClient1.query('BEGIN;');
-    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
-    const preRollbackSourceRes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whA, itemId]);
-    const preRollbackDestRes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whB, itemId]);
-    await appClient1.query('COMMIT;');
-
-    const preRbSourceQty = preRollbackSourceRes.rows[0]?.qty;
-    const preRbDestQty = preRollbackDestRes.rows[0]?.qty;
-
     let faultingServiceFailed = false;
     let faultingErrMsg = '';
     try {
       await faultingStockService.transfer(
         compId,
-        { sourceWarehouseId: whA, destWarehouseId: whB, itemId, qty: 5, memo: 'Faulting Transfer' }
+        { sourceWarehouseId: whFaultSrc, destWarehouseId: whFaultDst, itemId, qty: 5, memo: 'Faulting Transfer' }
       );
     } catch (err: any) {
       faultingErrMsg = err.message || '';
       if (faultingErrMsg === 'INTENTIONAL_AUDIT_SERVICE_TEST_FAILURE') {
         faultingServiceFailed = true;
+      } else {
+        console.error(`[T9.7 UNEXPECTED ERROR]: ${faultingErrMsg}`);
       }
     }
 
+    assert(faultingServiceFailed, `T9.7: transfer failed with exact INTENTIONAL_AUDIT_SERVICE_TEST_FAILURE (actual error: '${faultingErrMsg}')`);
+
     await appClient1.query('BEGIN;');
     await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
-    const postRollbackSourceRes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whA, itemId]);
-    const postRollbackDestRes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whB, itemId]);
+    const postRollbackSourceRes = await appClient1.query<{ qty: number }>(
+      "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+      [compId, whFaultSrc, itemId]
+    );
+    const postRollbackDestRes = await appClient1.query<{ qty: number }>(
+      "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+      [compId, whFaultDst, itemId]
+    );
 
     const capturedAuditId = faultingAudit.lastCapturedAuditId;
     const capturedSourceMoveId = faultingAudit.lastCapturedSourceMovementId;
@@ -1110,8 +1159,8 @@ async function runVerification() {
     }
     await appClient1.query('COMMIT;');
 
-    const postRbSourceQty = postRollbackSourceRes.rows[0]?.qty;
-    const postRbDestQty = postRollbackDestRes.rows[0]?.qty;
+    const postRbSourceQty = postRollbackSourceRes.rows[0]?.qty ?? 0;
+    const postRbDestQty = postRollbackDestRes.rows[0]?.qty ?? 0;
 
     assert(
       faultingServiceFailed &&
