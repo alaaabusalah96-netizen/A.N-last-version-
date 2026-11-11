@@ -1309,8 +1309,9 @@ async function runVerification() {
 
         assert(companyCheck.rows[0]?.count > 0, `Protected Records Check: Test companies (${companyCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
         assert(auditCheck.rows[0]?.count > 0, `Protected Records Check: Audit logs (${auditCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
-      } catch (checkErr) {
+      } catch (checkErr: any) {
         console.error('[CLEANUP CHECK ERROR]', checkErr);
+        assert(false, `Protected Records Check FAILED: ${checkErr.message || String(checkErr)}`);
       }
     }
 

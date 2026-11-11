@@ -1,3 +1,4 @@
+import { withTenantTransaction } from '../db/transactionManager.js';
 import { defaultCompanySettingsRepository, CompanySettingsRepository } from './companySettingsRepository.js';
 import { UpsertCompanySettingsInput } from './companySettingsTypes.js';
 import { defaultAuditService } from '../audit/auditService.js';
@@ -27,36 +28,38 @@ export class CompanySettingsService {
   }
 
   async upsertSettings(actorId: string, companyId: string, input: UpsertCompanySettingsInput): Promise<CompanySettings> {
-    // Basic validation
-    if (input.fiscalYearStartMonth !== undefined && (input.fiscalYearStartMonth < 1 || input.fiscalYearStartMonth > 12)) {
-      throw new ValidationError('Month must be between 1 and 12');
-    }
-    if (input.fiscalYearStartDay !== undefined && (input.fiscalYearStartDay < 1 || input.fiscalYearStartDay > 28)) {
-      throw new ValidationError('Day must be between 1 and 28');
-    }
+    return await withTenantTransaction(companyId, async (tx) => {
+      // Basic validation
+      if (input.fiscalYearStartMonth !== undefined && (input.fiscalYearStartMonth < 1 || input.fiscalYearStartMonth > 12)) {
+        throw new ValidationError('Month must be between 1 and 12');
+      }
+      if (input.fiscalYearStartDay !== undefined && (input.fiscalYearStartDay < 1 || input.fiscalYearStartDay > 28)) {
+        throw new ValidationError('Day must be between 1 and 28');
+      }
 
-    // Validate accounts belong to company
-    if (input.inventoryAccountId) {
-      const account = await defaultAccountRepository.findById(companyId, input.inventoryAccountId);
-      if (!account) throw new ValidationError('Invalid inventory account');
-    }
-    if (input.purchasesClearingAccountId) {
-      const account = await defaultAccountRepository.findById(companyId, input.purchasesClearingAccountId);
-      if (!account) throw new ValidationError('Invalid purchases clearing account');
-    }
+      // Validate accounts belong to company (only if string ID is provided, allow null to skip)
+      if (typeof input.inventoryAccountId === 'string') {
+        const account = await defaultAccountRepository.findById(companyId, input.inventoryAccountId, tx);
+        if (!account) throw new ValidationError('Invalid inventory account');
+      }
+      if (typeof input.purchasesClearingAccountId === 'string') {
+        const account = await defaultAccountRepository.findById(companyId, input.purchasesClearingAccountId, tx);
+        if (!account) throw new ValidationError('Invalid purchases clearing account');
+      }
 
-    const settings = await this.repo.upsert(companyId, input, actorId);
+      const settings = await this.repo.upsert(companyId, input, actorId, tx);
 
-    await defaultAuditService.record({
-      actorUserId: actorId,
-      companyId,
-      action: 'COMPANY_SETTINGS_UPDATE',
-      entityType: 'company_settings',
-      entityId: companyId,
-      metadata: { patch: input }
+      await defaultAuditService.record({
+        actorUserId: actorId,
+        companyId,
+        action: 'COMPANY_SETTINGS_UPDATE',
+        entityType: 'company_settings',
+        entityId: companyId,
+        metadata: { patch: input }
+      }, { executor: tx });
+
+      return settings;
     });
-
-    return settings;
   }
 }
 

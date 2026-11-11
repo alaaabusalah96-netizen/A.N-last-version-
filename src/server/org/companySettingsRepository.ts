@@ -1,4 +1,5 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
+import { DbExecutor } from '../db/types.js';
 import { CompanySettings, UpsertCompanySettingsInput } from './companySettingsTypes.js';
 
 export class CompanySettingsRepository {
@@ -26,8 +27,8 @@ export class CompanySettingsRepository {
     });
   }
 
-  async upsert(companyId: string, input: UpsertCompanySettingsInput, actorId: string): Promise<CompanySettings> {
-    return await withTenantTransaction(companyId, async (executor) => {
+  async upsert(companyId: string, input: UpsertCompanySettingsInput, actorId: string, customExecutor?: DbExecutor): Promise<CompanySettings> {
+    const run = async (executor: DbExecutor) => {
       const sql = `
         INSERT INTO company_settings (
           company_id, 
@@ -62,8 +63,8 @@ export class CompanySettingsRepository {
           fiscal_year_start_day = COALESCE(EXCLUDED.fiscal_year_start_day, company_settings.fiscal_year_start_day),
           display_name_finance = COALESCE(EXCLUDED.display_name_finance, company_settings.display_name_finance),
           locale = COALESCE(EXCLUDED.locale, company_settings.locale),
-          inventory_account_id = COALESCE(EXCLUDED.inventory_account_id, company_settings.inventory_account_id),
-          purchases_clearing_account_id = COALESCE(EXCLUDED.purchases_clearing_account_id, company_settings.purchases_clearing_account_id),
+          inventory_account_id = CASE WHEN $11 THEN EXCLUDED.inventory_account_id ELSE company_settings.inventory_account_id END,
+          purchases_clearing_account_id = CASE WHEN $12 THEN EXCLUDED.purchases_clearing_account_id ELSE company_settings.purchases_clearing_account_id END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -89,12 +90,17 @@ export class CompanySettingsRepository {
         input.displayNameFinance || null,
         input.locale || null,
         actorId,
-        input.inventoryAccountId || null,
-        input.purchasesClearingAccountId || null
+        input.inventoryAccountId === undefined ? null : input.inventoryAccountId,
+        input.purchasesClearingAccountId === undefined ? null : input.purchasesClearingAccountId,
+        input.inventoryAccountId !== undefined,
+        input.purchasesClearingAccountId !== undefined
       ]);
 
       return res.rows[0];
-    });
+    };
+
+    if (customExecutor) return run(customExecutor);
+    return await withTenantTransaction(companyId, run);
   }
 }
 
