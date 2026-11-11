@@ -1,7 +1,9 @@
 import { defaultCompanySettingsRepository, CompanySettingsRepository } from './companySettingsRepository.js';
-import { CompanySettings, UpsertCompanySettingsInput } from './companySettingsTypes.js';
+import { UpsertCompanySettingsInput } from './companySettingsTypes.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import { ValidationError } from '../http/errors.js';
+import { defaultAccountRepository } from '../accounting/accountRepository.js';
+import { CompanySettings } from './companySettingsTypes.js';
 
 export class CompanySettingsService {
   constructor(private repo: CompanySettingsRepository = defaultCompanySettingsRepository) {}
@@ -31,6 +33,16 @@ export class CompanySettingsService {
     }
     if (input.fiscalYearStartDay !== undefined && (input.fiscalYearStartDay < 1 || input.fiscalYearStartDay > 28)) {
       throw new ValidationError('Day must be between 1 and 28');
+    }
+
+    // Validate accounts belong to company
+    if (input.inventoryAccountId) {
+      const account = await defaultAccountRepository.findById(companyId, input.inventoryAccountId);
+      if (!account) throw new ValidationError('Invalid inventory account');
+    }
+    if (input.purchasesClearingAccountId) {
+      const account = await defaultAccountRepository.findById(companyId, input.purchasesClearingAccountId);
+      if (!account) throw new ValidationError('Invalid purchases clearing account');
     }
 
     const settings = await this.repo.upsert(companyId, input, actorId);

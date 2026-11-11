@@ -15,6 +15,8 @@ interface CompanySettings {
   fiscalYearStartDay: number;
   displayNameFinance: string | null;
   locale: string | null;
+  inventoryAccountId: string | null;
+  purchasesClearingAccountId: string | null;
 }
 
 interface CompanySettingsPanelProps {
@@ -25,6 +27,7 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [settings, setSettings] = useState<CompanySettings | null>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,10 +56,18 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
     setError(null);
     setSuccess(null);
     try {
-      const res = await apiFetch(`/api/companies/${companyId}/settings`);
-      if (!res.ok) throw new Error('تعذر جلب إعدادات الشركة');
-      const data = await res.json();
-      setSettings(data.settings);
+      const [settingsRes, accountsRes] = await Promise.all([
+        apiFetch(`/api/companies/${companyId}/settings`),
+        apiFetch(`/api/accounting/accounts?companyId=${companyId}`)
+      ]);
+      if (!settingsRes.ok) throw new Error('تعذر جلب إعدادات الشركة');
+      if (!accountsRes.ok) throw new Error('تعذر جلب الحسابات');
+      
+      const settingsData = await settingsRes.json();
+      const accountsData = await accountsRes.json();
+      
+      setSettings(settingsData.settings);
+      setAccounts(accountsData.accounts || []);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -242,6 +253,44 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
                   placeholder="مثلاً: الإدارة المالية"
                 />
+              </div>
+
+              {/* Inventory Account */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                  حساب المخزون
+                </label>
+                <select
+                  value={settings.inventoryAccountId || ''}
+                  onChange={(e) => updateField('inventoryAccountId', e.target.value || null)}
+                  disabled={isReadOnly}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">— غير محدد —</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Purchases Clearing Account */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                  حساب مقاصة المشتريات
+                </label>
+                <select
+                  value={settings.purchasesClearingAccountId || ''}
+                  onChange={(e) => updateField('purchasesClearingAccountId', e.target.value || null)}
+                  disabled={isReadOnly}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">— غير محدد —</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
