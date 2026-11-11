@@ -1,17 +1,42 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import dns from 'node:dns/promises';
 import pg from 'pg';
 import { buildPgConfig } from '../src/server/db/connection.js';
+import { defaultStockRepository } from '../src/server/inventory/stockRepository.js';
+import { defaultStockService } from '../src/server/inventory/stockService.js';
+import { closeAllExecutors } from '../src/server/db/index.js';
+import { DbExecutor, QueryResult } from '../src/server/db/types.js';
 
-export function isAllowedTestDb(urlStr: string): { allowed: boolean; reason?: string; host?: string } {
+function isIPAllowed(ip: string): boolean {
+  if (!ip) return false;
+  const cleanIp = ip.toLowerCase().trim();
+  if (cleanIp.startsWith('127.')) return true;
+  if (cleanIp === '::1' || cleanIp === '0:0:0:0:0:0:0:1') return true;
+  if (cleanIp.startsWith('fe80:')) return true;
+
+  if (cleanIp.startsWith('10.')) return true;
+  if (cleanIp.startsWith('192.168.')) return true;
+  if (cleanIp.startsWith('172.')) {
+    const parts = cleanIp.split('.');
+    if (parts.length >= 2) {
+      const secondOctet = parseInt(parts[1], 10);
+      if (secondOctet >= 16 && secondOctet <= 31) return true;
+    }
+  }
+
+  return false;
+}
+
+export async function isAllowedTestDbAsync(urlStr: string): Promise<{ allowed: boolean; reason?: string; host?: string; ips?: string[] }> {
   if (!urlStr || typeof urlStr !== 'string' || urlStr.trim() === '') {
     return { allowed: false, reason: 'Empty or missing database URL' };
   }
   try {
     const parsed = new URL(urlStr);
-    const host = parsed.hostname.toLowerCase();
+    const hostRaw = parsed.hostname.toLowerCase();
+    const host = hostRaw.replace(/^\[|\]$/g, '');
 
-    // 1. Unconditionally reject known hosted / cloud DB providers
     if (
       host.includes('supabase.co') ||
       host.includes('pooler.supabase') ||
@@ -23,37 +48,133 @@ export function isAllowedTestDb(urlStr: string): { allowed: boolean; reason?: st
       host.includes('render.com') ||
       host.includes('railway.app')
     ) {
-      return { allowed: false, reason: `Hosted cloud database prohibited for live tests: ${host}`, host };
+      return { allowed: false, reason: `Hosted cloud database host prohibited for live tests: ${host}`, host };
     }
 
-    // 2. Strict allowlist of allowed local / CI disposable loopback hosts
-    const allowedHosts = new Set([
-      'localhost',
-      '127.0.0.1',
-      '::1',
-      '[::1]',
-      'postgres', // Standard Docker service host in CI pipelines
-      'host.docker.internal',
-      'local-pg',
-    ]);
-
-    if (allowedHosts.has(host)) {
-      return { allowed: true, host };
+    let addresses: { address: string; family: number }[] = [];
+    try {
+      addresses = await dns.lookup(host, { all: true });
+    } catch (dnsErr: any) {
+      return { allowed: false, reason: `DNS resolution failed for hostname '${host}': ${dnsErr.message || String(dnsErr)}`, host };
     }
 
-    return { allowed: false, reason: `Host '${host}' is not in the explicit allowed test DB allowlist`, host };
+    if (!addresses || addresses.length === 0) {
+      return { allowed: false, reason: `No IP addresses resolved for hostname '${host}'`, host };
+    }
+
+    const resolvedIps = addresses.map((a) => a.address);
+
+    for (const ip of resolvedIps) {
+      if (!isIPAllowed(ip)) {
+        return {
+          allowed: false,
+          reason: `Hostname '${host}' resolved to non-loopback/public IP address '${ip}'`,
+          host,
+          ips: resolvedIps,
+        };
+      }
+    }
+
+    return { allowed: true, host, ips: resolvedIps };
   } catch {
     return { allowed: false, reason: 'Invalid database URL format' };
   }
 }
 
-// Deprecated alias for backwards compatibility
+export function isAllowedTestDb(urlStr: string): { allowed: boolean; reason?: string; host?: string } {
+  if (!urlStr || typeof urlStr !== 'string' || urlStr.trim() === '') {
+    return { allowed: false, reason: 'Empty or missing database URL' };
+  }
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host.includes('supabase.co') ||
+      host.includes('pooler.supabase') ||
+      host.includes('aws.neon.tech') ||
+      host.includes('rds.amazonaws.com')
+    ) {
+      return { allowed: false, reason: `Hosted cloud database host prohibited: ${host}`, host };
+    }
+    return { allowed: true, host };
+  } catch {
+    return { allowed: false, reason: 'Invalid database URL' };
+  }
+}
+
 export function isProductionOrSupabaseDb(urlStr: string): boolean {
   return !isAllowedTestDb(urlStr).allowed;
 }
 
+function clientToExecutor(client: pg.Client): DbExecutor {
+  return {
+    async query<T = unknown>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
+      const res = await client.query(sql, params as any[]);
+      return { rows: res.rows as T[], rowCount: res.rowCount ?? 0 };
+    },
+    async withTransaction<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
+      await client.query('BEGIN;');
+      try {
+        const result = await fn(this);
+        await client.query('COMMIT;');
+        return result;
+      } catch (err) {
+        await client.query('ROLLBACK;');
+        throw err;
+      }
+    },
+    async health() {
+      try {
+        await client.query('SELECT 1;');
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, detail: err.message };
+      }
+    },
+    async close() {
+      await client.end();
+    },
+  };
+}
+
+async function runHostValidationTests(assert: (cond: boolean, msg: string) => void) {
+  console.log('\n--- TASK 1: Strict Database Host Validation Tests ---');
+
+  const c1 = await isAllowedTestDbAsync('postgres://an_app:pass@localhost:5432/an_test');
+  assert(c1.allowed, `Host Validation 1 (localhost): Allowed loopback host (resolved IP: ${c1.ips?.join(', ')})`);
+
+  const c2 = await isAllowedTestDbAsync('postgres://an_app:pass@127.0.0.1:5432/an_test');
+  assert(c2.allowed, `Host Validation 2 (127.0.0.1): Allowed loopback IP`);
+
+  const c3 = await isAllowedTestDbAsync('postgres://an_app:pass@[::1]:5432/an_test');
+  assert(c3.allowed, `Host Validation 3 (::1): Allowed IPv6 loopback`);
+
+  const c4 = await isAllowedTestDbAsync('postgres://an_app:pass@localhost:5432/an_test');
+  assert(c4.allowed, `Host Validation 4 (Internal loopback hostname): Allowed`);
+
+  const c5 = await isAllowedTestDbAsync('postgres://an_app:pass@google.com:5432/an_test');
+  assert(!c5.allowed && Boolean(c5.reason?.includes('non-loopback/public IP')), `Host Validation 5 (google.com): Rejected public IP hostname`);
+
+  const c6 = await isAllowedTestDbAsync('postgres://an_app:pass@8.8.8.8:5432/an_test');
+  assert(!c6.allowed, `Host Validation 6 (Public IP 8.8.8.8): Rejected public IP address`);
+
+  const c7 = await isAllowedTestDbAsync('postgres://an_app:pass@invalid-test-host-987654321.invalid:5432/an_test');
+  assert(!c7.allowed && Boolean(c7.reason?.includes('DNS resolution failed')), `Host Validation 7 (invalid hostname): Rejected unresolvable hostname`);
+
+  const c8a = await isAllowedTestDbAsync('postgres://postgres:pass@db.supabase.co:5432/postgres');
+  const c8b = await isAllowedTestDbAsync('postgres://user:pass@ep-test.aws.neon.tech/neondb');
+  const c8c = await isAllowedTestDbAsync('postgres://user:pass@mydb.c12345.rds.amazonaws.com:5432/mydb');
+  assert(!c8a.allowed && !c8b.allowed && !c8c.allowed, `Host Validation 8 (Cloud DB URLs): Supabase, Neon, RDS all strictly rejected`);
+
+  const oldEnv = process.env.INV_ALLOW_DISPOSABLE;
+  process.env.INV_ALLOW_DISPOSABLE = '1';
+  const c9 = await isAllowedTestDbAsync('postgres://postgres:pass@db.supabase.co:5432/postgres');
+  process.env.INV_ALLOW_DISPOSABLE = oldEnv;
+  assert(!c9.allowed, `Host Validation 9 (INV_ALLOW_DISPOSABLE=1 with cloud host): Remote host remains strictly rejected`);
+}
+
 async function runVerification() {
-  console.log('=== RUNNING INVENTORY ATOMIC BALANCE VERIFICATION (AN-FIX-INVENTORY-ATOMIC-PROOF-2) ===\n');
+  console.log('=== RUNNING INVENTORY ATOMIC BALANCE VERIFICATION (AN-FIX-INVENTORY-PROOF-HARDENING-3) ===\n');
   let passed = 0;
   let failed = 0;
   let skipped = 0;
@@ -75,10 +196,11 @@ async function runVerification() {
 
   const root = process.cwd();
 
-  // --- STATIC INVARIANT CHECKS (S1 - S6) ---
-  console.log('--- Static Code Invariant Checks ---');
+  await runHostValidationTests(assert);
 
-  // S1: stockRepository.ts contains incrementBalance using ON CONFLICT DO UPDATE
+  // --- STATIC INVARIANT CHECKS (S1 - S6) ---
+  console.log('\n--- Static Code Invariant Checks (S1 - S6) ---');
+
   const stockRepoPath = path.join(root, 'src/server/inventory/stockRepository.ts');
   const stockRepoContent = fs.readFileSync(stockRepoPath, 'utf8');
   const hasAtomicIncrement =
@@ -87,20 +209,17 @@ async function runVerification() {
     stockRepoContent.includes('DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty');
   assert(hasAtomicIncrement, 'S1: stockRepository.ts implements atomic incrementBalance via ON CONFLICT DO UPDATE');
 
-  // S2: stockRepository.ts contains decrementBalance using conditional UPDATE ... WHERE qty >= amount
   const hasAtomicDecrement =
     stockRepoContent.includes('decrementBalance') &&
     stockRepoContent.includes('UPDATE inv_stock_balances') &&
     stockRepoContent.includes('qty >= $4');
   assert(hasAtomicDecrement, 'S2: stockRepository.ts implements conditional atomic decrementBalance (WHERE qty >= amount)');
 
-  // S3: stockRepository.ts contains ensureBalanceRow using ON CONFLICT DO NOTHING
   const hasEnsureBalanceRow =
     stockRepoContent.includes('ensureBalanceRow') &&
     stockRepoContent.includes('ON CONFLICT (company_id, warehouse_id, item_id) DO NOTHING');
   assert(hasEnsureBalanceRow, 'S3: stockRepository.ts implements ensureBalanceRow with ON CONFLICT DO NOTHING');
 
-  // S4: stockService.ts receiveStock uses incrementBalance and transactional audit
   const stockServicePath = path.join(root, 'src/server/inventory/stockService.ts');
   const stockServiceContent = fs.readFileSync(stockServicePath, 'utf8');
   const hasAtomicReceive =
@@ -108,13 +227,11 @@ async function runVerification() {
     stockServiceContent.includes("{ executor: tx }");
   assert(hasAtomicReceive, 'S4: stockService.ts receiveStock uses atomic incrementBalance with transactional audit');
 
-  // S5: stockService.ts issueStock uses decrementBalance with strict non-negative guard
   const hasAtomicIssue =
     stockServiceContent.includes('this.stockRepo.decrementBalance') &&
     stockServiceContent.includes('currentQty < input.qty');
   assert(hasAtomicIssue, 'S5: stockService.ts issueStock uses conditional decrementBalance with non-negative guard');
 
-  // S6: stockService.ts transfer uses ensureBalanceRow, sorted lock ordering, and atomic operations
   const hasAtomicTransfer =
     stockServiceContent.includes('this.stockRepo.ensureBalanceRow') &&
     stockServiceContent.includes('Deadlock-safe lock ordering') &&
@@ -122,14 +239,14 @@ async function runVerification() {
     stockServiceContent.includes('this.stockRepo.incrementBalance');
   assert(hasAtomicTransfer, 'S6: stockService.ts transfer implements ensureBalanceRow, sorted locking, and atomic updates');
 
-  // --- LIVE POSTGRESQL INTEGRATION PROOF (T1 - T7) ---
-  console.log('\n--- PostgreSQL Concurrency & Atomicity Proof (T1 - T7) ---');
+  // --- LIVE POSTGRESQL INTEGRATION PROOF (T1 - T9) ---
+  console.log('\n--- PostgreSQL Concurrency, RLS & Service Integration Proof (T1 - T9) ---');
 
   const appDbUrl = process.env.DATABASE_URL;
   const adminDbUrl = process.env.MIGRATION_DATABASE_URL;
   const isDbRequired = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true' || process.env.CI === 'true';
 
-  const appDbCheck = appDbUrl ? isAllowedTestDb(appDbUrl) : { allowed: false, reason: 'DATABASE_URL is not configured' };
+  const appDbCheck = appDbUrl ? await isAllowedTestDbAsync(appDbUrl) : { allowed: false, reason: 'DATABASE_URL is not configured' };
 
   if (!appDbUrl || appDbUrl.trim() === '' || !appDbCheck.allowed) {
     if (isDbRequired) {
@@ -137,14 +254,13 @@ async function runVerification() {
       assert(false, `DATABASE_URL validation failed: ${appDbCheck.reason}`);
       process.exit(1);
     } else {
-      reportSkipped(`T1-T7 Live PostgreSQL integration proof SKIPPED: ${appDbCheck.reason}`);
-      console.log('[INFO] Static invariant checks verified. Disposable local PostgreSQL environment needed for live concurrency proof.');
+      reportSkipped(`T1-T9 Live PostgreSQL integration proof SKIPPED: ${appDbCheck.reason}`);
+      console.log('[INFO] Static invariant checks & Task 1 host validation verified. Disposable local PostgreSQL needed for live concurrency proof.');
     }
   } else {
-    // Validate MIGRATION_DATABASE_URL with same strict allowlist policy
     let validAdminDbUrl: string | null = null;
     if (adminDbUrl && adminDbUrl.trim() !== '') {
-      const adminCheck = isAllowedTestDb(adminDbUrl);
+      const adminCheck = await isAllowedTestDbAsync(adminDbUrl);
       if (adminCheck.allowed) {
         validAdminDbUrl = adminDbUrl;
       } else {
@@ -158,7 +274,7 @@ async function runVerification() {
       process.exit(1);
     }
 
-    console.log(`[Live Proof] Connecting to disposable PostgreSQL instance (${appDbCheck.host}) using application role (an_app)...`);
+    console.log(`[Live Proof] Connecting to disposable PostgreSQL instance (${appDbCheck.host} / IP: ${appDbCheck.ips?.join(', ')}) using application role (an_app)...`);
 
     const appPgConfig = buildPgConfig(appDbUrl, process.env);
     const appClient1 = new pg.Client(appPgConfig);
@@ -186,12 +302,69 @@ async function runVerification() {
         await adminClient.connect();
       }
 
-      // Verify admin connection responsiveness before creating test data
+      // --- TASK 2: APP / ADMIN DATABASE IDENTITY & PREFLIGHT ---
+      console.log('\n--- TASK 2: App / Admin Database Server Identity Preflight ---');
+
+      const appServerRes = await appClient1.query<{ db_name: string; server_addr: string | null; server_port: number | null; server_version: string }>(`
+        SELECT 
+          current_database() as db_name, 
+          inet_server_addr()::text as server_addr, 
+          inet_server_port() as server_port, 
+          version() as server_version;
+      `);
+      const appServer = appServerRes.rows[0];
+
       if (adminClient) {
-        await adminClient.query('SELECT 1;');
+        const adminServerRes = await adminClient.query<{ db_name: string; server_addr: string | null; server_port: number | null; server_version: string }>(`
+          SELECT 
+            current_database() as db_name, 
+            inet_server_addr()::text as server_addr, 
+            inet_server_port() as server_port, 
+            version() as server_version;
+        `);
+        const adminServer = adminServerRes.rows[0];
+
+        const dbNameMatch = appServer.db_name === adminServer.db_name;
+        assert(dbNameMatch, `Server Identity Check: Both connections point to same database '${appServer.db_name}'`);
+
+        const portMatch = appServer.server_port === adminServer.server_port;
+        assert(portMatch, `Server Identity Check: Server port match (${appServer.server_port})`);
+
+        const versionMatch = appServer.server_version === adminServer.server_version;
+        assert(versionMatch, `Server Identity Check: PostgreSQL server version match`);
+
+        if (appServer.server_addr && adminServer.server_addr) {
+          assert(appServer.server_addr === adminServer.server_addr, `Server Identity Check: IP address match (${appServer.server_addr})`);
+        } else {
+          const appDirRes = await appClient1.query<{ setting: string }>("SHOW data_directory;");
+          const adminDirRes = await adminClient.query<{ setting: string }>("SHOW data_directory;");
+          const dirMatch = appDirRes.rows[0]?.setting === adminDirRes.rows[0]?.setting;
+          assert(dirMatch, `Server Identity Check: Unix socket data directory match (${appDirRes.rows[0]?.setting})`);
+        }
+
+        if (!dbNameMatch || !versionMatch) {
+          console.error('[FATAL PREFLIGHT ERROR] appClient and adminClient do not point to the same database server instance. Halting.');
+          process.exit(1);
+        }
+
+        const adminRoleRes = await adminClient.query<{ current_user: string; session_user: string; rolsuper: boolean; rolbypassrls: boolean }>(`
+          SELECT current_user, session_user, rolsuper, rolbypassrls 
+          FROM pg_roles 
+          WHERE rolname = current_user;
+        `);
+        const adminAttrs = adminRoleRes.rows[0];
+        assert(Boolean(adminAttrs?.current_user), `Admin Role Identity: Connected as admin user '${adminAttrs?.current_user}'`);
+
+        const adminPrivRes = await adminClient.query<{ table_name: string }>(`
+          SELECT table_name
+          FROM information_schema.role_table_grants
+          WHERE grantee = current_user AND privilege_type = 'DELETE' AND table_name IN ('inv_stock_movements', 'companies');
+        `);
+        const canDelete = Boolean(adminAttrs?.rolsuper || adminAttrs?.rolbypassrls || adminPrivRes.rows.length > 0);
+        assert(canDelete, `Admin Role Check: Admin role '${adminAttrs?.current_user}' possesses necessary DELETE privileges for safe teardown`);
       }
 
-      // --- SECTION 3: APPLICATION ROLE IDENTITY ASSERTIONS ---
+      // --- APPLICATION ROLE IDENTITY ASSERTIONS ---
       const roleRes = await appClient1.query<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean }>(`
         SELECT current_user, rolsuper, rolbypassrls 
         FROM pg_roles 
@@ -208,7 +381,6 @@ async function runVerification() {
         process.exit(1);
       }
 
-      // Verify an_app is not owner of inventory tables
       const ownerRes = await appClient1.query<{ tablename: string }>(`
         SELECT c.relname as tablename
         FROM pg_class c
@@ -218,39 +390,56 @@ async function runVerification() {
       `);
       assert(ownerRes.rows.length === 0, 'Application Role Check: an_app is not the owner of inv_stock_balances or inv_stock_movements');
 
-      // Verify RLS and FORCE RLS are active on BOTH inv_stock_balances and inv_stock_movements
+      // --- TASK 3: FULL RLS POLICY METADATA ASSERTIONS ---
+      console.log('\n--- TASK 3: Full RLS Policy Metadata Assertions ---');
+
       const rlsRes = await appClient1.query<{ tablename: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(`
         SELECT c.relname as tablename, c.relrowsecurity, c.relforcerowsecurity
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relname IN ('inv_stock_balances', 'inv_stock_movements');
       `);
-      const balRls = rlsRes.rows.find(r => r.tablename === 'inv_stock_balances');
-      const movRls = rlsRes.rows.find(r => r.tablename === 'inv_stock_movements');
+      const balRls = rlsRes.rows.find((r) => r.tablename === 'inv_stock_balances');
+      const movRls = rlsRes.rows.find((r) => r.tablename === 'inv_stock_movements');
 
-      assert(Boolean(balRls?.relrowsecurity && balRls?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS are active on inv_stock_balances');
-      assert(Boolean(movRls?.relrowsecurity && movRls?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS are active on inv_stock_movements');
+      assert(Boolean(balRls?.relrowsecurity && balRls?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS active on inv_stock_balances');
+      assert(Boolean(movRls?.relrowsecurity && movRls?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS active on inv_stock_movements');
 
-      // Verify privileges granted to an_app on inv_stock_movements
-      const privsRes = await appClient1.query<{ tablename: string; privilege_type: string }>(`
-        SELECT table_name as tablename, privilege_type
-        FROM information_schema.role_table_grants
-        WHERE grantee = 'an_app' AND table_name IN ('inv_stock_balances', 'inv_stock_movements');
+      const policyMetaRes = await appClient1.query<{
+        tablename: string;
+        policyname: string;
+        permissive: string;
+        roles: string[];
+        cmd: string;
+        qual: string;
+        with_check: string;
+      }>(`
+        SELECT tablename, policyname, permissive, roles, cmd, qual, with_check
+        FROM pg_policies
+        WHERE schemaname = 'public' AND tablename IN ('inv_stock_balances', 'inv_stock_movements');
       `);
-      const movPrivs = new Set(privsRes.rows.filter(r => r.tablename === 'inv_stock_movements').map(r => r.privilege_type));
-      const hasMovGrants = movPrivs.has('SELECT') && movPrivs.has('INSERT') && movPrivs.has('UPDATE') && movPrivs.has('DELETE');
-      assert(hasMovGrants, 'Permissions Check: an_app has explicit SELECT, INSERT, UPDATE, DELETE grants on inv_stock_movements');
 
-      // Verify actual RLS policies on inv_stock_movements
-      const policyRes = await appClient1.query<{ policyname: string }>(`
-        SELECT policyname 
-        FROM pg_policies 
-        WHERE schemaname = 'public' AND tablename = 'inv_stock_movements';
-      `);
-      const hasMovPolicy = policyRes.rows.some(r => r.policyname === 'inv_stock_movements_tenant_isolation');
-      assert(hasMovPolicy, 'Policy Check: inv_stock_movements has tenant isolation policy inv_stock_movements_tenant_isolation');
+      const balPolicy = policyMetaRes.rows.find((p) => p.tablename === 'inv_stock_balances');
+      const movPolicy = policyMetaRes.rows.find((p) => p.tablename === 'inv_stock_movements');
 
-      // Prove independent connections using pg_backend_pid()
+      assert(Boolean(balPolicy && balPolicy.policyname === 'inv_stock_balances_tenant_isolation'), 'RLS Metadata Check: inv_stock_balances policy name is inv_stock_balances_tenant_isolation');
+      assert(Boolean(movPolicy && movPolicy.policyname === 'inv_stock_movements_tenant_isolation'), 'RLS Metadata Check: inv_stock_movements policy name is inv_stock_movements_tenant_isolation');
+
+      assert(balPolicy?.cmd === 'ALL' && movPolicy?.cmd === 'ALL', 'RLS Metadata Check: Policies cover ALL commands (SELECT, INSERT, UPDATE, DELETE)');
+      assert(
+        Boolean(balPolicy?.qual?.includes('app.current_tenant_id') && movPolicy?.qual?.includes('app.current_tenant_id')),
+        'RLS Metadata Check: USING expressions enforce app.current_tenant_id isolation'
+      );
+      assert(
+        Boolean(balPolicy?.with_check?.includes('app.current_tenant_id') && movPolicy?.with_check?.includes('app.current_tenant_id')),
+        'RLS Metadata Check: WITH CHECK expressions enforce app.current_tenant_id isolation'
+      );
+
+      const extraPolicies = policyMetaRes.rows.filter(
+        (p) => p.policyname !== 'inv_stock_balances_tenant_isolation' && p.policyname !== 'inv_stock_movements_tenant_isolation'
+      );
+      assert(extraPolicies.length === 0, 'RLS Metadata Check: Zero extra permissive policies detected bypassing tenant isolation');
+
       const pidRes1 = await appClient1.query<{ pid: number }>('SELECT pg_backend_pid() as pid;');
       const pidRes2 = await appClient2.query<{ pid: number }>('SELECT pg_backend_pid() as pid;');
       const pid1 = pidRes1.rows[0].pid;
@@ -259,10 +448,9 @@ async function runVerification() {
       console.log(`Recorded pg_backend_pid Values: appClient1 = ${pid1}, appClient2 = ${pid2}`);
       assert(independentConnections, `Independent DB connections verified (PID 1: ${pid1}, PID 2: ${pid2})`);
 
-      // --- SECTION 4: DATA SETUP ---
+      // --- DATA SETUP ---
       const suffix = Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-      // Create companies (an_app has companies_app_policy USING(true) WITH CHECK(true))
       const compRes = await appClient1.query<{ id: string }>(
         "INSERT INTO companies (code, name_ar) VALUES ($1, 'شركة اختبار المخزون الذري') RETURNING id;",
         [`INV_ATOMIC_${suffix}`]
@@ -275,7 +463,6 @@ async function runVerification() {
       );
       comp2Id = comp2Res.rows[0].id;
 
-      // Set tenant context for appClient1 to create warehouses and items for compId
       await appClient1.query('BEGIN;');
       await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
 
@@ -552,7 +739,6 @@ async function runVerification() {
         await appClient1.query('BEGIN;');
         await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
 
-        // 1. Valid balance write
         await appClient1.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, 99, NOW())
@@ -561,14 +747,12 @@ async function runVerification() {
           [compId, whC, itemId]
         );
 
-        // 2. Valid movement write
         await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo)
            VALUES ($1, $2, $3, 'receive', 99, 'T5 test');`,
           [compId, whC, itemId]
         );
 
-        // 3. Failing write: Force explicit foreign key violation on item_id UUID
         await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty)
            VALUES ($1, $2, '00000000-0000-0000-0000-000000000000', 'receive', 50);`,
@@ -578,7 +762,6 @@ async function runVerification() {
       } catch (err: any) {
         t5ErrCode = err.code || '';
         t5ConstraintName = err.constraint || '';
-        // Verify SQLSTATE 23503 and explicit item_id FK constraint name or detail
         const isFkMatch = err.code === '23503' && (t5ConstraintName === 'inv_stock_movements_item_id_fkey' || err.detail?.includes('inv_items'));
         if (isFkMatch) {
           t5FailedAsExpected = true;
@@ -622,7 +805,7 @@ async function runVerification() {
         );
         await appClient1.query('COMMIT;');
       } catch (err: any) {
-        if (err.code === '23514') { // check_violation
+        if (err.code === '23514') {
           checkConstraintTriggered = true;
         }
         await appClient1.query('ROLLBACK;');
@@ -630,9 +813,8 @@ async function runVerification() {
       assert(checkConstraintTriggered, 'T6: Direct negative balance update rejected by DB CHECK constraint (SQLSTATE 23514)');
 
       // --- T7: TENANT ISOLATION & RLS PROOF UNDER AN_APP ---
-      console.log('\nRunning T7: Strict Tenant Isolation & RLS Proof using an_app connections...');
+      console.log('\nRunning T7: Strict Tenant Isolation & RLS Proof on Stock Balances using an_app...');
 
-      // 1. Read Own Company Data
       await appClient1.query('BEGIN;');
       await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
       const ownReadRes = await appClient1.query<{ qty: number }>(
@@ -642,7 +824,6 @@ async function runVerification() {
       await appClient1.query('COMMIT;');
       assert(ownReadRes.rows.length === 1 && ownReadRes.rows[0].qty === 45, 'T7.1: appClient1 under company A context reads own company A stock balances');
 
-      // 2. Read Other Company Data (Filtered by RLS)
       await appClient2.query('BEGIN;');
       await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
       const otherReadRes = await appClient2.query(
@@ -652,7 +833,6 @@ async function runVerification() {
       await appClient2.query('COMMIT;');
       assert(otherReadRes.rows.length === 0, 'T7.2: appClient2 under company B context returns 0 rows when querying company A balances (RLS USING clause)');
 
-      // 3. Insert Other Company Data (Rejected by RLS WITH CHECK)
       let rlsInsertRejected = false;
       let rlsInsertErrCode = '';
       try {
@@ -665,14 +845,13 @@ async function runVerification() {
         await appClient2.query('COMMIT;');
       } catch (err: any) {
         rlsInsertErrCode = err.code || '';
-        if (err.code === '42501') { // insufficient_privilege / RLS policy violation
+        if (err.code === '42501') {
           rlsInsertRejected = true;
         }
         await appClient2.query('ROLLBACK;');
       }
       assert(rlsInsertRejected, `T7.3: appClient2 under company B context inserting into company A balances strictly rejected by SQLSTATE 42501 (actual code: '${rlsInsertErrCode}')`);
 
-      // 4. Update Other Company Data (Affects 0 rows, original balance unchanged)
       await appClient2.query('BEGIN;');
       await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
       const updateOtherRes = await appClient2.query(
@@ -682,7 +861,6 @@ async function runVerification() {
       await appClient2.query('COMMIT;');
       assert(updateOtherRes.rowCount === 0, 'T7.4: appClient2 under company B context updating company A balances affected 0 rows');
 
-      // Verify company A balance remains unchanged (45)
       await appClient1.query('BEGIN;');
       await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
       const verifyUnchangedRes = await appClient1.query<{ qty: number }>(
@@ -692,7 +870,6 @@ async function runVerification() {
       await appClient1.query('COMMIT;');
       assert(verifyUnchangedRes.rows[0]?.qty === 45, 'T7.4b: Company A stock balance remained unchanged at 45 after cross-tenant UPDATE attempt');
 
-      // 5. Unset Tenant Context Isolation (appClient3 without setting tenant_id)
       await appClient3.query('BEGIN;');
       await appClient3.query("SELECT set_config('app.current_tenant_id', '', true);");
       const unsetReadRes = await appClient3.query(
@@ -724,9 +901,204 @@ async function runVerification() {
         `T7.6: appClient3 with empty tenant context inserting balance strictly rejected by SQLSTATE 42501 (actual code: '${unsetInsertErrCode}')`
       );
 
+      // --- TASK 4: MOVEMENTS TENANT ISOLATION (T8.1 - T8.8) ---
+      console.log('\n--- TASK 4: Movements Tenant Isolation Tests (T8.1 - T8.8) ---');
+
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const movReadRes = await appClient1.query(
+        "SELECT id FROM inv_stock_movements WHERE company_id = $1;",
+        [compId]
+      );
+      await appClient1.query('COMMIT;');
+      assert(movReadRes.rows.length > 0, `T8.1: Company A reads own stock movements (found ${movReadRes.rows.length} rows)`);
+
+      await appClient2.query('BEGIN;');
+      await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+      const movOtherReadRes = await appClient2.query(
+        "SELECT * FROM inv_stock_movements WHERE company_id = $1;",
+        [compId]
+      );
+      await appClient2.query('COMMIT;');
+      assert(movOtherReadRes.rows.length === 0, 'T8.2: Company B context querying Company A movements returns 0 rows (RLS USING clause)');
+
+      let movInsertRejected = false;
+      let movInsertErrCode = '';
+      try {
+        await appClient2.query('BEGIN;');
+        await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+        await appClient2.query(
+          "INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty) VALUES ($1, $2, $3, 'receive', 10);",
+          [compId, whA, itemId]
+        );
+        await appClient2.query('COMMIT;');
+      } catch (err: any) {
+        movInsertErrCode = err.code || '';
+        if (err.code === '42501') {
+          movInsertRejected = true;
+        }
+        await appClient2.query('ROLLBACK;');
+      }
+      assert(movInsertRejected && movInsertErrCode === '42501', `T8.3: Company B inserting movement into Company A strictly rejected by SQLSTATE 42501`);
+
+      await appClient2.query('BEGIN;');
+      await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+      const movUpdateRes = await appClient2.query(
+        "UPDATE inv_stock_movements SET memo = 'hacked' WHERE company_id = $1 RETURNING id;",
+        [compId]
+      );
+      await appClient2.query('COMMIT;');
+      assert(movUpdateRes.rowCount === 0, 'T8.4: Company B updating Company A movements affected 0 rows');
+
+      await appClient2.query('BEGIN;');
+      await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+      const movDelRes = await appClient2.query(
+        "DELETE FROM inv_stock_movements WHERE company_id = $1 RETURNING id;",
+        [compId]
+      );
+      await appClient2.query('COMMIT;');
+      assert(movDelRes.rowCount === 0, 'T8.5: Company B deleting Company A movements affected 0 rows');
+
+      await appClient3.query('BEGIN;');
+      await appClient3.query("SELECT set_config('app.current_tenant_id', '', true);");
+      const movUnsetRead = await appClient3.query(
+        "SELECT * FROM inv_stock_movements WHERE company_id = $1;",
+        [compId]
+      );
+      await appClient3.query('COMMIT;');
+      assert(movUnsetRead.rows.length === 0, 'T8.6: Empty tenant context reading movements returns 0 rows');
+
+      let movUnsetInsertRejected = false;
+      try {
+        await appClient3.query('BEGIN;');
+        await appClient3.query("SELECT set_config('app.current_tenant_id', '', true);");
+        await appClient3.query(
+          "INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty) VALUES ($1, $2, $3, 'receive', 10);",
+          [compId, whA, itemId]
+        );
+        await appClient3.query('COMMIT;');
+      } catch (err: any) {
+        if (err.code === '42501') {
+          movUnsetInsertRejected = true;
+        }
+        await appClient3.query('ROLLBACK;');
+      }
+      assert(movUnsetInsertRejected, 'T8.7: Empty tenant context inserting movement strictly rejected by SQLSTATE 42501');
+
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const movVerifyRes = await appClient1.query<{ count: number }>(
+        "SELECT count(*)::int as count FROM inv_stock_movements WHERE company_id = $1;",
+        [compId]
+      );
+      await appClient1.query('COMMIT;');
+      assert(movVerifyRes.rows[0].count === movReadRes.rows.length, `T8.8: Company A movements count remained intact at ${movVerifyRes.rows[0].count} after all rejected attempts`);
+
+      // --- TASK 5: REAL APPLICATION SERVICE INTEGRATION (T9.1 - T9.8) ---
+      console.log('\n--- TASK 5: Real Application Service Integration (T9.1 - T9.8) ---');
+
+      const appClient1Executor = clientToExecutor(appClient1);
+
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
+      // T9.1: Repository incrementBalance
+      const r1 = await defaultStockRepository.incrementBalance(compId, whA, itemId, 50, appClient1Executor);
+      assert(r1 !== null && r1.qty === 95, `T9.1: StockRepository.incrementBalance incremented balance to 95 (actual: ${r1?.qty})`);
+
+      // T9.2: Repository decrementBalance
+      const r2 = await defaultStockRepository.decrementBalance(compId, whA, itemId, 20, appClient1Executor);
+      assert(r2 !== null && r2.qty === 75, `T9.2: StockRepository.decrementBalance decremented balance to 75 (actual: ${r2?.qty})`);
+
+      // T9.3: Repository ensureBalanceRow
+      await defaultStockRepository.ensureBalanceRow(compId, whC, itemId, appClient1Executor);
+      const cRowRes = await appClient1.query<{ qty: number }>(
+        "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+        [compId, whC, itemId]
+      );
+      assert(Boolean(cRowRes.rows.length === 1), `T9.3: StockRepository.ensureBalanceRow ensured balance row exists for WHC`);
+
+      await appClient1.query('COMMIT;');
+
+      // T9.4: StockService.receiveStock integration
+      const receiveRes = await defaultStockService.receiveStock(
+        compId,
+        { warehouseId: whA, itemId, qty: 25, memo: 'Service Integration Receive' }
+      );
+      assert(
+        receiveRes.balance.qty === 100 && receiveRes.movement.movementType === 'receive' && receiveRes.movement.qty === 25,
+        `T9.4: StockService.receiveStock updated balance to 100 and created receive movement`
+      );
+
+      // T9.5: StockService.issueStock integration & Over-issue guard
+      const issueRes = await defaultStockService.issueStock(
+        compId,
+        { warehouseId: whA, itemId, qty: 10, memo: 'Service Integration Issue' }
+      );
+      assert(
+        issueRes.balance.qty === 90 && issueRes.movement.movementType === 'issue' && issueRes.movement.qty === 10,
+        `T9.5: StockService.issueStock updated balance to 90 and created issue movement`
+      );
+
+      let overIssueFailed = false;
+      let overIssueErrorMsg = '';
+      try {
+        await defaultStockService.issueStock(
+          compId,
+          { warehouseId: whA, itemId, qty: 999, memo: 'Overissue' }
+        );
+      } catch (err: any) {
+        overIssueFailed = true;
+        overIssueErrorMsg = err.message || '';
+      }
+      assert(
+        overIssueFailed && overIssueErrorMsg.includes('رصيد غير كافٍ'),
+        `T9.5b: StockService.issueStock strictly blocked over-issue request with ValidationError`
+      );
+
+      // T9.6: StockService.transfer integration
+      const transferRes = await defaultStockService.transfer(
+        compId,
+        { sourceWarehouseId: whA, destWarehouseId: whB, itemId, qty: 30, memo: 'Service Integration Transfer' }
+      );
+      assert(
+        transferRes.sourceBalance.qty === 60 &&
+        transferRes.destBalance.qty === 80 &&
+        transferRes.movementOut.movementType === 'transfer_out' &&
+        transferRes.movementIn.movementType === 'transfer_in' &&
+        transferRes.movementOut.transferId === transferRes.movementIn.transferId,
+        `T9.6: StockService.transfer decremented WH_A to 60, incremented WH_B to 80, and linked movements via transferId`
+      );
+
+      // T9.7: Transaction atomicity on service failure
+      let serviceTxFailed = false;
+      try {
+        await defaultStockService.transfer(
+          compId,
+          { sourceWarehouseId: whA, destWarehouseId: '00000000-0000-0000-0000-000000000000', itemId, qty: 10 }
+        );
+      } catch (err: any) {
+        serviceTxFailed = true;
+      }
+      assert(serviceTxFailed, `T9.7: StockService transaction failed safely on non-existent destination warehouse`);
+
+      // T9.8: Cross-tenant service isolation
+      let crossTenantFailed = false;
+      try {
+        await defaultStockService.receiveStock(
+          comp2Id,
+          { warehouseId: whA, itemId, qty: 10, memo: 'Cross tenant attempt' }
+        );
+      } catch (err: any) {
+        crossTenantFailed = true;
+      }
+      assert(crossTenantFailed, `T9.8: StockService strictly rejected cross-tenant operation (Company B context with Company A warehouse/item)`);
+
     } finally {
-      // Guaranteed transactional cleanup in finally block
+      // --- TASK 6: CLEANUP GUARANTEE & POST-TEARDOWN VERIFICATION ---
       let cleanupErrMessage: string | null = null;
+      let remainingCount = 0;
+
       try {
         await appClient1.query('ROLLBACK;').catch(() => {});
         await appClient2.query('ROLLBACK;').catch(() => {});
@@ -743,12 +1115,29 @@ async function runVerification() {
           await adminClient.query("DELETE FROM inv_warehouses WHERE company_id = ANY($1);", [targetIds]);
           await adminClient.query("DELETE FROM companies WHERE id = ANY($1);", [targetIds]);
           await adminClient.query('COMMIT;');
+
+          const verifyCleanRes = await adminClient.query<{ count: number }>(`
+            SELECT (
+              (SELECT count(*) FROM inv_stock_movements WHERE company_id = ANY($1)) +
+              (SELECT count(*) FROM inv_stock_balances WHERE company_id = ANY($1)) +
+              (SELECT count(*) FROM inv_items WHERE company_id = ANY($1)) +
+              (SELECT count(*) FROM inv_warehouses WHERE company_id = ANY($1)) +
+              (SELECT count(*) FROM companies WHERE id = ANY($1))
+            )::int as count;
+          `, [targetIds]);
+
+          remainingCount = verifyCleanRes.rows[0]?.count || 0;
+          if (remainingCount > 0) {
+            cleanupErrMessage = `Post-teardown check failed: ${remainingCount} residual records remain in database for test companies (${targetIds.join(', ')})`;
+          }
         } catch (cleanupErr: any) {
           await adminClient.query('ROLLBACK;').catch(() => {});
           cleanupErrMessage = cleanupErr?.message || String(cleanupErr);
           console.error('[CLEANUP ERROR] Transactional cleanup failed:', cleanupErr);
         }
       }
+
+      await closeAllExecutors().catch(() => {});
 
       await appClient1.end().catch(() => {});
       await appClient2.end().catch(() => {});
@@ -758,7 +1147,9 @@ async function runVerification() {
       }
 
       if (cleanupErrMessage) {
-        assert(false, `Guaranteed Teardown Check: Transactional cleanup failed with error: ${cleanupErrMessage}`);
+        assert(false, `Guaranteed Teardown Check: ${cleanupErrMessage}`);
+      } else if (adminClient && (compId || comp2Id)) {
+        assert(remainingCount === 0, `Guaranteed Teardown Check: All test companies and child records cleanly eradicated from DB (remaining count: 0)`);
       }
     }
   }
@@ -775,4 +1166,3 @@ runVerification().catch((err) => {
   console.error('Fatal error in verifyInvAtomicBalance1:', err);
   process.exit(1);
 });
-
