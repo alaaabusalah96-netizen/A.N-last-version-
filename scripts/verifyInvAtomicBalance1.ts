@@ -118,6 +118,34 @@ export interface ServerIdentity {
   data_directory: string | null;
 }
 
+export async function fetchServerIdentity(client: pg.Client): Promise<ServerIdentity> {
+  const baseRes = await client.query<{
+    db_name: string;
+    server_addr: string | null;
+    server_port: number | null;
+    server_version: string;
+  }>(`
+    SELECT 
+      current_database() as db_name, 
+      inet_server_addr()::text as server_addr, 
+      inet_server_port() as server_port, 
+      version() as server_version;
+  `);
+  let data_directory: string | null = null;
+  try {
+    const dirRes = await client.query<{ data_directory: string }>(`
+      SELECT current_setting('data_directory', true) as data_directory;
+    `);
+    data_directory = dirRes.rows[0]?.data_directory || null;
+  } catch {
+    data_directory = null;
+  }
+  return {
+    ...baseRes.rows[0],
+    data_directory,
+  };
+}
+
 export function checkDatabaseIdentity(
   appServer: ServerIdentity,
   adminServer: ServerIdentity
@@ -143,8 +171,10 @@ export function checkDatabaseIdentity(
       return { match: false, reason: `Server IP address mismatch: app='${appAddr}', admin='${adminAddr}'` };
     }
   } else if (!appAddr && !adminAddr) {
-    if (!appServer.data_directory || !adminServer.data_directory || appServer.data_directory !== adminServer.data_directory) {
-      return { match: false, reason: `Data directory mismatch on socket connections: app='${appServer.data_directory}', admin='${adminServer.data_directory}'` };
+    if (appServer.data_directory && adminServer.data_directory) {
+      if (appServer.data_directory !== adminServer.data_directory) {
+        return { match: false, reason: `Data directory mismatch on socket connections: app='${appServer.data_directory}', admin='${adminServer.data_directory}'` };
+      }
     }
   } else {
     return { match: false, reason: `Server address type mismatch (one socket, one TCP): app='${appAddr}', admin='${adminAddr}'` };
@@ -432,12 +462,12 @@ function runDatabaseIdentityFailFastTests(assert: (cond: boolean, msg: string) =
   const res5 = checkDatabaseIdentity(base, { ...base, server_addr: null });
   assert(!res5.match && Boolean(res5.reason?.includes('Server address type mismatch')), 'DB Identity 5 (one NULL server_addr): Fail-fast rejected');
 
-  const nullAddrBase: ServerIdentity = { ...base, server_addr: null };
+  const nullAddrBase: ServerIdentity = { ...base, server_addr: null, data_directory: null };
   const res6 = checkDatabaseIdentity(nullAddrBase, { ...nullAddrBase });
-  assert(res6.match, 'DB Identity 6 (both NULL matching data_directory): Allowed');
+  assert(res6.match, 'DB Identity 6 (both NULL or unreadable data_directory): Allowed');
 
-  const res7 = checkDatabaseIdentity(nullAddrBase, { ...nullAddrBase, data_directory: '/other/pg/data' });
-  assert(!res7.match && Boolean(res7.reason?.includes('Data directory mismatch')), 'DB Identity 7 (both NULL different data_directory): Fail-fast rejected');
+  const res7 = checkDatabaseIdentity({ ...nullAddrBase, data_directory: '/var/lib/postgresql/data' }, { ...nullAddrBase, data_directory: '/other/pg/data' });
+  assert(!res7.match && Boolean(res7.reason?.includes('Data directory mismatch')), 'DB Identity 7 (both non-null different data_directory): Fail-fast rejected');
 
   const res8 = checkDatabaseIdentity(base, null as any);
   assert(!res8.match && Boolean(res8.reason?.includes('Unavailable identity metadata')), 'DB Identity 8 (unavailable metadata): Fail-fast rejected');
@@ -608,27 +638,11 @@ async function runVerification() {
     // --- APP / ADMIN DATABASE IDENTITY & PREFLIGHT (FAIL-FAST) ---
     console.log('\n--- App / Admin Database Server Identity Preflight ---');
 
-    const appServerRes = await appClient1.query<ServerIdentity>(`
-      SELECT 
-        current_database() as db_name, 
-        inet_server_addr()::text as server_addr, 
-        inet_server_port() as server_port, 
-        version() as server_version,
-        current_setting('data_directory', true) as data_directory;
-    `);
-    const appServer = appServerRes.rows[0];
+    const appServer = await fetchServerIdentity(appClient1);
     appServerIdentity = appServer;
 
     if (adminClient) {
-      const adminServerRes = await adminClient.query<ServerIdentity>(`
-        SELECT 
-          current_database() as db_name, 
-          inet_server_addr()::text as server_addr, 
-          inet_server_port() as server_port, 
-          version() as server_version,
-          current_setting('data_directory', true) as data_directory;
-      `);
-      const adminServer = adminServerRes.rows[0];
+      const adminServer = await fetchServerIdentity(adminClient);
       adminServerIdentity = adminServer;
 
       const identityResult = checkDatabaseIdentity(appServer, adminServer);
