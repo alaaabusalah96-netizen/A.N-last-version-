@@ -110,7 +110,7 @@ const scripts = [
 
 export interface BatteryItemReport {
   script: string;
-  status: 'PASS' | 'FAIL' | 'BLOCKED';
+  status: 'PASS' | 'FAIL' | 'BLOCKED' | 'SKIPPED';
   durationMs: number;
   exitCode: number | null;
   failureReason?: string;
@@ -129,6 +129,7 @@ export interface BatteryReport {
     passed: number;
     failed: number;
     blocked: number;
+    skipped: number;
   };
   results: BatteryItemReport[];
 }
@@ -137,6 +138,7 @@ const runResults: BatteryItemReport[] = [];
 let passedScripts = 0;
 let failedScripts = 0;
 let blockedScripts = 0;
+let skippedScripts = 0;
 
 const tsxBin = path.resolve(process.cwd(), 'node_modules/.bin/tsx');
 const logLines: string[] = [];
@@ -168,7 +170,7 @@ for (const script of scripts) {
   if (stderr) process.stderr.write(stderr);
 
   const exitCode = result.status;
-  let status: 'PASS' | 'FAIL' | 'BLOCKED' = 'FAIL';
+  let status: 'PASS' | 'FAIL' | 'BLOCKED' | 'SKIPPED' = 'FAIL';
   let failureReason: string | undefined = undefined;
 
   if (exitCode === 0) {
@@ -180,10 +182,10 @@ for (const script of scripts) {
     const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
     failureReason = match ? sanitizeMessage(match[1].trim()) : 'Test prerequisites unfulfilled (BLOCKED)';
   } else if (exitCode === 3) {
-    status = 'BLOCKED';
-    blockedScripts++;
-    const match = combinedOutput.match(/\[BLOCKED\]\s*([^\r\n]+)/);
-    failureReason = match ? sanitizeMessage(match[1].trim()) : 'No database environment (BLOCKED)';
+    status = 'SKIPPED';
+    skippedScripts++;
+    const match = combinedOutput.match(/\[SKIPPED\]\s*([^\r\n]+)/);
+    failureReason = match ? sanitizeMessage(match[1].trim()) : 'Permitted test skip condition (SKIPPED)';
   } else {
     status = 'FAIL';
     failedScripts++;
@@ -217,7 +219,7 @@ for (const r of runResults) {
   console.log(`| ${scriptName} | ${statusStr} | ${timeStr} | ${exitStr} |`);
 }
 console.log('======================================================');
-console.log(`Total Scripts: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts}`);
+console.log(`Total Scripts: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts} | Skipped: ${skippedScripts}`);
 
 const reportData: BatteryReport = {
   timestamp: new Date().toISOString(),
@@ -232,6 +234,7 @@ const reportData: BatteryReport = {
     passed: passedScripts,
     failed: failedScripts,
     blocked: blockedScripts,
+    skipped: skippedScripts,
   },
   results: runResults,
 };
@@ -248,7 +251,7 @@ const logReportPath = path.join(testReportsDir, 'battery.log');
 const logContent = [
   '=== FOUNDATION BATTERY TEST EXECUTION LOG ===',
   `Timestamp: ${reportData.timestamp}`,
-  `Total: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts}`,
+  `Total: ${scripts.length} | Passed: ${passedScripts} | Failed: ${failedScripts} | Blocked: ${blockedScripts} | Skipped: ${skippedScripts}`,
   `Require DB: ${isDbRequired}`,
   '',
   ...logLines,
@@ -260,7 +263,7 @@ const summaryMdContent = [
   '# Foundation Battery Test Summary',
   `Timestamp: ${reportData.timestamp}`,
   '',
-  `Total: ${scripts.length} | Passed: **${passedScripts}** | Failed: **${failedScripts}** | Blocked: **${blockedScripts}**`,
+  `Total: ${scripts.length} | Passed: **${passedScripts}** | Failed: **${failedScripts}** | Blocked: **${blockedScripts}** | Skipped: **${skippedScripts}**`,
   '',
   '| Script | Status | Time | Exit |',
   '|---|---|---|---|',
@@ -275,14 +278,14 @@ if (failedScripts > 0) {
   process.exit(1);
 }
 
-if (isDbRequired && blockedScripts > 0) {
-  console.error('\n[BATTERY ERROR] REQUIRE_DB=1 or CI=true is set, but test scripts reported BLOCKED.');
+if (isDbRequired && (blockedScripts > 0 || skippedScripts > 0)) {
+  console.error('\n[BATTERY ERROR] REQUIRE_DB=1 or CI=true is set, but test scripts reported BLOCKED or SKIPPED.');
   process.exit(1);
 }
 
-if (blockedScripts > 0) {
-  console.log('\n[BATTERY INFO] All tests passed or cleanly blocked due to missing local database.');
-  process.exit(2);
+if (blockedScripts > 0 || skippedScripts > 0) {
+  console.log('\n[BATTERY INFO] All tests passed or cleanly blocked/skipped due to missing local database.');
+  process.exit(blockedScripts > 0 ? 2 : 3);
 }
 
 process.exit(0);
