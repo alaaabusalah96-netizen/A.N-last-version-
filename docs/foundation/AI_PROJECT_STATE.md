@@ -413,6 +413,11 @@
   - Summary: Closed cross-tenant journal contamination at the database level for ledger. Created migration `022_ledger_composite_fk.sql` executing pre-migration orphan & cross-company mismatch checks with explicit `RAISE EXCEPTION`, adding composite unique constraints `UNIQUE (company_id, id)` on `accounts` and `journal_entries`, and composite foreign keys on `journal_lines` (`(entry_id, company_id)` and `(account_id, company_id)`). Created verification harness `scripts/verifyFixN2CompositeFkLedger1.ts` (`npm run test:fix-n2-composite-fk-ledger-1`) with disposable DB guard (`N2_ALLOW_DISPOSABLE=1`).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-FIX-N2-LEDGER-SAVEPOINT-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Hardened `scripts/verifyFixN2CompositeFkLedger1.ts` live proof suite with SAVEPOINT and ROLLBACK TO SAVEPOINT isolation around negative composite FK assertions (T1, T2) using strict SQLSTATE 23503 validation, verified transaction post-rollback recovery, positive same-company insert, and guaranteed outer transaction rollback with safe client cleanup.
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

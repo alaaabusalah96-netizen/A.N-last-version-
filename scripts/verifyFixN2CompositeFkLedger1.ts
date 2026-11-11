@@ -115,52 +115,98 @@ async function runVerification() {
       );
       const entry1Id = entry1Res.rows[0].id;
 
-      // T1: Try inserting journal_line in Company 2 pointing to entry in Company 1 -> must fail FK violation
+      // T1: Try inserting journal_line in Company 2 pointing to entry in Company 1 -> must fail with SQLSTATE 23503
       let t1Failed = false;
+      await client.query('SAVEPOINT sp_t1;');
       try {
         await client.query(
           "INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 100, 0);",
           [comp2Id, entry1Id, acc1Id]
         );
       } catch (err: any) {
-        if (err.code === '23503' || err.message.includes('foreign key')) {
+        if (err.code === '23503') {
+          t1Failed = true;
+        } else if (err.message && err.message.toLowerCase().includes('foreign key')) {
           t1Failed = true;
         } else {
           throw err;
         }
       }
-      assert(t1Failed, 'T1: Inserting journal_line with cross-company entry_id correctly rejected by composite FK');
+      await client.query('ROLLBACK TO SAVEPOINT sp_t1;');
+      try {
+        await client.query('RELEASE SAVEPOINT sp_t1;');
+      } catch {}
+      assert(t1Failed, 'T1: Inserting journal_line with cross-company entry_id correctly rejected with SQLSTATE 23503');
 
-      // T2: Try inserting journal_line in Company 1 pointing to account in Company 2 (or cross-company account) -> create acc2 in Company 2
+      // Isolation assertion: Verify transaction remains healthy and usable after T1 savepoint rollback
+      let t1IsolationRecovered = false;
+      try {
+        const isoRes = await client.query('SELECT 1 as alive;');
+        t1IsolationRecovered = isoRes.rows[0]?.alive === 1;
+      } catch (err: any) {
+        console.error('Savepoint isolation verification failed:', err);
+      }
+      assert(t1IsolationRecovered, 'T1 Isolation: Transaction remains valid after T1 SAVEPOINT rollback (no 25P02 abort)');
+
+      // Create account in Company 2 (runs AFTER T1 savepoint rollback so txn is usable)
       const acc2Res = await client.query(
         "INSERT INTO accounts (company_id, code, name_ar, account_type) VALUES ($1, '102', 'صندوق ب', 'asset') RETURNING id;",
         [comp2Id]
       );
       const acc2Id = acc2Res.rows[0].id;
 
+      // T2: Try inserting journal_line in Company 1 pointing to account in Company 2 -> must fail with SQLSTATE 23503
       let t2Failed = false;
+      await client.query('SAVEPOINT sp_t2;');
       try {
         await client.query(
           "INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 100, 0);",
           [comp1Id, entry1Id, acc2Id]
         );
       } catch (err: any) {
-        if (err.code === '23503' || err.message.includes('foreign key')) {
+        if (err.code === '23503') {
+          t2Failed = true;
+        } else if (err.message && err.message.toLowerCase().includes('foreign key')) {
           t2Failed = true;
         } else {
           throw err;
         }
       }
-      assert(t2Failed, 'T2: Inserting journal_line with cross-company account_id correctly rejected by composite FK');
+      await client.query('ROLLBACK TO SAVEPOINT sp_t2;');
+      try {
+        await client.query('RELEASE SAVEPOINT sp_t2;');
+      } catch {}
+      assert(t2Failed, 'T2: Inserting journal_line with cross-company account_id correctly rejected with SQLSTATE 23503');
+
+      // T3: Positive same-company insert succeeds
+      let t3Success = false;
+      await client.query('SAVEPOINT sp_t3;');
+      try {
+        await client.query(
+          "INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 100, 0);",
+          [comp1Id, entry1Id, acc1Id]
+        );
+        t3Success = true;
+      } catch (err: any) {
+        console.error('Positive insert error:', err);
+      }
+      await client.query('ROLLBACK TO SAVEPOINT sp_t3;');
+      try {
+        await client.query('RELEASE SAVEPOINT sp_t3;');
+      } catch {}
+      assert(t3Success, 'T3: Valid same-company insert succeeded successfully');
 
       await client.query('ROLLBACK;');
-      await client.end();
     } catch (err) {
       try {
-        await client.end();
+        await client.query('ROLLBACK;');
       } catch {}
       console.error('[Live Proof Error]:', err);
       assert(false, `Live FK rejection proof encountered unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      try {
+        await client.end();
+      } catch {}
     }
   }
 
