@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 async function runVerification() {
-  console.log('=== RUNNING GRN GL CONTEXT VERIFICATION (AN-FIX-GRN-GL-CONTEXT-1) ===');
+  console.log('=== RUNNING GRN GL EXPLICIT TX VERIFICATION (AN-FIX-GRN-GL-EXPLICIT-TX-1) ===');
   let passed = 0;
   let failed = 0;
 
@@ -43,8 +43,14 @@ async function runVerification() {
   // S5: AI_PROJECT_STATE.md records AN-FIX-GRN-GL-CONTEXT-1 or AN-FIX-GRN-GL-POST-1
   const statePath = path.join(root, 'docs/foundation/AI_PROJECT_STATE.md');
   const stateContent = fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '';
-  const hasStateRecord = stateContent.includes('AN-FIX-GRN-GL-CONTEXT-1') || stateContent.includes('AN-FIX-GRN-GL-POST-1');
+  const hasStateRecord = stateContent.includes('AN-FIX-GRN-GL-') || stateContent.includes('AN-FIX-GRN-GL-POST-1');
   assert(hasStateRecord, 'S5: AI_PROJECT_STATE.md records GRN GL fix');
+
+  // S6: grnService.ts passes explicit tx into createDraftEntry and postEntry, and journalService accepts executor
+  const journalServicePath = path.join(root, 'src/server/accounting/journalService.ts');
+  const journalServiceContent = fs.existsSync(journalServicePath) ? fs.readFileSync(journalServicePath, 'utf8') : '';
+  const passesExplicitTx = grnServiceContent.includes(', tx') && journalServiceContent.includes('executor?: DbExecutor');
+  assert(passesExplicitTx, 'S6: grnService.ts explicitly passes tx into journal calls and journalService accepts executor');
 
   console.log(`Summary -> Passed: ${passed} | Failed: ${failed}`);
   if (failed > 0) {

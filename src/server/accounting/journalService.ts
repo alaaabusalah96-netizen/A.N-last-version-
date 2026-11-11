@@ -2,6 +2,7 @@ import { defaultJournalRepository, JournalRepository } from './journalRepository
 import { defaultAccountRepository, AccountRepository } from './accountRepository.js';
 import { defaultPeriodRepository, PeriodRepository } from './periodRepository.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
+import { DbExecutor } from '../db/types.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import { defaultOrgUnitService } from '../org/orgUnitService.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.js';
@@ -27,7 +28,8 @@ export class JournalService {
     companyId: string,
     input: CreateDraftJournalEntryInput,
     actorId?: string,
-    isPlatformAdmin: boolean = false
+    isPlatformAdmin: boolean = false,
+    executor?: DbExecutor
   ): Promise<JournalEntry> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('companyId is required');
@@ -54,7 +56,7 @@ export class JournalService {
       }
     }
 
-    return await withTenantTransaction(companyId, async (tx) => {
+    const runOp = async (tx: DbExecutor) => {
       // Validate accounts existence, active state, and postability
       for (const line of input.lines) {
         if (!line.accountId) {
@@ -125,7 +127,12 @@ export class JournalService {
       });
 
       return draft;
-    });
+    };
+
+    if (executor) {
+      return await runOp(executor);
+    }
+    return await withTenantTransaction(companyId, runOp);
   }
 
   /**
@@ -138,13 +145,14 @@ export class JournalService {
     companyId: string,
     entryId: string,
     actorId: string,
-    isPlatformAdmin: boolean = false
+    isPlatformAdmin: boolean = false,
+    executor?: DbExecutor
   ): Promise<JournalEntry> {
     if (!companyId || !entryId) {
       throw new ValidationError('companyId and entryId are required');
     }
 
-    return await withTenantTransaction(companyId, async (tx) => {
+    const runOp = async (tx: DbExecutor) => {
       const entry = await this.journalRepo.findByIdForUpdate(companyId, entryId, tx);
       if (!entry) {
         throw new NotFoundError('Journal entry not found');
@@ -258,7 +266,12 @@ export class JournalService {
 
       const postedEntry = await this.journalRepo.findById(companyId, entryId, tx);
       return postedEntry!;
-    });
+    };
+
+    if (executor) {
+      return await runOp(executor);
+    }
+    return await withTenantTransaction(companyId, runOp);
   }
 
   /**

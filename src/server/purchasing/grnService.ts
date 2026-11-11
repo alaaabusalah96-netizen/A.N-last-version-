@@ -199,10 +199,12 @@ export class GrnService {
             { accountId: settings.purchasesClearingAccountId, debit: 0, credit: totalAmount, lineMemo: `مقابل استلام مخزون سند ${grnNo}` }
           ]
         },
-        actorId
+        actorId,
+        false,
+        tx
       );
       
-      const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '');
+      const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '', false, tx);
 
       // 5. Mark GRN as posted and link journal entry
       await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', postedJournal.id, tx);
