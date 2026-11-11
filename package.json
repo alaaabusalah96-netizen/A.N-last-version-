@@ -91,6 +91,9 @@
     "test:accounting-periods-enforce-1": "tsx scripts/verifyAccountingPeriodsEnforce1.ts",
     "test:accounting-periods-harden-1": "tsx scripts/verifyAccountingPeriodsHarden1.ts",
     "test:c2-http-proof-1": "tsx scripts/verifyC2HttpProof1.ts",
+    "test:audit-explicit-tx-1": "tsx scripts/verifyAuditExplicitTx1.ts",
+    "test:fix-025-composite-fk-grn-settings-1": "tsx scripts/verifyFix025CompositeFkGrnSettings1.ts",
+    "test:ui-company-settings-accounts-1": "tsx scripts/verifyUiCompanySettingsAccounts1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

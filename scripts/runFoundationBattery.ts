@@ -108,6 +108,7 @@ const scripts = [
   'scripts/verifyC2HttpProof1.ts',
   'scripts/verifyFix025CompositeFkGrnSettings1.ts',
   'scripts/verifyAuditExplicitTx1.ts',
+  'scripts/verifyUiCompanySettingsAccounts1.ts',
 ];
 
 export interface BatteryItemReport {

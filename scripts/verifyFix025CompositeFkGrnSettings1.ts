@@ -32,34 +32,48 @@ async function verify() {
         try {
             await client.query('BEGIN');
 
-            // Setup fixtures
+            // Setup fixtures for Company A
             const compA = randomUUID();
-            const compB = randomUUID();
             await client.query('INSERT INTO companies (id, code, name_ar) VALUES ($1, $2, $3)', [compA, 'CA', 'Comp A']);
+            
+            const supplierA = randomUUID();
+            await client.query('INSERT INTO purch_suppliers (id, company_id, code, name_ar) VALUES ($1, $2, $3, $4)', [supplierA, compA, 'SUP1', 'Supplier A']);
+            
+            const warehouseA = randomUUID();
+            await client.query('INSERT INTO inv_warehouses (id, company_id, code, name_ar) VALUES ($1, $2, $3, $4)', [warehouseA, compA, 'WHA', 'Warehouse A']);
+
+            // Setup fixtures for Company B
+            const compB = randomUUID();
             await client.query('INSERT INTO companies (id, code, name_ar) VALUES ($1, $2, $3)', [compB, 'CB', 'Comp B']);
             
             const journalB = randomUUID();
             await client.query('INSERT INTO journal_entries (id, company_id) VALUES ($1, $2)', [journalB, compB]);
             
-            // 23503 Proof T1: GRN with cross-company journal
+            // 23503 Proof T1: GRN for Company A pointing at Journal of Company B
             const sp1 = 'savepoint_t1';
             await client.query(`SAVEPOINT ${sp1}`);
             try {
-                // Must provide required NOT NULL columns for purch_grn (assume minimal based on schema)
                 await client.query(`
-                    INSERT INTO purch_grn (id, company_id, journal_entry_id, supplier_id, warehouse_id, status)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                `, [randomUUID(), compA, journalB, randomUUID(), randomUUID(), 'draft']); // Mocking supplier/warehouse UUIDs
-                assert.fail('Should have failed with 23503');
+                    INSERT INTO purch_grn (id, company_id, supplier_id, warehouse_id, journal_entry_id, status)
+                    VALUES ($1, $2, $3, $4, $5, 'draft')
+                `, [randomUUID(), compA, supplierA, warehouseA, journalB]);
+                assert.fail('Should have failed with 23503 (composite journal FK)');
             } catch (err: any) {
-                if (err.code !== '23503') throw err;
-                console.log('Passed: Caught expected 23503 for GRN FK');
+                if (err.code !== '23503') {
+                    console.error(`Unexpected error code ${err.code}: ${err.message}`);
+                    throw err;
+                }
+                // Verify it targets the intended constraint
+                if (err.constraint && !err.constraint.includes('journal_entry_id_company_id')) {
+                    throw new Error(`Caught 23503 but target was ${err.constraint}, not composite journal FK`);
+                }
+                console.log('Passed: Caught expected 23503 for composite GRN -> Journal FK');
             }
             await client.query(`ROLLBACK TO SAVEPOINT ${sp1}`);
 
-            // 23503 Proof T2: company_settings with cross-company account
+            // 23503 Proof T2: Company A settings pointing at Account of Company B
             const accountB = randomUUID();
-            await client.query('INSERT INTO accounts (id, company_id, code, name_ar, account_type) VALUES ($1, $2, $3, $4, $5)', [accountB, compB, '1000', 'Asset', 'asset']);
+            await client.query('INSERT INTO accounts (id, company_id, code, name_ar, account_type) VALUES ($1, $2, $3, $4, $5)', [accountB, compB, 'ACCB', 'Account B', 'asset']);
             
             const sp2 = 'savepoint_t2';
             await client.query(`SAVEPOINT ${sp2}`);
@@ -69,10 +83,13 @@ async function verify() {
                     VALUES ($1, $2)
                     ON CONFLICT (company_id) DO UPDATE SET inventory_account_id = EXCLUDED.inventory_account_id
                 `, [compA, accountB]);
-                assert.fail('Should have failed with 23503');
+                assert.fail('Should have failed with 23503 (composite settings account FK)');
             } catch (err: any) {
                 if (err.code !== '23503') throw err;
-                console.log('Passed: Caught expected 23503 for Company Settings FK');
+                if (err.constraint && !err.constraint.includes('inventory_account_id_company_id')) {
+                    throw new Error(`Caught 23503 but target was ${err.constraint}, not composite settings account FK`);
+                }
+                console.log('Passed: Caught expected 23503 for composite Company Settings -> Accounts FK');
             }
             await client.query(`ROLLBACK TO SAVEPOINT ${sp2}`);
 

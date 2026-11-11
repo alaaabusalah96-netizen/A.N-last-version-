@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns/promises';
+import crypto from 'node:crypto';
 import pg from 'pg';
 import { buildPgConfig } from '../src/server/db/connection.js';
 import { defaultStockRepository } from '../src/server/inventory/stockRepository.js';
@@ -1011,7 +1012,7 @@ async function runVerification() {
     );
     registry.registerBalance(compId, whB, itemId);
 
-    const transferIdT6 = `tr_${Date.now()}`;
+    const transferIdT6 = crypto.randomUUID();
     const mOut = await appClient1.query<{ id: string }>(`INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, transfer_id) VALUES ($1, $2, $3, 'transfer_out', 4, $4) RETURNING id;`, [compId, whA, itemId, transferIdT6]);
     const mIn = await appClient1.query<{ id: string }>(`INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, transfer_id) VALUES ($1, $2, $3, 'transfer_in', 4, $4) RETURNING id;`, [compId, whB, itemId, transferIdT6]);
     registry.registerMovement(mOut.rows[0].id);
