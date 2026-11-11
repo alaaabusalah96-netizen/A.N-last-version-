@@ -28,7 +28,7 @@ export function isProductionOrSupabaseDb(urlStr: string): boolean {
 }
 
 async function runVerification() {
-  console.log('=== RUNNING INVENTORY ATOMIC BALANCE VERIFICATION (AN-FIX-INVENTORY-ATOMIC-BALANCE-1) ===\n');
+  console.log('=== RUNNING INVENTORY ATOMIC BALANCE VERIFICATION (AN-FIX-INVENTORY-ATOMIC-PROOF-1) ===\n');
   let passed = 0;
   let failed = 0;
   let skipped = 0;
@@ -100,19 +100,34 @@ async function runVerification() {
   // --- LIVE POSTGRESQL INTEGRATION PROOF (T1 - T7) ---
   console.log('\n--- PostgreSQL Concurrency & Atomicity Proof (T1 - T7) ---');
 
-  const dbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
+  const appDbUrl = process.env.DATABASE_URL;
+  const adminDbUrl = process.env.MIGRATION_DATABASE_URL;
+  const isDbRequired = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true' || process.env.CI === 'true';
 
-  if (!dbUrl) {
-    reportSkipped('T1-T7 Live PostgreSQL integration proof SKIPPED: Neither DATABASE_URL nor MIGRATION_DATABASE_URL configured');
-    console.log('[INFO] Static invariant checks verified. Disposable PostgreSQL environment needed for live concurrency proof.');
-  } else if (isProductionOrSupabaseDb(dbUrl) && process.env.INV_ALLOW_DISPOSABLE !== '1') {
-    reportSkipped('T1-T7 Live PostgreSQL integration proof SKIPPED: Protected/remote DB detected and INV_ALLOW_DISPOSABLE is not set to 1');
+  if (!appDbUrl || appDbUrl.trim() === '') {
+    if (isDbRequired) {
+      console.error('[FAIL] DATABASE_URL environment variable is required for application role (an_app) tests when REQUIRE_DB=1 or CI=true');
+      assert(false, 'DATABASE_URL environment variable is required for an_app application role tests');
+      process.exit(1);
+    } else {
+      reportSkipped('T1-T7 Live PostgreSQL integration proof SKIPPED: DATABASE_URL is not configured.');
+      console.log('[INFO] Static invariant checks verified. Disposable PostgreSQL environment with DATABASE_URL needed for live concurrency proof.');
+    }
+  } else if (isProductionOrSupabaseDb(appDbUrl) && process.env.INV_ALLOW_DISPOSABLE !== '1') {
+    reportSkipped('T1-T7 Live PostgreSQL integration proof SKIPPED: Protected/remote DB detected in DATABASE_URL and INV_ALLOW_DISPOSABLE is not set to 1');
   } else {
-    console.log('[Live Proof] Connecting to disposable PostgreSQL instance via independent connections...');
+    console.log('[Live Proof] Connecting to disposable PostgreSQL instance using application role (an_app)...');
 
-    const pgConfig = buildPgConfig(dbUrl, process.env);
-    const client1 = new pg.Client(pgConfig);
-    const client2 = new pg.Client(pgConfig);
+    const appPgConfig = buildPgConfig(appDbUrl, process.env);
+    const appClient1 = new pg.Client(appPgConfig);
+    const appClient2 = new pg.Client(appPgConfig);
+    const appClient3 = new pg.Client(appPgConfig);
+
+    let adminClient: pg.Client | null = null;
+    if (adminDbUrl && adminDbUrl.trim() !== '') {
+      const adminPgConfig = buildPgConfig(adminDbUrl, process.env);
+      adminClient = new pg.Client(adminPgConfig);
+    }
 
     let compId = '';
     let whA = '';
@@ -122,117 +137,169 @@ async function runVerification() {
     let comp2Id = '';
 
     try {
-      await client1.connect();
-      await client2.connect();
+      await appClient1.connect();
+      await appClient2.connect();
+      await appClient3.connect();
+      if (adminClient) {
+        await adminClient.connect();
+      }
+
+      // --- SECTION 3: APPLICATION ROLE IDENTITY ASSERTIONS ---
+      const roleRes = await appClient1.query<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean }>(`
+        SELECT current_user, rolsuper, rolbypassrls 
+        FROM pg_roles 
+        WHERE rolname = current_user;
+      `);
+      const userAttrs = roleRes.rows[0];
+      const isAppUser = Boolean(userAttrs && userAttrs.current_user === 'an_app');
+      assert(isAppUser, `Application Role Check: Connection current_user is 'an_app' (actual: '${userAttrs?.current_user}')`);
+      assert(userAttrs?.rolsuper === false, 'Application Role Check: an_app has rolsuper=false (not superuser)');
+      assert(userAttrs?.rolbypassrls === false, 'Application Role Check: an_app has rolbypassrls=false (strictly subject to RLS)');
+
+      if (!isAppUser || userAttrs?.rolsuper || userAttrs?.rolbypassrls) {
+        console.error('[FATAL SECURITY ERROR] Application connection is not authenticated as an_app or has elevated privileges. Halting test.');
+        process.exit(1);
+      }
+
+      // Verify an_app is not owner of inventory tables
+      const ownerRes = await appClient1.query<{ tablename: string }>(`
+        SELECT c.relname as tablename
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_roles r ON r.oid = c.relowner
+        WHERE n.nspname = 'public' AND r.rolname = 'an_app' AND c.relname IN ('inv_stock_balances', 'inv_stock_movements');
+      `);
+      assert(ownerRes.rows.length === 0, 'Application Role Check: an_app is not the owner of inv_stock_balances or inv_stock_movements');
+
+      // Verify RLS and FORCE RLS are active on inv_stock_balances
+      const rlsRes = await appClient1.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(`
+        SELECT c.relrowsecurity, c.relforcerowsecurity
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'inv_stock_balances';
+      `);
+      const rlsAttrs = rlsRes.rows[0];
+      assert(Boolean(rlsAttrs?.relrowsecurity && rlsAttrs?.relforcerowsecurity), 'RLS Check: RLS and FORCE RLS are active on inv_stock_balances');
 
       // Prove independent connections using pg_backend_pid()
-      const pidRes1 = await client1.query('SELECT pg_backend_pid() as pid;');
-      const pidRes2 = await client2.query('SELECT pg_backend_pid() as pid;');
+      const pidRes1 = await appClient1.query<{ pid: number }>('SELECT pg_backend_pid() as pid;');
+      const pidRes2 = await appClient2.query<{ pid: number }>('SELECT pg_backend_pid() as pid;');
       const pid1 = pidRes1.rows[0].pid;
       const pid2 = pidRes2.rows[0].pid;
-
       const independentConnections = Boolean(pid1 && pid2 && pid1 !== pid2);
-      console.log(`Recorded pg_backend_pid Values: Client 1 = ${pid1}, Client 2 = ${pid2}`);
+      console.log(`Recorded pg_backend_pid Values: appClient1 = ${pid1}, appClient2 = ${pid2}`);
       assert(independentConnections, `Independent DB connections verified (PID 1: ${pid1}, PID 2: ${pid2})`);
 
-      // Setup disposable test data
-      const suffix = Date.now();
-      const compRes = await client1.query(
+      // --- SECTION 4: DATA SETUP ---
+      const suffix = Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+
+      // Create companies (an_app has companies_app_policy USING(true) WITH CHECK(true))
+      const compRes = await appClient1.query<{ id: string }>(
         "INSERT INTO companies (code, name_ar) VALUES ($1, 'شركة اختبار المخزون الذري') RETURNING id;",
         [`INV_ATOMIC_${suffix}`]
       );
       compId = compRes.rows[0].id;
 
-      const comp2Res = await client1.query(
+      const comp2Res = await appClient1.query<{ id: string }>(
         "INSERT INTO companies (code, name_ar) VALUES ($1, 'شركة اختبار العزل') RETURNING id;",
         [`INV_ISO_${suffix}`]
       );
       comp2Id = comp2Res.rows[0].id;
 
-      const whARes = await client1.query(
+      // Set tenant context for appClient1 to create warehouses and items for compId
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
+      const whARes = await appClient1.query<{ id: string }>(
         "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, 'WHA', 'مستودع أ') RETURNING id;",
         [compId]
       );
       whA = whARes.rows[0].id;
 
-      const whBRes = await client1.query(
+      const whBRes = await appClient1.query<{ id: string }>(
         "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, 'WHB', 'مستودع ب') RETURNING id;",
         [compId]
       );
       whB = whBRes.rows[0].id;
 
-      const whCRes = await client1.query(
+      const whCRes = await appClient1.query<{ id: string }>(
         "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, 'WHC', 'مستودع ج') RETURNING id;",
         [compId]
       );
       whC = whCRes.rows[0].id;
 
-      const itemRes = await client1.query(
+      const itemRes = await appClient1.query<{ id: string }>(
         "INSERT INTO inv_items (company_id, code, name_ar, uom) VALUES ($1, 'ITEM1', 'صنف تجريبي', 'unit') RETURNING id;",
         [compId]
       );
       itemId = itemRes.rows[0].id;
 
-      // Set tenant context on both connections
-      await client1.query("SELECT set_config('app.current_tenant_id', $1, false);", [compId]);
-      await client2.query("SELECT set_config('app.current_tenant_id', $1, false);", [compId]);
+      await appClient1.query('COMMIT;');
 
-      // T1: Concurrent RECEIVE into absent balance row
-      console.log('\nRunning T1: Concurrent RECEIVE (10 and 15)...');
+      // --- T1: CONCURRENT RECEIVE ---
+      console.log('\nRunning T1: Concurrent RECEIVE (10 and 15) using an_app connections...');
       const receive1 = async () => {
-        await client1.query('BEGIN;');
-        await client1.query(
+        await appClient1.query('BEGIN;');
+        await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+        await appClient1.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, 10, NOW())
            ON CONFLICT (company_id, warehouse_id, item_id)
            DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty, updated_at = NOW();`,
           [compId, whA, itemId]
         );
-        await client1.query(
+        await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo)
            VALUES ($1, $2, $3, 'receive', 10, 'T1 receive 10');`,
           [compId, whA, itemId]
         );
-        await client1.query('COMMIT;');
+        await appClient1.query('COMMIT;');
       };
 
       const receive2 = async () => {
-        await client2.query('BEGIN;');
-        await client2.query(
+        await appClient2.query('BEGIN;');
+        await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+        await appClient2.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, 15, NOW())
            ON CONFLICT (company_id, warehouse_id, item_id)
            DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty, updated_at = NOW();`,
           [compId, whA, itemId]
         );
-        await client2.query(
+        await appClient2.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo)
            VALUES ($1, $2, $3, 'receive', 15, 'T1 receive 15');`,
           [compId, whA, itemId]
         );
-        await client2.query('COMMIT;');
+        await appClient2.query('COMMIT;');
       };
 
       await Promise.all([receive1(), receive2()]);
 
-      const t1BalRes = await client1.query(
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const t1BalRes = await appClient1.query<{ qty: number }>(
         "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
         [compId, whA, itemId]
       );
+      await appClient1.query('COMMIT;');
       const t1Qty = t1BalRes.rows[0]?.qty;
       assert(t1Qty === 25, `T1: Concurrent receive into absent row produced exact sum 25 (actual: ${t1Qty})`);
 
-      // T2: Concurrent TRANSFERS into an absent destination
-      console.log('\nRunning T2: Concurrent TRANSFERS into absent destination WH_B...');
-      // Start with 100 in WH_A
-      await client1.query(
+      // --- T2: CONCURRENT TRANSFERS INTO ABSENT DESTINATION ---
+      console.log('\nRunning T2: Concurrent TRANSFERS into absent destination WH_B using an_app...');
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      await appClient1.query(
         "UPDATE inv_stock_balances SET qty = 100 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
         [compId, whA, itemId]
       );
+      await appClient1.query('COMMIT;');
 
       const transferOp = async (client: pg.Client, amount: number, memo: string) => {
         await client.query('BEGIN;');
-        // 1. Ensure rows exist
+        await client.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
         await client.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, 0, NOW())
@@ -246,13 +313,11 @@ async function runVerification() {
           [compId, whB, itemId]
         );
 
-        // 2. Lock in sorted order
         const [w1, w2] = [whA, whB].sort();
         await client.query("SELECT qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 FOR UPDATE;", [compId, w1, itemId]);
         await client.query("SELECT qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 FOR UPDATE;", [compId, w2, itemId]);
 
-        // 3. Decrement source
-        const decRes = await client.query(
+        const decRes = await client.query<{ qty: number }>(
           `UPDATE inv_stock_balances SET qty = qty - $4, updated_at = NOW()
            WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND qty >= $4
            RETURNING qty::float as qty;`,
@@ -263,7 +328,6 @@ async function runVerification() {
           throw new Error('INSUFFICIENT_STOCK');
         }
 
-        // 4. Increment destination
         await client.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, $4, NOW())
@@ -272,7 +336,6 @@ async function runVerification() {
           [compId, whB, itemId, amount]
         );
 
-        // 5. Insert paired movements
         const tId = '11111111-2222-3333-4444-' + String(amount).padStart(12, '0');
         await client.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo, transfer_id)
@@ -289,32 +352,39 @@ async function runVerification() {
       };
 
       await Promise.all([
-        transferOp(client1, 20, 'Transfer 20'),
-        transferOp(client2, 30, 'Transfer 30'),
+        transferOp(appClient1, 20, 'Transfer 20'),
+        transferOp(appClient2, 30, 'Transfer 30'),
       ]);
 
-      const t2DestRes = await client1.query(
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const t2DestRes = await appClient1.query<{ qty: number }>(
         "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
         [compId, whB, itemId]
       );
-      const t2SourceRes = await client1.query(
+      const t2SourceRes = await appClient1.query<{ qty: number }>(
         "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
         [compId, whA, itemId]
       );
+      await appClient1.query('COMMIT;');
       const destQty = t2DestRes.rows[0]?.qty;
       const sourceQty = t2SourceRes.rows[0]?.qty;
       assert(destQty === 50 && sourceQty === 50, `T2: Concurrent transfers into absent destination resulted in WH_B: ${destQty} (expected 50), WH_A: ${sourceQty} (expected 50)`);
 
-      // T3: Concurrent ISSUE (10 initial, two requests of 7 each -> exactly one succeeds)
-      console.log('\nRunning T3: Concurrent ISSUE (10 initial, two requests of 7 each)...');
-      await client1.query(
+      // --- T3: CONCURRENT ISSUE ---
+      console.log('\nRunning T3: Concurrent ISSUE (10 initial, two requests of 7 each) using an_app...');
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      await appClient1.query(
         "UPDATE inv_stock_balances SET qty = 10 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
         [compId, whA, itemId]
       );
+      await appClient1.query('COMMIT;');
 
       const issueOp = async (client: pg.Client) => {
         await client.query('BEGIN;');
-        const res = await client.query(
+        await client.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+        const res = await client.query<{ qty: number }>(
           `UPDATE inv_stock_balances SET qty = qty - 7, updated_at = NOW()
            WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND qty >= 7
            RETURNING qty::float as qty;`,
@@ -333,29 +403,36 @@ async function runVerification() {
         return { success: true };
       };
 
-      const [resI1, resI2] = await Promise.all([issueOp(client1), issueOp(client2)]);
+      const [resI1, resI2] = await Promise.all([issueOp(appClient1), issueOp(appClient2)]);
       const oneSucceeded = (resI1.success && !resI2.success) || (!resI1.success && resI2.success);
 
-      const t3BalRes = await client1.query(
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const t3BalRes = await appClient1.query<{ qty: number }>(
         "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
         [compId, whA, itemId]
       );
+      await appClient1.query('COMMIT;');
       const t3FinalQty = t3BalRes.rows[0]?.qty;
       assert(oneSucceeded && t3FinalQty === 3, `T3: Exactly one issue succeeded, one rejected, final balance is 3 (actual: ${t3FinalQty})`);
 
-      // T4: Concurrent TRANSFERS in opposite directions (WH_A <-> WH_B) proving deadlock-free lock ordering
-      console.log('\nRunning T4: Concurrent reverse-direction transfers (WH_A <-> WH_B)...');
-      await client1.query("UPDATE inv_stock_balances SET qty = 50 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whA, itemId]);
-      await client1.query("UPDATE inv_stock_balances SET qty = 50 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whB, itemId]);
+      // --- T4: CONCURRENT REVERSE TRANSFERS ---
+      console.log('\nRunning T4: Concurrent reverse-direction transfers (WH_A <-> WH_B) using an_app...');
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      await appClient1.query("UPDATE inv_stock_balances SET qty = 50 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whA, itemId]);
+      await appClient1.query("UPDATE inv_stock_balances SET qty = 50 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whB, itemId]);
+      await appClient1.query('COMMIT;');
 
       const transferDir = async (client: pg.Client, fromWh: string, toWh: string, amount: number) => {
         await client.query('BEGIN;');
-        // Deadlock-safe sorted lock ordering
+        await client.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
         const [w1, w2] = [fromWh, toWh].sort();
         await client.query("SELECT qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 FOR UPDATE;", [compId, w1, itemId]);
         await client.query("SELECT qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 FOR UPDATE;", [compId, w2, itemId]);
 
-        const dec = await client.query(
+        const dec = await client.query<{ qty: number }>(
           `UPDATE inv_stock_balances SET qty = qty - $4, updated_at = NOW()
            WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND qty >= $4
            RETURNING qty::float as qty;`,
@@ -377,113 +454,223 @@ async function runVerification() {
       };
 
       await Promise.all([
-        transferDir(client1, whA, whB, 15), // WH_A: 50 -> 35, WH_B: 50 -> 65
-        transferDir(client2, whB, whA, 10), // WH_B: 65 -> 55, WH_A: 35 -> 45
+        transferDir(appClient1, whA, whB, 15),
+        transferDir(appClient2, whB, whA, 10),
       ]);
 
-      const t4ARes = await client1.query("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whA, itemId]);
-      const t4BRes = await client1.query("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whB, itemId]);
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const t4ARes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whA, itemId]);
+      const t4BRes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whB, itemId]);
+      await appClient1.query('COMMIT;');
       const balA = t4ARes.rows[0]?.qty;
       const balB = t4BRes.rows[0]?.qty;
-      const totalStock = balA + balB;
+      const totalStock = (balA || 0) + (balB || 0);
       assert(balA === 45 && balB === 55 && totalStock === 100, `T4: Reverse transfers completed without deadlock, stock conserved (WH_A: ${balA}, WH_B: ${balB}, Total: ${totalStock})`);
 
-      // T5: Transaction rollback preserves atomicity (failure rolls back balance, movements, audit)
-      console.log('\nRunning T5: Transaction rollback atomicity...');
-      const preMovementsRes = await client1.query("SELECT count(*)::int as count FROM inv_stock_movements WHERE company_id = $1 AND warehouse_id = $2;", [compId, whC]);
+      // --- T5: TRANSACTION ROLLBACK ATOMICITY ---
+      console.log('\nRunning T5: Transaction rollback atomicity using an_app...');
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const preMovementsRes = await appClient1.query<{ count: number }>("SELECT count(*)::int as count FROM inv_stock_movements WHERE company_id = $1 AND warehouse_id = $2;", [compId, whC]);
+      await appClient1.query('COMMIT;');
       const preCount = preMovementsRes.rows[0].count;
 
+      let t5FailedAsExpected = false;
+      let t5ErrCode = '';
       try {
-        await client1.query('BEGIN;');
-        // 1. Increment balance
-        await client1.query(
+        await appClient1.query('BEGIN;');
+        await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+        await appClient1.query(
           `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
            VALUES ($1, $2, $3, 99, NOW())
            ON CONFLICT (company_id, warehouse_id, item_id)
            DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty, updated_at = NOW();`,
           [compId, whC, itemId]
         );
-        // 2. Insert valid movement
-        await client1.query(
+        await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo)
            VALUES ($1, $2, $3, 'receive', 99, 'T5 test');`,
           [compId, whC, itemId]
         );
-        // 3. Force failure (violates non-null / foreign key)
-        await client1.query(
+        // Force explicit foreign key failure (invalid non-existent item UUID)
+        await appClient1.query(
           `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty)
-           VALUES ($1, $2, '00000000-0000-0000-0000-000000000000', 'invalid_type', -50);`
+           VALUES ($1, $2, '00000000-0000-0000-0000-000000000000', 'receive', 50);`,
+          [compId, whC]
         );
-        await client1.query('COMMIT;');
-      } catch {
-        await client1.query('ROLLBACK;');
+        await appClient1.query('COMMIT;');
+      } catch (err: any) {
+        t5ErrCode = err.code || '';
+        if (err.code === '23503') { // foreign_key_violation
+          t5FailedAsExpected = true;
+        }
+        await appClient1.query('ROLLBACK;');
       }
 
-      const postBalRes = await client1.query("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whC, itemId]);
-      const postMovementsRes = await client1.query("SELECT count(*)::int as count FROM inv_stock_movements WHERE company_id = $1 AND warehouse_id = $2;", [compId, whC]);
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const postBalRes = await appClient1.query<{ qty: number }>("SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;", [compId, whC, itemId]);
+      const postMovementsRes = await appClient1.query<{ count: number }>("SELECT count(*)::int as count FROM inv_stock_movements WHERE company_id = $1 AND warehouse_id = $2;", [compId, whC]);
+      await appClient1.query('COMMIT;');
       const postQty = postBalRes.rows[0]?.qty;
       const postCount = postMovementsRes.rows[0].count;
 
-      assert(postQty === undefined && postCount === preCount, `T5: Rollback cleaned up completely (balance row absent, movements count unchanged: ${postCount})`);
+      assert(t5FailedAsExpected && postQty === undefined && postCount === preCount, `T5: Rollback cleaned up completely on SQLSTATE 23503 (balance row absent, movements count unchanged: ${postCount})`);
 
-      // T6: Repository & validation behavior (conditional decrement rejection & DB check constraint)
-      console.log('\nRunning T6: Repository conditional decrement validation...');
-      const decFailRes = await client1.query(
+      // --- T6: REPOSITORY & DB VALIDATION ---
+      console.log('\nRunning T6: Repository conditional decrement & DB check constraint validation using an_app...');
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const decFailRes = await appClient1.query<{ qty: number }>(
         `UPDATE inv_stock_balances SET qty = qty - 999, updated_at = NOW()
          WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND qty >= 999
          RETURNING qty::float as qty;`,
         [compId, whA, itemId]
       );
+      await appClient1.query('COMMIT;');
       assert(decFailRes.rows.length === 0, 'T6: Decrement with amount exceeding balance returns 0 rows (no negative balance allowed)');
 
-      // Verify DB CHECK constraint blocks negative quantity directly
       let checkConstraintTriggered = false;
       try {
-        await client1.query('SAVEPOINT sp_chk;');
-        await client1.query(
+        await appClient1.query('BEGIN;');
+        await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+        await appClient1.query(
           "UPDATE inv_stock_balances SET qty = -10 WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
           [compId, whA, itemId]
         );
+        await appClient1.query('COMMIT;');
       } catch (err: any) {
         if (err.code === '23514') { // check_violation
           checkConstraintTriggered = true;
         }
-        await client1.query('ROLLBACK TO SAVEPOINT sp_chk;');
+        await appClient1.query('ROLLBACK;');
       }
-      assert(checkConstraintTriggered, 'T6: Direct negative balance update rejected by DB CHECK constraint (23514)');
+      assert(checkConstraintTriggered, 'T6: Direct negative balance update rejected by DB CHECK constraint (SQLSTATE 23514)');
 
-      // T7: Tenant and entity isolation
-      console.log('\nRunning T7: Tenant isolation verification...');
-      // Set client2 context to company 2
-      await client2.query("SELECT set_config('app.current_tenant_id', $1, false);", [comp2Id]);
-      const comp2BalRes = await client2.query(
+      // --- T7: TENANT ISOLATION & RLS PROOF UNDER AN_APP ---
+      console.log('\nRunning T7: Strict Tenant Isolation & RLS Proof using an_app connections...');
+
+      // 1. Read Own Company Data
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const ownReadRes = await appClient1.query<{ qty: number }>(
+        "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+        [compId, whA, itemId]
+      );
+      await appClient1.query('COMMIT;');
+      assert(ownReadRes.rows.length === 1 && ownReadRes.rows[0].qty === 45, 'T7.1: appClient1 under company A context reads own company A stock balances');
+
+      // 2. Read Other Company Data (Filtered by RLS)
+      await appClient2.query('BEGIN;');
+      await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+      const otherReadRes = await appClient2.query(
         "SELECT * FROM inv_stock_balances WHERE company_id = $1;",
         [compId]
       );
-      assert(comp2BalRes.rows.length === 0, 'T7: Cross-tenant query under company 2 context returned 0 rows for company 1 balances (RLS isolation)');
+      await appClient2.query('COMMIT;');
+      assert(otherReadRes.rows.length === 0, 'T7.2: appClient2 under company B context returns 0 rows when querying company A balances (RLS USING clause)');
+
+      // 3. Insert Other Company Data (Rejected by RLS WITH CHECK)
+      let rlsInsertRejected = false;
+      let rlsInsertErrCode = '';
+      try {
+        await appClient2.query('BEGIN;');
+        await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+        await appClient2.query(
+          "INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty) VALUES ($1, $2, $3, 99);",
+          [compId, whA, itemId]
+        );
+        await appClient2.query('COMMIT;');
+      } catch (err: any) {
+        rlsInsertErrCode = err.code || '';
+        if (err.code === '42501') { // insufficient_privilege / RLS policy violation
+          rlsInsertRejected = true;
+        }
+        await appClient2.query('ROLLBACK;');
+      }
+      assert(rlsInsertRejected, `T7.3: appClient2 under company B context inserting into company A balances strictly rejected by SQLSTATE 42501 (actual code: '${rlsInsertErrCode}')`);
+
+      // 4. Update Other Company Data (Affects 0 rows, original balance unchanged)
+      await appClient2.query('BEGIN;');
+      await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
+      const updateOtherRes = await appClient2.query(
+        "UPDATE inv_stock_balances SET qty = 999 WHERE company_id = $1 RETURNING qty;",
+        [compId]
+      );
+      await appClient2.query('COMMIT;');
+      assert(updateOtherRes.rowCount === 0, 'T7.4: appClient2 under company B context updating company A balances affected 0 rows');
+
+      // Verify company A balance remains unchanged (45)
+      await appClient1.query('BEGIN;');
+      await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+      const verifyUnchangedRes = await appClient1.query<{ qty: number }>(
+        "SELECT qty::float as qty FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+        [compId, whA, itemId]
+      );
+      await appClient1.query('COMMIT;');
+      assert(verifyUnchangedRes.rows[0]?.qty === 45, 'T7.4b: Company A stock balance remained unchanged at 45 after cross-tenant UPDATE attempt');
+
+      // 5. Unset Tenant Context Isolation (appClient3 without setting tenant_id)
+      await appClient3.query('BEGIN;');
+      await appClient3.query("SELECT set_config('app.current_tenant_id', '', true);");
+      const unsetReadRes = await appClient3.query(
+        "SELECT * FROM inv_stock_balances WHERE company_id = $1;",
+        [compId]
+      );
+      await appClient3.query('COMMIT;');
+      assert(unsetReadRes.rows.length === 0, 'T7.5: appClient3 with empty tenant context returns 0 rows for any company balances');
+
+      let unsetInsertRejected = false;
+      try {
+        await appClient3.query('BEGIN;');
+        await appClient3.query("SELECT set_config('app.current_tenant_id', '', true);");
+        await appClient3.query(
+          "INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty) VALUES ($1, $2, $3, 99);",
+          [compId, whA, itemId]
+        );
+        await appClient3.query('COMMIT;');
+      } catch (err: any) {
+        if (err.code === '42501') {
+          unsetInsertRejected = true;
+        }
+        await appClient3.query('ROLLBACK;');
+      }
+      assert(unsetInsertRejected, 'T7.6: appClient3 with empty tenant context inserting balance strictly rejected by SQLSTATE 42501');
 
     } finally {
-      // Safe cleanup of test data
+      // Safe cleanup in finally block
       try {
-        if (compId) {
-          await client1.query("DELETE FROM inv_stock_movements WHERE company_id = $1;", [compId]);
-          await client1.query("DELETE FROM inv_stock_balances WHERE company_id = $1;", [compId]);
-          await client1.query("DELETE FROM inv_items WHERE company_id = $1;", [compId]);
-          await client1.query("DELETE FROM inv_warehouses WHERE company_id = $1;", [compId]);
-          await client1.query("DELETE FROM companies WHERE id = $1;", [compId]);
+        await appClient1.query('ROLLBACK;').catch(() => {});
+        await appClient2.query('ROLLBACK;').catch(() => {});
+        await appClient3.query('ROLLBACK;').catch(() => {});
+      } catch {}
+
+      try {
+        await appClient1.end().catch(() => {});
+        await appClient2.end().catch(() => {});
+        await appClient3.end().catch(() => {});
+      } catch {}
+
+      // Targeted cleanup using adminClient if available
+      if (adminClient) {
+        try {
+          if (compId || comp2Id) {
+            const targetIds = [compId, comp2Id].filter(Boolean);
+            await adminClient.query("DELETE FROM inv_stock_movements WHERE company_id = ANY($1);", [targetIds]);
+            await adminClient.query("DELETE FROM inv_stock_balances WHERE company_id = ANY($1);", [targetIds]);
+            await adminClient.query("DELETE FROM inv_items WHERE company_id = ANY($1);", [targetIds]);
+            await adminClient.query("DELETE FROM inv_warehouses WHERE company_id = ANY($1);", [targetIds]);
+            await adminClient.query("DELETE FROM companies WHERE id = ANY($1);", [targetIds]);
+          }
+        } catch (cleanupErr) {
+          console.error('[WARNING] Data cleanup error in adminClient finally:', cleanupErr);
+        } finally {
+          try {
+            await adminClient.end().catch(() => {});
+          } catch {}
         }
-        if (comp2Id) {
-          await client1.query("DELETE FROM companies WHERE id = $1;", [comp2Id]);
-        }
-      } catch (cleanupErr) {
-        console.error('Warning during test cleanup:', cleanupErr);
       }
-      try {
-        await client1.end();
-      } catch {}
-      try {
-        await client2.end();
-      } catch {}
     }
   }
 
