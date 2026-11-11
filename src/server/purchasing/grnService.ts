@@ -158,23 +158,12 @@ export class GrnService {
           throw new ValidationError(`الصنف بـ ID (${line.itemId}) غير موجود أو غير نشط`);
         }
 
-        // Lock existing stock balance
-        const existingBalance = await this.stockRepo.getBalanceForUpdate(
+        // Atomically increment stock balance
+        await this.stockRepo.incrementBalance(
           companyId,
           grn.warehouseId,
           line.itemId,
-          tx
-        );
-
-        const currentQty = existingBalance ? Number(existingBalance.qty) : 0;
-        const newQty = currentQty + Number(line.qty);
-
-        // Upsert new stock balance
-        await this.stockRepo.upsertBalance(
-          companyId,
-          grn.warehouseId,
-          line.itemId,
-          newQty,
+          Number(line.qty),
           tx
         );
 

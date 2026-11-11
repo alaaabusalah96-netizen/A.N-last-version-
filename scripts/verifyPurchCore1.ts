@@ -40,12 +40,12 @@ function runVerification() {
     appContent.includes("'/api/purchasing'");
   assert(hasPurchasingRoutes, 'S2: purchasingRoutes imported and mounted at /api/purchasing in app.ts');
 
-  // S3: postGrn in grnService.ts performs stock receive updates (upsertBalance & createMovement receive)
+  // S3: postGrn in grnService.ts performs stock receive updates (incrementBalance & createMovement receive)
   const grnServicePath = path.join(root, 'src/server/purchasing/grnService.ts');
   const grnServiceContent = fs.readFileSync(grnServicePath, 'utf8');
   const hasGrnStockReceive =
     grnServiceContent.includes('postGrn(') &&
-    grnServiceContent.includes('upsertBalance') &&
+    grnServiceContent.includes('incrementBalance') &&
     grnServiceContent.includes("'receive'");
   assert(hasGrnStockReceive, 'S3: grnService.ts postGrn method performs atomic stock receive increases on inventory');
 
