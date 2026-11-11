@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 async function runVerification() {
-  console.log('=== RUNNING GRN GL POSTING VERIFICATION (AN-FIX-GRN-GL-POST-1) ===');
+  console.log('=== RUNNING GRN GL CONTEXT VERIFICATION (AN-FIX-GRN-GL-CONTEXT-1) ===');
   let passed = 0;
   let failed = 0;
 
@@ -31,11 +31,20 @@ async function runVerification() {
   const repoUpdatesJournalId = grnRepoContent.includes('journal_entry_id = $5');
   assert(repoUpdatesJournalId, 'S2: grnRepository.ts marks GRN with journal_entry_id');
 
-  // S3: AI_PROJECT_STATE.md records AN-FIX-GRN-GL-POST-1
+  // S3: grnService.ts does NOT map warehouseId to orgUnitId and does NOT pass isPlatformAdmin=true
+  const hasNoOrgUnitWarehouse = !grnServiceContent.includes('orgUnitId: grn.warehouseId');
+  const hasNoPlatformAdminBypass = !grnServiceContent.includes('true // Assuming platform admin') && !grnServiceContent.includes(', true)');
+  assert(hasNoOrgUnitWarehouse && hasNoPlatformAdminBypass, 'S3: grnService.ts GL context does not map warehouse to orgUnitId or pass isPlatformAdmin=true');
+
+  // S4: grnService.ts retains incrementBalance
+  const hasIncrementBalance = grnServiceContent.includes('incrementBalance');
+  assert(hasIncrementBalance, 'S4: grnService.ts retains atomic incrementBalance');
+
+  // S5: AI_PROJECT_STATE.md records AN-FIX-GRN-GL-CONTEXT-1 or AN-FIX-GRN-GL-POST-1
   const statePath = path.join(root, 'docs/foundation/AI_PROJECT_STATE.md');
   const stateContent = fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '';
-  const hasStateRecord = stateContent.includes('AN-FIX-GRN-GL-POST-1');
-  assert(hasStateRecord, 'S3: AI_PROJECT_STATE.md records AN-FIX-GRN-GL-POST-1');
+  const hasStateRecord = stateContent.includes('AN-FIX-GRN-GL-CONTEXT-1') || stateContent.includes('AN-FIX-GRN-GL-POST-1');
+  assert(hasStateRecord, 'S5: AI_PROJECT_STATE.md records GRN GL fix');
 
   console.log(`Summary -> Passed: ${passed} | Failed: ${failed}`);
   if (failed > 0) {

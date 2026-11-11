@@ -197,11 +197,9 @@ export class GrnService {
           lines: [
             { accountId: settings.inventoryAccountId, debit: totalAmount, credit: 0, lineMemo: `استلام مخزون سند ${grnNo}` },
             { accountId: settings.purchasesClearingAccountId, debit: 0, credit: totalAmount, lineMemo: `مقابل استلام مخزون سند ${grnNo}` }
-          ],
-          orgUnitId: grn.warehouseId // Using warehouse as org unit context for GL
+          ]
         },
-        actorId,
-        true // Assuming platform admin access or context-aware
+        actorId
       );
       
       const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '');
