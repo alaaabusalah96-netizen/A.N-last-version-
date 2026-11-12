@@ -8,6 +8,9 @@ import { generateCsrfToken, setCsrfCookie } from '../security/csrfProtection.js'
 import { InvalidCredentialsError, ValidationError } from '../http/errors.js';
 import { ExtendedRequest } from '../http/errorHandler.js';
 import { isAppPreview, isProduction } from '../config/env.js';
+import { defaultMembershipStore } from '../org/membershipStore.js';
+import { ROLE_PERMISSIONS, RoleName } from '../rbac/roles.js';
+import { PermissionCode } from '../rbac/permissions.js';
 
 export const authRoutes = Router();
 
@@ -211,14 +214,52 @@ function getSessionCookieOptions(req: Request, expires?: Date) {
   };
 }
 
+async function resolveEffectiveAccess(user: AuthenticatedRequest['user']): Promise<{
+  permissions: PermissionCode[];
+  memberships: { companyId: string; role: RoleName; isActive: boolean }[];
+  degraded: boolean;
+}> {
+  try {
+    if (user!.role === 'platform_admin') {
+      return {
+        permissions: [...ROLE_PERMISSIONS.platform_admin],
+        memberships: [],
+        degraded: false,
+      };
+    }
+    const raw = await defaultMembershipStore.listByUser(user!.id);
+    const active = raw.filter((m) => m.isActive !== false);
+    const permissions = new Set<PermissionCode>();
+    for (const membership of active) {
+      const perms = ROLE_PERMISSIONS[membership.role as RoleName] || [];
+      for (const p of perms) permissions.add(p);
+    }
+    return {
+      permissions: [...permissions],
+      memberships: active.map((m) => ({
+        companyId: m.companyId,
+        role: m.role as RoleName,
+        isActive: true,
+      })),
+      degraded: false,
+    };
+  } catch {
+    return { permissions: [], memberships: [], degraded: true };
+  }
+}
+
 // GET /api/auth/me
 authRoutes.get(
   '/me',
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const access = await resolveEffectiveAccess(req.user);
     return res.status(200).json({
       status: 'ok',
       user: req.user,
+      permissions: access.permissions,
+      memberships: access.memberships,
+      degraded: access.degraded,
     });
   })
 );

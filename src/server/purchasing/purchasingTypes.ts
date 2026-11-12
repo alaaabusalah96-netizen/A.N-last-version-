@@ -45,6 +45,7 @@ export interface GrnHeader {
   memo?: string | null;
   createdBy?: string | null;
   createdAt: string;
+  journalEntryId?: string | null;
   lines?: GrnLine[];
 }
 

@@ -20,6 +20,7 @@ export class GrnRepository {
           g.grn_no as "grnNo", 
           g.posted_at as "postedAt", 
           g.posted_by as "postedBy", 
+          g.journal_entry_id as "journalEntryId",
           g.memo, 
           g.created_by as "createdBy", 
           g.created_at as "createdAt"
@@ -58,6 +59,7 @@ export class GrnRepository {
           g.grn_no as "grnNo", 
           g.posted_at as "postedAt", 
           g.posted_by as "postedBy", 
+          g.journal_entry_id as "journalEntryId",
           g.memo, 
           g.created_by as "createdBy", 
           g.created_at as "createdAt"
@@ -116,6 +118,7 @@ export class GrnRepository {
         grn_no as "grnNo", 
         posted_at as "postedAt", 
         posted_by as "postedBy", 
+        journal_entry_id as "journalEntryId",
         memo, 
         created_by as "createdBy", 
         created_at as "createdAt"

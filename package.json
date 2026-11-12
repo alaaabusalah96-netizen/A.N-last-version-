@@ -96,6 +96,7 @@
     "test:ui-company-settings-accounts-1": "tsx scripts/verifyUiCompanySettingsAccounts1.ts",
     "test:fix-settings-fk-null-semantics-1": "tsx scripts/verifyFixSettingsFkNullSemantics1.ts",
     "test:numeric-qty-cost-1": "tsx scripts/verifyNumericQtyCost1.ts",
+    "test:grn-gl-me-1": "tsx scripts/verifyGrnGlOrderAndMe1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

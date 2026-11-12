@@ -111,6 +111,7 @@ const scripts = [
   'scripts/verifyUiCompanySettingsAccounts1.ts',
   'scripts/verifyFixSettingsFkNullSemantics1.ts',
   'scripts/verifyNumericQtyCost1.ts',
+  'scripts/verifyGrnGlOrderAndMe1.ts',
 ];
 
 export interface BatteryItemReport {

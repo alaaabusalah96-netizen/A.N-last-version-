@@ -11,6 +11,9 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
 import { toDecimal, toMoney } from '../lib/numeric.js';
+import { CompanySettings } from '../org/companySettingsTypes.js';
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class GrnService {
   constructor(
@@ -114,6 +117,27 @@ export class GrnService {
     });
   }
 
+  private resolveEntryDate(grn: GrnHeader): string {
+    const candidate = typeof grn.createdAt === 'string' ? grn.createdAt.slice(0, 10) : '';
+    if (ISO_DATE.test(candidate)) return candidate;
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private requireGlAccounts(settings: CompanySettings | null): {
+    inventoryAccountId: string;
+    purchasesClearingAccountId: string;
+  } {
+    if (!settings || !settings.inventoryAccountId || !settings.purchasesClearingAccountId) {
+      throw new ValidationError(
+        'لا يمكن ترحيل سند الاستلام محاسبياً قبل ضبط "حساب المخزون" و"حساب المشتريات المعلّقة" في إعدادات الشركة (الإعدادات ← الحسابات المحاسبية).'
+      );
+    }
+    return {
+      inventoryAccountId: settings.inventoryAccountId,
+      purchasesClearingAccountId: settings.purchasesClearingAccountId,
+    };
+  }
+
   /**
    * Confirm & Post Goods Receipt Note (ترحيل سند استلام البضائع إلى المخزون)
    * Atomic stock increase across all GRN lines in a single tenant transaction.
@@ -148,82 +172,79 @@ export class GrnService {
         throw new ValidationError('مستودع الاستلام غير موجود أو غير نشط');
       }
 
-      // 4. Mark GRN as posted
-      const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
-
-      // 3. Post each line to stock inventory atomically
-      let totalAmount = 0;
+      // READ-ONLY validation — no stock/GL writes yet
       for (const line of grn.lines) {
         const item = await this.itemRepo.findById(companyId, line.itemId, tx);
         if (!item || !item.isActive) {
           throw new ValidationError(`الصنف بـ ID (${line.itemId}) غير موجود أو غير نشط`);
         }
+      }
 
-        // Atomically increment stock balance
-        await this.stockRepo.incrementBalance(
-          companyId,
-          grn.warehouseId,
-          line.itemId,
-          toDecimal(line.qty),
-          tx
-        );
+      const settings = await this.settingsRepo.getByCompanyId(companyId);
+      const gl = this.requireGlAccounts(settings);
 
-        // Record stock movement
-        await this.stockRepo.createMovement(
-          companyId,
-          grn.warehouseId,
-          line.itemId,
-          'receive',
-          toDecimal(line.qty),
-          `استلام مشتريات (سند رقم ${grnNo})`,
-          actorId,
-          undefined,
-          tx
-        );
+      let totalAmount = 0;
+      for (const line of grn.lines) {
         totalAmount += toDecimal(line.qty) * toDecimal(line.unitCost || 0);
       }
       totalAmount = toMoney(totalAmount);
-
-      // 4. Post to General Ledger
-      const settings = await this.settingsRepo.getByCompanyId(companyId);
-      if (!settings || !settings.inventoryAccountId || !settings.purchasesClearingAccountId) {
-        throw new ValidationError('لم يتم إعداد حسابات المخزون أو حساب المشتريات في إعدادات الشركة');
+      if (!(totalAmount > 0)) {
+        throw new ValidationError(
+          'لا يمكن الترحيل المحاسبي: إجمالي قيمة السند صفر. يجب إدخال تكلفة وحدة أكبر من صفر لكل بند قبل الترحيل.'
+        );
       }
 
-      
+      const entryDate = this.resolveEntryDate(grn);
+      const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
+
+      // WRITE phase — stock then GL (same tx)
+      for (const line of grn.lines) {
+        await this.stockRepo.incrementBalance(companyId, grn.warehouseId, line.itemId, toDecimal(line.qty), tx);
+        await this.stockRepo.createMovement(
+          companyId, grn.warehouseId, line.itemId, 'receive', toDecimal(line.qty),
+          `استلام مشتريات (سند رقم ${grnNo})`, actorId, undefined, tx
+        );
+      }
+
       const journalEntry = await defaultJournalService.createDraftEntry(
         companyId,
         {
-          entryDate: new Date().toISOString().split('T')[0],
+          entryDate,
           memo: `ترحيل سند استلام بضائع رقم ${grnNo}`,
           lines: [
-            { accountId: settings.inventoryAccountId, debit: totalAmount, credit: 0, lineMemo: `استلام مخزون سند ${grnNo}` },
-            { accountId: settings.purchasesClearingAccountId, debit: 0, credit: totalAmount, lineMemo: `مقابل استلام مخزون سند ${grnNo}` }
+            { accountId: gl.inventoryAccountId, debit: totalAmount, credit: 0, lineMemo: `استلام مخزون سند ${grnNo}` },
+            { accountId: gl.purchasesClearingAccountId, debit: 0, credit: totalAmount, lineMemo: `مقابل استلام مخزون سند ${grnNo}` }
           ]
         },
         actorId,
         false,
         tx
       );
-      
-      const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '', false, tx);
 
-      // 5. Mark GRN as posted and link journal entry
+      const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '', false, tx);
       await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', postedJournal.id, tx);
 
       await this.auditService.record({
-        actorUserId: actorId || null,
+        actorUserId: actorId || '',
         companyId,
         action: 'GRN_POST',
         entityType: 'purch_grn',
         entityId: grnId,
-        metadata: { grnNo, warehouseId: grn.warehouseId, lineCount: grn.lines.length },
+        metadata: {
+          grnNo,
+          warehouseId: grn.warehouseId,
+          lineCount: grn.lines.length,
+          totalAmount,
+          entryDate,
+          journalEntryId: postedJournal.id,
+        },
       }, { executor: tx });
 
       const updatedGrn = await this.grnRepo.findById(companyId, grnId, tx);
       return updatedGrn!;
     });
   }
+
 }
 
 export const defaultGrnService = new GrnService();
