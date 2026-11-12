@@ -6,6 +6,7 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { StockBalance, StockMovement, RecordMovementInput, TransferInput } from './inventoryTypes.js';
 import { randomUUID } from 'node:crypto';
+import { toDecimal } from '../lib/numeric.js';
 
 export class StockService {
   constructor(
@@ -196,7 +197,7 @@ export class StockService {
 
       if (!balance) {
         const cur = await this.stockRepo.getBalanceForUpdate(companyId, input.warehouseId, input.itemId, tx);
-        const currentQty = cur ? Number(cur.qty) : 0;
+        const currentQty = toDecimal(cur?.qty);
         // STRICT NON-NEGATIVE STOCK GUARD
         if (currentQty < input.qty) {
           throw new ValidationError(
@@ -324,7 +325,7 @@ export class StockService {
 
       if (!sourceBalance) {
         const curSource = await this.stockRepo.getBalanceForUpdate(companyId, input.sourceWarehouseId, input.itemId, tx);
-        const sourceQty = curSource ? Number(curSource.qty) : 0;
+        const sourceQty = toDecimal(curSource?.qty);
         // STRICT NON-NEGATIVE STOCK GUARD FOR SOURCE WAREHOUSE
         if (sourceQty < input.qty) {
           throw new ValidationError(

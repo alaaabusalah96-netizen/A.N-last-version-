@@ -1,6 +1,7 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { GrnHeader, GrnLine, CreateGrnInput } from './purchasingTypes.js';
+import { toDecimal } from '../lib/numeric.js';
 
 export class GrnRepository {
   async listByCompany(companyId: string, customExecutor?: DbExecutor): Promise<GrnHeader[]> {
@@ -78,16 +79,20 @@ export class GrnRepository {
           i.code as "itemCode",
           i.name_ar as "itemNameAr",
           i.uom as "itemUom",
-          l.qty::float as "qty", 
-          l.unit_cost::float as "unitCost", 
+          l.qty as "qty", 
+          l.unit_cost as "unitCost", 
           l.line_no as "lineNo"
         FROM purch_grn_lines l
         INNER JOIN inv_items i ON i.id = l.item_id AND i.company_id = l.company_id
         WHERE l.grn_id = $1 AND l.company_id = $2
         ORDER BY l.line_no ASC
       `;
-      const linesRes = await executor.query<GrnLine>(linesSql, [grnId, companyId]);
-      header.lines = linesRes.rows;
+      const linesRes = await executor.query<any>(linesSql, [grnId, companyId]);
+      header.lines = linesRes.rows.map(r => ({
+        ...r,
+        qty: toDecimal(r.qty),
+        unitCost: toDecimal(r.unitCost)
+      }));
 
       return header;
     };
@@ -162,11 +167,11 @@ export class GrnRepository {
             grn_id as "grnId", 
             company_id as "companyId", 
             item_id as "itemId", 
-            qty::float as "qty", 
-            unit_cost::float as "unitCost", 
+            qty as "qty", 
+            unit_cost as "unitCost", 
             line_no as "lineNo"
         `;
-        const lineRes = await executor.query<GrnLine>(lineSql, [
+        const lineRes = await executor.query<any>(lineSql, [
           header.id,
           companyId,
           lineInput.itemId,
@@ -174,7 +179,12 @@ export class GrnRepository {
           lineInput.unitCost ?? null,
           i + 1,
         ]);
-        lines.push(lineRes.rows[0]);
+        const row = lineRes.rows[0];
+        lines.push({
+          ...row,
+          qty: toDecimal(row.qty),
+          unitCost: toDecimal(row.unitCost)
+        });
       }
 
       header.lines = lines;

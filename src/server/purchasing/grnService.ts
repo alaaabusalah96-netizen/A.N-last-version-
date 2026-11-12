@@ -10,6 +10,7 @@ import { defaultCompanySettingsRepository, CompanySettingsRepository } from '../
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
+import { toDecimal, toMoney } from '../lib/numeric.js';
 
 export class GrnService {
   constructor(
@@ -163,7 +164,7 @@ export class GrnService {
           companyId,
           grn.warehouseId,
           line.itemId,
-          Number(line.qty),
+          toDecimal(line.qty),
           tx
         );
 
@@ -173,14 +174,15 @@ export class GrnService {
           grn.warehouseId,
           line.itemId,
           'receive',
-          Number(line.qty),
+          toDecimal(line.qty),
           `استلام مشتريات (سند رقم ${grnNo})`,
           actorId,
           undefined,
           tx
         );
-        totalAmount += Number(line.qty) * Number(line.unitCost || 0);
+        totalAmount += toDecimal(line.qty) * toDecimal(line.unitCost || 0);
       }
+      totalAmount = toMoney(totalAmount);
 
       // 4. Post to General Ledger
       const settings = await this.settingsRepo.getByCompanyId(companyId);

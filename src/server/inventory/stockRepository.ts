@@ -1,6 +1,7 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { StockBalance, StockMovement, MovementType } from './inventoryTypes.js';
+import { toDecimal } from '../lib/numeric.js';
 
 export class StockRepository {
   async listBalancesByCompany(companyId: string, customExecutor?: DbExecutor): Promise<StockBalance[]> {
@@ -15,7 +16,7 @@ export class StockRepository {
           i.code as "itemCode",
           i.name_ar as "itemNameAr",
           i.uom as "itemUom",
-          b.qty::float as "qty", 
+          b.qty as "qty", 
           b.updated_at as "updatedAt"
         FROM inv_stock_balances b
         INNER JOIN inv_warehouses w ON w.id = b.warehouse_id AND w.company_id = b.company_id
@@ -23,8 +24,11 @@ export class StockRepository {
         WHERE b.company_id = $1
         ORDER BY w.code ASC, i.code ASC
       `;
-      const res = await executor.query<StockBalance>(sql, [companyId]);
-      return res.rows;
+      const res = await executor.query<any>(sql, [companyId]);
+      return res.rows.map(r => ({
+        ...r,
+        qty: toDecimal(r.qty)
+      }));
     };
 
     if (customExecutor) return await run(customExecutor);
@@ -42,14 +46,16 @@ export class StockRepository {
         company_id as "companyId", 
         warehouse_id as "warehouseId", 
         item_id as "itemId", 
-        qty::float as "qty", 
+        qty as "qty", 
         updated_at as "updatedAt"
       FROM inv_stock_balances
       WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3
       FOR UPDATE
     `;
-    const res = await executor.query<StockBalance>(sql, [companyId, warehouseId, itemId]);
-    return res.rows[0] || null;
+    const res = await executor.query<any>(sql, [companyId, warehouseId, itemId]);
+    const row = res.rows[0];
+    if (!row) return null;
+    return { ...row, qty: toDecimal(row.qty) };
   }
 
   async ensureBalanceRow(
@@ -82,11 +88,12 @@ export class StockRepository {
         company_id as "companyId", 
         warehouse_id as "warehouseId", 
         item_id as "itemId", 
-        qty::float as "qty", 
+        qty as "qty", 
         updated_at as "updatedAt"
     `;
-    const res = await executor.query<StockBalance>(sql, [companyId, warehouseId, itemId, qty]);
-    return res.rows[0];
+    const res = await executor.query<any>(sql, [companyId, warehouseId, itemId, qty]);
+    const row = res.rows[0];
+    return { ...row, qty: toDecimal(row.qty) };
   }
 
   async decrementBalance(
@@ -107,11 +114,13 @@ export class StockRepository {
         company_id as "companyId", 
         warehouse_id as "warehouseId", 
         item_id as "itemId", 
-        qty::float as "qty", 
+        qty as "qty", 
         updated_at as "updatedAt"
     `;
-    const res = await executor.query<StockBalance>(sql, [companyId, warehouseId, itemId, qty]);
-    return res.rows[0] || null;
+    const res = await executor.query<any>(sql, [companyId, warehouseId, itemId, qty]);
+    const row = res.rows[0];
+    if (!row) return null;
+    return { ...row, qty: toDecimal(row.qty) };
   }
 
   async upsertBalance(
@@ -130,11 +139,12 @@ export class StockRepository {
         company_id as "companyId", 
         warehouse_id as "warehouseId", 
         item_id as "itemId", 
-        qty::float as "qty", 
+        qty as "qty", 
         updated_at as "updatedAt"
     `;
-    const res = await executor.query<StockBalance>(sql, [companyId, warehouseId, itemId, newQty]);
-    return res.rows[0];
+    const res = await executor.query<any>(sql, [companyId, warehouseId, itemId, newQty]);
+    const row = res.rows[0];
+    return { ...row, qty: toDecimal(row.qty) };
   }
 
   async createMovement(
@@ -158,13 +168,13 @@ export class StockRepository {
           warehouse_id as "warehouseId", 
           item_id as "itemId", 
           movement_type as "movementType", 
-          qty::float as "qty", 
+          qty as "qty", 
           memo, 
           transfer_id as "transferId",
           created_by as "createdBy", 
           created_at as "createdAt"
       `;
-      const res = await executor.query<StockMovement>(sql, [
+      const res = await executor.query<any>(sql, [
         companyId,
         warehouseId,
         itemId,
@@ -174,7 +184,8 @@ export class StockRepository {
         createdBy || null,
         transferId || null,
       ]);
-      return res.rows[0];
+      const row = res.rows[0];
+      return { ...row, qty: toDecimal(row.qty) };
     };
 
     if (customExecutor) return await run(customExecutor);
@@ -194,7 +205,7 @@ export class StockRepository {
           i.code as "itemCode",
           i.name_ar as "itemNameAr",
           m.movement_type as "movementType", 
-          m.qty::float as "qty", 
+          m.qty as "qty", 
           m.memo, 
           m.transfer_id as "transferId",
           m.created_by as "createdBy", 
@@ -206,8 +217,8 @@ export class StockRepository {
         ORDER BY m.created_at DESC
         LIMIT 100
       `;
-      const res = await executor.query<StockMovement>(sql, [companyId]);
-      return res.rows;
+      const res = await executor.query<any>(sql, [companyId]);
+      return res.rows.map(r => ({ ...r, qty: toDecimal(r.qty) }));
     };
 
     if (customExecutor) return await run(customExecutor);
@@ -230,7 +241,7 @@ export class StockRepository {
           i.code as "itemCode",
           i.name_ar as "itemNameAr",
           i.uom as "itemUom",
-          b.qty::float as "qty", 
+          b.qty as "qty", 
           b.updated_at as "updatedAt"
         FROM inv_stock_balances b
         INNER JOIN inv_warehouses w ON w.id = b.warehouse_id AND w.company_id = b.company_id
@@ -238,8 +249,8 @@ export class StockRepository {
         WHERE b.company_id = $1 AND b.item_id = $2
         ORDER BY w.code ASC
       `;
-      const res = await executor.query<StockBalance>(sql, [companyId, itemId]);
-      return res.rows;
+      const res = await executor.query<any>(sql, [companyId, itemId]);
+      return res.rows.map(r => ({ ...r, qty: toDecimal(r.qty) }));
     };
 
     if (customExecutor) return await run(customExecutor);
@@ -289,7 +300,7 @@ export class StockRepository {
           i.code as "itemCode",
           i.name_ar as "itemNameAr",
           m.movement_type as "movementType", 
-          m.qty::float as "qty", 
+          m.qty as "qty", 
           m.memo, 
           m.transfer_id as "transferId",
           m.created_by as "createdBy", 
@@ -301,8 +312,8 @@ export class StockRepository {
         ORDER BY m.created_at DESC
         LIMIT 200
       `;
-      const res = await executor.query<StockMovement>(sql, params);
-      return res.rows;
+      const res = await executor.query<any>(sql, params);
+      return res.rows.map(r => ({ ...r, qty: toDecimal(r.qty) }));
     };
 
     if (customExecutor) return await run(customExecutor);
