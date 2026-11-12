@@ -65,3 +65,27 @@ export const ROLE_PERMISSIONS: Record<RoleName, PermissionCode[]> = {
     PERMISSIONS.PURCHASING_READ,
   ],
 };
+
+/**
+ * Legacy Membership Compatibility & Explicit Conversion Contract (WP-6):
+ * - Any `company_memberships` row with `role_id IS NULL` intentionally resolves
+ *   permissions via `ROLE_PERMISSIONS[membership.role]` for backward compatibility.
+ * - Migrations MUST NOT auto-convert legacy rows into dynamic `role_id` links.
+ * - Explicit conversion is performed strictly via operator/service action using
+ *   `LEGACY_ROLE_TO_SYSTEM_CODE`, preserving exact permission parity with the seeded
+ *   system roles from migration 031 (`company_admin`, `company_user`).
+ */
+export const LEGACY_ROLE_TO_SYSTEM_CODE: Record<Exclude<RoleName, 'platform_admin'>, RoleName> = {
+  company_admin: 'company_admin',
+  company_user: 'company_user',
+};
+
+export function getTargetSystemRoleCodeForLegacyMembership(
+  legacyRole: RoleName
+): Exclude<RoleName, 'platform_admin'> | null {
+  if (legacyRole === 'company_admin' || legacyRole === 'company_user') {
+    return LEGACY_ROLE_TO_SYSTEM_CODE[legacyRole] as Exclude<RoleName, 'platform_admin'>;
+  }
+  return null;
+}
+

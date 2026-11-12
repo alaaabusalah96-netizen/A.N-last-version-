@@ -127,6 +127,7 @@ const scripts = [
   'scripts/verifyUserScopeIsolation6.ts',
   'scripts/verifyGlMappingEvents7.ts',
   'scripts/verifyCustomFields8.ts',
+  'scripts/verifyRbacAssignment9.ts',
 ];
 
 export interface BatteryItemReport {

@@ -23,9 +23,13 @@ export class RbacService {
     private runWithTenant: TenantRunner = withTenantTransaction
   ) {}
 
-  invalidate(companyId?: string): void {
+  invalidate(companyId?: string, userId?: string): void {
     if (!companyId) {
       this.cache.clear();
+      return;
+    }
+    if (userId) {
+      this.cache.delete(`${companyId}:${userId}`);
       return;
     }
     const prefix = `${companyId}:`;
@@ -36,15 +40,20 @@ export class RbacService {
     }
   }
 
-  private async resolveMembershipPermissions(
+  /**
+   * Resolves effective permissions for a single company membership:
+   * - If `membership.roleId` is NULL: documented legacy compatibility path -> static ROLE_PERMISSIONS[membership.role].
+   * - If `membership.roleId` is present: STRICT FAIL-CLOSED dynamic contract:
+   *   - Returns permissions of active DB role in the same company.
+   *   - Returns [] if role is missing, inactive, or any DB/lookup failure occurs (never falls back to ROLE_PERMISSIONS).
+   */
+  async resolveMembershipPermissions(
     userId: string,
     membership: CompanyMembership
   ): Promise<PermissionCode[]> {
-    const staticFallback = ROLE_PERMISSIONS[membership.role as RoleName] || [];
-
-    // Backward-compatible path when membership.role_id is NULL
+    // Documented backward-compatible path ONLY when membership.role_id is NULL
     if (!membership.roleId) {
-      return staticFallback;
+      return ROLE_PERMISSIONS[membership.role as RoleName] || [];
     }
 
     const cacheKey = `${membership.companyId}:${userId}`;
@@ -68,9 +77,9 @@ export class RbacService {
       });
       return perms;
     } catch (err) {
-      // Fail back strictly to the static conservative role map (never fail-open)
-      console.error('[rbacService] Failed to read dynamic role permissions from DB; falling back to static map:', err);
-      return staticFallback;
+      // STRICT FAIL-CLOSED: When role_id is assigned and lookup fails, deny all permissions (never fall back to static map)
+      console.error('[rbacService] Fail-closed: dynamic role lookup failed for assigned role_id; denying permissions:', err);
+      return [];
     }
   }
 

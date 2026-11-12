@@ -2,10 +2,13 @@ import { defaultAuditService } from '../audit/auditService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
+import { isUuid } from '../http/validators.js';
+import { CompanyMemberRoleView, defaultMembershipRepository, MembershipRepository } from '../org/membershipRepository.js';
+import { CompanyMembership } from '../org/membershipStore.js';
 import { PERMISSIONS } from './permissions.js';
 import { defaultRbacService, TenantRunner } from './rbacService.js';
 import { defaultRoleRepository, RoleOrgLevel, RoleRecord, RoleRepository } from './roleRepository.js';
-import { ROLE_PERMISSIONS, RoleName } from './roles.js';
+import { getTargetSystemRoleCodeForLegacyMembership, ROLE_PERMISSIONS, RoleName } from './roles.js';
 
 export interface CreateRoleInput {
   code: string;
@@ -34,8 +37,9 @@ const SYSTEM_ROLE_LABELS: Array<{ code: RoleName; nameAr: string }> = [
 export class RoleService {
   constructor(
     private repo: RoleRepository = defaultRoleRepository,
-    private onInvalidate: (companyId: string) => void = (cid) => defaultRbacService.invalidate(cid),
-    private runWithTenant: TenantRunner = withTenantTransaction
+    private onInvalidate: (companyId: string, userId?: string) => void = (cid, uid) => defaultRbacService.invalidate(cid, uid),
+    private runWithTenant: TenantRunner = withTenantTransaction,
+    private membershipRepo: MembershipRepository = defaultMembershipRepository
   ) {}
 
   async bootstrapCompanyRoles(companyId: string, _actorId?: string, executor?: DbExecutor): Promise<void> {
@@ -335,6 +339,197 @@ export class RoleService {
    */
   async deleteRole(_companyId: string, _roleId: string): Promise<never> {
     throw new ValidationError('حذف الدور غير مسموح حفاظاً على الأثر التدقيقي — استخدم التعطيل بدلاً من الحذف');
+  }
+
+  /**
+   * التحقق من أن الدور صالح للتعيين لعضوية في نفس الشركة.
+   */
+  async validateAssignableRole(
+    companyId: string,
+    roleId: string,
+    tx?: DbExecutor
+  ): Promise<RoleRecord> {
+    if (!companyId || !isUuid(companyId)) {
+      throw new ValidationError('معرّف الشركة غير صالح');
+    }
+    if (!roleId || !isUuid(roleId)) {
+      throw new ValidationError('معرّف الدور غير صالح');
+    }
+
+    const inspect = async (ex: DbExecutor): Promise<RoleRecord> => {
+      const role = await this.repo.findById(companyId, roleId, ex);
+      if (!role || role.companyId !== companyId) {
+        throw new ValidationError('الدور المحدد غير موجود في هذه الشركة أو تابع لشركة أخرى');
+      }
+      if (role.code === 'platform_admin') {
+        throw new ValidationError('لا يمكن تعيين دور مدير المنصة (platform_admin) على عضوية شركة');
+      }
+      if (!role.isActive) {
+        throw new ValidationError(`لا يمكن تعيين الدور المعطّل '${role.nameAr}' (${role.code}) للعضوية`);
+      }
+      return role;
+    };
+
+    if (tx) {
+      return await inspect(tx);
+    }
+    return await this.runWithTenant(companyId, inspect);
+  }
+
+  /**
+   * تعيين دور ديناميكي (أو إرجاعه إلى مسار التوافق role_id = NULL) لعضوية داخل الشركة،
+   * مع كتابة سجل التدقيق وإبطال cache الصلاحيات فورياً.
+   */
+  async assignRole(
+    companyId: string,
+    userIdOrMembershipId: string,
+    roleId: string | null,
+    actorId: string
+  ): Promise<CompanyMembership> {
+    if (!companyId || !isUuid(companyId)) {
+      throw new ValidationError('معرّف الشركة غير صالح');
+    }
+    if (!userIdOrMembershipId || !isUuid(userIdOrMembershipId)) {
+      throw new ValidationError('معرّف المستخدم أو العضوية غير صالح');
+    }
+    if (!actorId || typeof actorId !== 'string') {
+      throw new ValidationError('actorId is required');
+    }
+    if (roleId !== null && (typeof roleId !== 'string' || !isUuid(roleId))) {
+      throw new ValidationError('معرّف الدور غير صالح');
+    }
+
+    return await this.runWithTenant(companyId, async (tx) => {
+      let existing = await this.membershipRepo.getMembership(userIdOrMembershipId, companyId, tx);
+      if (!existing) {
+        const all = await this.membershipRepo.listAllByCompany(companyId, tx);
+        existing = all.find((m) => m.id === userIdOrMembershipId) || null;
+      }
+      if (!existing) {
+        throw new NotFoundError('العضوية غير موجودة في هذه الشركة');
+      }
+
+      let targetRole: RoleRecord | null = null;
+      if (roleId !== null) {
+        targetRole = await this.validateAssignableRole(companyId, roleId, tx);
+      }
+
+      const updated = await this.membershipRepo.updateMembership(
+        existing.userId,
+        companyId,
+        { roleId },
+        tx
+      );
+      if (!updated) {
+        throw new NotFoundError('تعذر تحديث دور العضوية');
+      }
+
+      await defaultAuditService.record(
+        {
+          actorUserId: actorId,
+          companyId,
+          action: 'membership.role.assign',
+          entityType: 'company_membership',
+          entityId: updated.id,
+          metadata: {
+            userId: updated.userId,
+            fromRoleId: existing.roleId ?? null,
+            toRoleId: roleId,
+            toRoleCode: targetRole?.code ?? null,
+            legacyRole: existing.role,
+          },
+        },
+        { mode: 'required', executor: tx }
+      );
+
+      this.onInvalidate(companyId, updated.userId);
+      return updated;
+    });
+  }
+
+  /**
+   * جلب عضويات الشركة مع بيانات الدور الديناميكي المعين.
+   */
+  async listCompanyMemberRoles(companyId: string): Promise<CompanyMemberRoleView[]> {
+    if (!companyId || !isUuid(companyId)) {
+      throw new ValidationError('معرّف الشركة غير صالح');
+    }
+    return await this.runWithTenant(companyId, async (tx) => {
+      return await this.membershipRepo.listCompanyMemberRoles(companyId, tx);
+    });
+  }
+
+  /**
+   * تحويل صريح (لا تلقائي) لعضوية قديمة (role_id IS NULL) إلى الدور النظامي المقابل في 031
+   * وفق LEGACY_ROLE_TO_SYSTEM_CODE مع حفظ الأثر التدقيقي وإبطال الكاش فوراً.
+   */
+  async convertLegacyMembership(
+    companyId: string,
+    userId: string,
+    actorId: string
+  ): Promise<{ membership: CompanyMembership; role: RoleRecord }> {
+    if (!companyId || !isUuid(companyId)) {
+      throw new ValidationError('معرّف الشركة غير صالح');
+    }
+    if (!userId || !isUuid(userId)) {
+      throw new ValidationError('معرّف المستخدم غير صالح');
+    }
+    if (!actorId || typeof actorId !== 'string') {
+      throw new ValidationError('actorId is required');
+    }
+
+    return await this.runWithTenant(companyId, async (tx) => {
+      await this.ensureSeeded(companyId, tx);
+
+      const membership = await this.membershipRepo.getMembership(userId, companyId, tx);
+      if (!membership) {
+        throw new NotFoundError('العضوية غير موجودة في هذه الشركة');
+      }
+      if (membership.roleId) {
+        throw new ValidationError('العضوية مرتبطة بدور ديناميكي مسبقاً ولا تحتاج تحويل توافق');
+      }
+
+      const targetCode = getTargetSystemRoleCodeForLegacyMembership(membership.role);
+      if (!targetCode) {
+        throw new ValidationError(`الدور القديم '${membership.role}' غير قابل للتحويل التوافقي على مستوى الشركة`);
+      }
+
+      const targetRole = await this.repo.findByCode(companyId, targetCode, tx);
+      if (!targetRole || !targetRole.isActive) {
+        throw new ValidationError(`الدور النظامي المقابل '${targetCode}' غير موجود أو معطّل في هذه الشركة`);
+      }
+
+      const updated = await this.membershipRepo.updateMembership(
+        userId,
+        companyId,
+        { roleId: targetRole.id },
+        tx
+      );
+      if (!updated) {
+        throw new NotFoundError('تعذر تحويل العضوية القديمة');
+      }
+
+      await defaultAuditService.record(
+        {
+          actorUserId: actorId,
+          companyId,
+          action: 'membership.role.convert_legacy',
+          entityType: 'company_membership',
+          entityId: updated.id,
+          metadata: {
+            userId: updated.userId,
+            legacyRole: membership.role,
+            fromRoleId: null,
+            toRoleId: targetRole.id,
+            toRoleCode: targetRole.code,
+          },
+        },
+        { mode: 'required', executor: tx }
+      );
+
+      this.onInvalidate(companyId, userId);
+      return { membership: updated, role: targetRole };
+    });
   }
 }
 

@@ -2,6 +2,7 @@ import { defaultUserRepository } from '../auth/userRepository.js';
 import { defaultMembershipStore } from '../org/membershipStore.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
+import { defaultRoleService } from '../rbac/roleService.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { RoleName } from '../rbac/roles.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
@@ -30,7 +31,7 @@ export class UserAdminService {
 
   async createUser(
     actor: AuthenticatedRequest['user'],
-    input: { username: string; passwordHash: string; companyId?: string; role?: RoleName }
+    input: { username: string; passwordHash: string; companyId?: string; role?: RoleName; roleId?: string | null }
   ): Promise<any> {
     if (!actor) throw new ForbiddenError('Authentication required');
 
@@ -46,6 +47,15 @@ export class UserAdminService {
     const isAllowed = await defaultRbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, input.companyId);
     if (!isAllowed) throw new ForbiddenError('Missing USER_WRITE permission');
 
+    let validatedRoleId: string | null = null;
+    if (input.roleId) {
+      if (!input.companyId || input.role === 'platform_admin') {
+        throw new ValidationError('لا يمكن تعيين دور شركة ديناميكي بدون تحديد شركة');
+      }
+      const validatedRole = await defaultRoleService.validateAssignableRole(input.companyId, input.roleId);
+      validatedRoleId = validatedRole.id;
+    }
+
     const user = await defaultUserRepository.createUser({
       username: input.username,
       passwordHash: input.passwordHash,
@@ -57,8 +67,10 @@ export class UserAdminService {
         user.id,
         input.companyId,
         (input.role === 'company_admin' ? 'company_admin' : 'company_user') as RoleName,
-        true
+        true,
+        validatedRoleId
       );
+      defaultRbacService.invalidate(input.companyId, user.id);
     }
 
     await defaultAuditService.record({
@@ -67,12 +79,15 @@ export class UserAdminService {
       action: 'USER_CREATE',
       entityType: 'user',
       entityId: user.id,
-      metadata: { username: user.username, role: user.role }
+      metadata: { username: user.username, role: user.role, roleId: validatedRoleId }
     });
     return user;
   }
 
-  async addMembership(actor: AuthenticatedRequest['user'], input: { userId: string; companyId: string; role: RoleName }): Promise<void> {
+  async addMembership(
+    actor: AuthenticatedRequest['user'],
+    input: { userId: string; companyId: string; role: RoleName; roleId?: string | null }
+  ): Promise<void> {
     if (!actor) throw new ForbiddenError('Authentication required');
 
     const isAllowed = await defaultRbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, input.companyId);
@@ -82,7 +97,14 @@ export class UserAdminService {
       throw new ForbiddenError('Cannot assign platform_admin role via membership');
     }
 
-    await defaultMembershipStore.addMember(input.userId, input.companyId, input.role, true);
+    let validatedRoleId: string | null = null;
+    if (input.roleId) {
+      const validatedRole = await defaultRoleService.validateAssignableRole(input.companyId, input.roleId);
+      validatedRoleId = validatedRole.id;
+    }
+
+    await defaultMembershipStore.addMember(input.userId, input.companyId, input.role, true, validatedRoleId);
+    defaultRbacService.invalidate(input.companyId, input.userId);
 
     await defaultAuditService.record({
       actorUserId: actor.id,
@@ -90,7 +112,7 @@ export class UserAdminService {
       action: 'MEMBERSHIP_ADD',
       entityType: 'membership',
       entityId: input.userId,
-      metadata: { role: input.role }
+      metadata: { role: input.role, roleId: validatedRoleId }
     });
   }
 

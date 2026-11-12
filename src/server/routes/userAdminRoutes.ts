@@ -31,7 +31,7 @@ userAdminRoutes.post(
   requireAuth,
   requirePermission(PERMISSIONS.USER_WRITE),
   wrap(async (req: AuthenticatedRequest, res: Response) => {
-    const { username, password, companyId, role } = req.body;
+    const { username, password, companyId, role, roleId } = req.body;
     if (!username || !password) throw new ValidationError('Username and password required');
     if (typeof password !== 'string' || password.length < 12) {
       throw new ValidationError('Password must be at least 12 characters long');
@@ -39,11 +39,13 @@ userAdminRoutes.post(
 
     const effectiveCompanyId = companyId || (req.headers['x-company-id'] as string);
     const ph = await hashPassword(password);
+    const normalizedRoleId = roleId === null || (typeof roleId === 'string' && roleId.trim() !== '') ? roleId : undefined;
     const user = await defaultUserAdminService.createUser(req.user, {
       username,
       passwordHash: ph,
       companyId: effectiveCompanyId,
       role,
+      roleId: normalizedRoleId,
     });
     res.status(201).json({ status: 'ok', user: mapUserResponse(user) });
   })
@@ -55,11 +57,17 @@ userAdminRoutes.post(
   requirePermission(PERMISSIONS.USER_WRITE),
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const { userId } = req.params;
-    const { companyId, role } = req.body;
+    const { companyId, role, roleId } = req.body;
     const effectiveCompanyId = companyId || (req.headers['x-company-id'] as string);
-    if (!effectiveCompanyId || !role) throw new ValidationError('companyId and role required');
+    if (!effectiveCompanyId || (!role && !roleId)) throw new ValidationError('companyId and role required');
 
-    await defaultUserAdminService.addMembership(req.user, { userId, companyId: effectiveCompanyId, role });
+    const normalizedRoleId = roleId === null || (typeof roleId === 'string' && roleId.trim() !== '') ? roleId : undefined;
+    await defaultUserAdminService.addMembership(req.user, {
+      userId,
+      companyId: effectiveCompanyId,
+      role: role || 'company_user',
+      roleId: normalizedRoleId,
+    });
     res.status(200).json({ status: 'ok' });
   })
 );

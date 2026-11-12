@@ -4,6 +4,7 @@ import { wrap } from '../http/asyncHandler.js';
 import { ValidationError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { PERMISSION_CATALOG, PERMISSIONS } from '../rbac/permissions.js';
+import { defaultRbacService } from '../rbac/rbacService.js';
 import { requirePermission } from '../rbac/requirePermission.js';
 import { defaultRoleService } from '../rbac/roleService.js';
 
@@ -85,6 +86,40 @@ companyRoleRoutes.post(
     const isActive = req.body?.isActive;
     const role = await defaultRoleService.setActive(companyId, roleId, isActive, req.user!.id);
     return res.status(200).json({ status: 'ok', role });
+  })
+);
+
+// GET /api/companies/:companyId/members — list memberships with assigned dynamic roles + userCanWrite
+companyRoleRoutes.get(
+  '/members',
+  requireAuth,
+  requirePermission(PERMISSIONS.USER_READ),
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const companyId = assertUuidParam(req.params.companyId, 'company ID');
+    const [members, userCanWrite] = await Promise.all([
+      defaultRoleService.listCompanyMemberRoles(companyId),
+      defaultRbacService.hasPermission(req.user!, PERMISSIONS.USER_WRITE, companyId),
+    ]);
+    return res.status(200).json({ status: 'ok', members, userCanWrite });
+  })
+);
+
+// PUT /api/companies/:companyId/members/:userId/role — assign dynamic role (or null for legacy compatibility)
+companyRoleRoutes.put(
+  '/members/:userId/role',
+  requireAuth,
+  requirePermission(PERMISSIONS.USER_WRITE),
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const companyId = assertUuidParam(req.params.companyId, 'company ID');
+    const userId = assertUuidParam(req.params.userId, 'user ID');
+    const rawRoleId = req.body?.roleId;
+    if (rawRoleId !== null && (typeof rawRoleId !== 'string' || !isUuid(rawRoleId))) {
+      throw new ValidationError('حقل roleId مطلوب (معرّف دور UUID صالح أو null لمسار التوافق)');
+    }
+
+    const membership = await defaultRoleService.assignRole(companyId, userId, rawRoleId, req.user!.id);
+    const userCanWrite = await defaultRbacService.hasPermission(req.user!, PERMISSIONS.USER_WRITE, companyId);
+    return res.status(200).json({ status: 'ok', membership, userCanWrite });
   })
 );
 

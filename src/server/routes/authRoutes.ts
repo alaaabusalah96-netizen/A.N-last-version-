@@ -9,6 +9,7 @@ import { InvalidCredentialsError, ValidationError } from '../http/errors.js';
 import { ExtendedRequest } from '../http/errorHandler.js';
 import { isAppPreview, isProduction } from '../config/env.js';
 import { defaultMembershipStore } from '../org/membershipStore.js';
+import { defaultRbacService } from '../rbac/rbacService.js';
 import { ROLE_PERMISSIONS, RoleName } from '../rbac/roles.js';
 import { PermissionCode } from '../rbac/permissions.js';
 
@@ -216,7 +217,7 @@ function getSessionCookieOptions(req: Request, expires?: Date) {
 
 async function resolveEffectiveAccess(user: AuthenticatedRequest['user']): Promise<{
   permissions: PermissionCode[];
-  memberships: { companyId: string; role: RoleName; isActive: boolean }[];
+  memberships: { companyId: string; role: RoleName; roleId: string | null; isActive: boolean }[];
   degraded: boolean;
 }> {
   try {
@@ -231,7 +232,7 @@ async function resolveEffectiveAccess(user: AuthenticatedRequest['user']): Promi
     const active = raw.filter((m) => m.isActive !== false);
     const permissions = new Set<PermissionCode>();
     for (const membership of active) {
-      const perms = ROLE_PERMISSIONS[membership.role as RoleName] || [];
+      const perms = await defaultRbacService.resolveMembershipPermissions(user!.id, membership);
       for (const p of perms) permissions.add(p);
     }
     return {
@@ -239,6 +240,7 @@ async function resolveEffectiveAccess(user: AuthenticatedRequest['user']): Promi
       memberships: active.map((m) => ({
         companyId: m.companyId,
         role: m.role as RoleName,
+        roleId: m.roleId ?? null,
         isActive: true,
       })),
       degraded: false,

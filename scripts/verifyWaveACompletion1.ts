@@ -108,7 +108,23 @@ async function verify() {
       ('bbbbbbbb-0000-0000-0000-000000000002','WB','شركة Wave B')
       ON CONFLICT (id) DO NOTHING;`);
 
-    const defKey = `wave.a.proof.${Date.now()}`;
+    const invalidDefKey = `wave.a.proof.${Date.now()}`;
+    let invalidKeyRejected = false;
+    try {
+      await client.query(
+        `INSERT INTO config_definitions (key, schema, default_value) VALUES ($1, '{"type":"object"}'::jsonb, '{}'::jsonb) RETURNING id;`,
+        [invalidDefKey]
+      );
+    } catch (e: any) {
+      invalidKeyRejected = /chk_config_def_key_format|check constraint/i.test(String(e?.message || ''));
+    }
+    check(
+      'T8',
+      invalidKeyRejected,
+      'live: invalid config_definitions key (digit-leading segment) is rejected by chk_config_def_key_format'
+    );
+
+    const defKey = `wave.a.proof.ts${Date.now()}`;
     const def = await client.query(
       `INSERT INTO config_definitions (key, schema, default_value) VALUES ($1, '{"type":"object"}'::jsonb, '{}'::jsonb) RETURNING id;`,
       [defKey]

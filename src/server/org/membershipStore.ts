@@ -1,4 +1,4 @@
-import { defaultMembershipRepository, MembershipRepository } from './membershipRepository.js';
+import { CompanyMemberRoleView, defaultMembershipRepository, MembershipRepository } from './membershipRepository.js';
 import { RoleName } from '../rbac/roles.js';
 import { DbExecutor } from '../db/types.js';
 
@@ -23,9 +23,10 @@ export class MembershipStore {
     companyId: string,
     role: RoleName,
     isActive: boolean = true,
+    roleIdOrExecutor?: string | null | DbExecutor,
     customExecutor?: DbExecutor
   ): Promise<CompanyMembership> {
-    return this.repo.addMember(userId, companyId, role, isActive, customExecutor);
+    return this.repo.addMember(userId, companyId, role, isActive, roleIdOrExecutor, customExecutor);
   }
 
   async getMembership(userId: string, companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership | null> {
@@ -47,6 +48,28 @@ export class MembershipStore {
 
   async listAllByCompany(companyId: string, customExecutor?: DbExecutor): Promise<CompanyMembership[]> {
     return this.repo.listAllByCompany(companyId, customExecutor);
+  }
+
+  async listCompanyMemberRoles(companyId: string, customExecutor?: DbExecutor): Promise<CompanyMemberRoleView[]> {
+    return this.repo.listCompanyMemberRoles(companyId, customExecutor);
+  }
+
+  async updateMembership(
+    userId: string,
+    companyId: string,
+    patch: { role?: RoleName; roleId?: string | null },
+    customExecutor?: DbExecutor
+  ): Promise<CompanyMembership | null> {
+    return this.repo.updateMembership(userId, companyId, patch, customExecutor);
+  }
+
+  async setRoleById(
+    membershipId: string,
+    roleId: string | null,
+    companyId: string,
+    customExecutor?: DbExecutor
+  ): Promise<CompanyMembership | null> {
+    return this.repo.setMembershipRoleById(membershipId, roleId, companyId, customExecutor);
   }
 
   async updateRole(userId: string, companyId: string, role: RoleName, customExecutor?: DbExecutor): Promise<boolean> {

@@ -1,4 +1,3 @@
-import { getDefaultExecutor } from '../db/index.js';
 import { DbExecutor } from '../db/types.js';
 
 export type RoleOrgLevel = 'company' | 'branch' | 'department';
@@ -20,6 +19,13 @@ export interface RoleRecord {
 }
 
 export class RoleRepository {
+  private requireExecutor(executor?: DbExecutor): DbExecutor {
+    if (!executor) {
+      throw new Error('ROLE_REPOSITORY_EXECUTOR_REQUIRED: DbExecutor must be provided explicitly to RoleRepository');
+    }
+    return executor;
+  }
+
   private mapRow(row: any): RoleRecord {
     return {
       id: row.id,
@@ -66,7 +72,7 @@ export class RoleRepository {
       const res = await ex.query(sql, [companyId]);
       return res.rows.map((r) => this.mapRow(r));
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async findById(companyId: string, roleId: string, executor?: DbExecutor): Promise<RoleRecord | null> {
@@ -94,7 +100,7 @@ export class RoleRepository {
       const res = await ex.query(sql, [companyId, roleId]);
       return res.rows[0] ? this.mapRow(res.rows[0]) : null;
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async findByCode(companyId: string, code: string, executor?: DbExecutor): Promise<RoleRecord | null> {
@@ -117,7 +123,7 @@ export class RoleRepository {
       const res = await ex.query(sql, [companyId, code]);
       return res.rows[0] ? this.mapRow(res.rows[0]) : null;
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async insertRole(
@@ -157,7 +163,7 @@ export class RoleRepository {
       ]);
       return this.mapRow(res.rows[0]);
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async updateRole(
@@ -206,7 +212,7 @@ export class RoleRepository {
       const res = await ex.query(sql, params);
       return this.mapRow(res.rows[0]);
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async setActive(
@@ -235,7 +241,7 @@ export class RoleRepository {
       const res = await ex.query(sql, [companyId, roleId, isActive]);
       return this.mapRow(res.rows[0]);
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async countActiveMembers(companyId: string, roleId: string, executor?: DbExecutor): Promise<number> {
@@ -248,7 +254,7 @@ export class RoleRepository {
       const res = await ex.query<{ cnt: number }>(sql, [companyId, roleId]);
       return Number(res.rows[0]?.cnt || 0);
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async listPermissions(roleId: string, executor?: DbExecutor): Promise<string[]> {
@@ -262,7 +268,7 @@ export class RoleRepository {
       const res = await ex.query<{ code: string }>(sql, [roleId]);
       return res.rows.map((r) => r.code);
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async replacePermissions(roleId: string, codes: string[], executor?: DbExecutor): Promise<string[]> {
@@ -276,7 +282,7 @@ export class RoleRepository {
       }
       return [...codes];
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
   async listRoleIdsWithPermissionsForUser(
@@ -303,16 +309,9 @@ export class RoleRepository {
       const res = await ex.query<{ roleId: string; code: string; permissions: string[] }>(sql, [companyId, userId]);
       return res.rows;
     };
-    return executor ? run(executor) : run(await this.defaultExecutor());
+    return run(this.requireExecutor(executor));
   }
 
-  private async defaultExecutor(): Promise<DbExecutor> {
-    const executor = await getDefaultExecutor();
-    if (!executor) {
-      throw new Error('DB_UNAVAILABLE: DATABASE_URL is required for role repository');
-    }
-    return executor;
-  }
 }
 
 export const defaultRoleRepository = new RoleRepository();
