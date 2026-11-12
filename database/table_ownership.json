@@ -113,5 +113,20 @@
     "table": "purch_grn_lines",
     "scope": "tenant",
     "reason": "Per-company goods receipt notes item lines"
+  },
+  {
+    "table": "config_definitions",
+    "scope": "global",
+    "reason": "Configuration platform global definitions catalog (Wave A / migration 027)"
+  },
+  {
+    "table": "config_registry",
+    "scope": "tenant",
+    "reason": "Company-scoped immutable published configuration versions (Wave A / migration 027)"
+  },
+  {
+    "table": "config_drafts",
+    "scope": "tenant",
+    "reason": "Company-scoped mutable configuration drafts, one per company+definition (Wave A / migration 027)"
   }
 ]

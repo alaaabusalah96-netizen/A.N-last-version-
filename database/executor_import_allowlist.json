@@ -46,5 +46,9 @@
   {
     "file": "src/server/http/readiness.ts",
     "reason": "Health & readiness probe database check"
+  },
+  {
+    "file": "src/server/config-platform/configRepository.ts",
+    "reason": "Configuration platform repository data access (Wave A) — same pattern as existing repository allowlist entries"
   }
 ]
