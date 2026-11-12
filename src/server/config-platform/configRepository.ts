@@ -8,6 +8,21 @@ import {
 } from './configTypes.js';
 
 export class ConfigRepository {
+  private mapDefinitionRow(row: any): ConfigDefinition {
+    return {
+      id: row.id,
+      key: row.key,
+      domain: row.domain || 'general',
+      labelAr: row.labelAr ?? row.label_ar ?? null,
+      isSystem: Boolean(row.isSystem ?? row.is_system ?? false),
+      schema: row.schema,
+      defaultValue: row.defaultValue ?? row.default_value,
+      description: row.description ?? null,
+      createdAt: row.createdAt ?? row.created_at,
+      updatedAt: row.updatedAt ?? row.updated_at,
+    };
+  }
+
   // ---------------------------------------------------------------- definitions
 
   async listDefinitions(executor?: DbExecutor): Promise<ConfigDefinition[]> {
@@ -16,16 +31,19 @@ export class ConfigRepository {
         SELECT
           id,
           key,
+          domain,
+          label_ar as "labelAr",
+          is_system as "isSystem",
           schema,
           default_value as "defaultValue",
           description,
           created_at as "createdAt",
           updated_at as "updatedAt"
         FROM config_definitions
-        ORDER BY key ASC;
+        ORDER BY domain ASC, key ASC;
       `;
       const res = await ex.query<ConfigDefinition>(sql);
-      return res.rows;
+      return res.rows.map((r) => this.mapDefinitionRow(r));
     };
     return executor ? run(executor) : run(await this.defaultExecutor());
   }
@@ -34,7 +52,10 @@ export class ConfigRepository {
     const run = async (ex: DbExecutor) => {
       const sql = `
         SELECT
-          id, key, schema,
+          id, key, domain,
+          label_ar as "labelAr",
+          is_system as "isSystem",
+          schema,
           default_value as "defaultValue",
           description,
           created_at as "createdAt",
@@ -43,7 +64,109 @@ export class ConfigRepository {
         WHERE key = $1;
       `;
       const res = await ex.query<ConfigDefinition>(sql, [key]);
-      return res.rows[0] || null;
+      return res.rows[0] ? this.mapDefinitionRow(res.rows[0]) : null;
+    };
+    return executor ? run(executor) : run(await this.defaultExecutor());
+  }
+
+  async findDefinitionByKeyForUpdate(key: string, executor?: DbExecutor): Promise<ConfigDefinition | null> {
+    const run = async (ex: DbExecutor) => {
+      const sql = `
+        SELECT
+          id, key, domain,
+          label_ar as "labelAr",
+          is_system as "isSystem",
+          schema,
+          default_value as "defaultValue",
+          description,
+          created_at as "createdAt",
+          updated_at as "updatedAt"
+        FROM config_definitions
+        WHERE key = $1
+        FOR UPDATE;
+      `;
+      const res = await ex.query<ConfigDefinition>(sql, [key]);
+      return res.rows[0] ? this.mapDefinitionRow(res.rows[0]) : null;
+    };
+    return executor ? run(executor) : run(await this.defaultExecutor());
+  }
+
+  async insertDefinition(input: {
+    key: string;
+    domain: string;
+    labelAr?: string | null;
+    description?: string | null;
+    schema: Record<string, unknown>;
+    defaultValue: Record<string, unknown>;
+    isSystem?: boolean;
+  }, executor?: DbExecutor): Promise<ConfigDefinition> {
+    const run = async (ex: DbExecutor) => {
+      const sql = `
+        INSERT INTO config_definitions (key, domain, label_ar, description, schema, default_value, is_system)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+        RETURNING
+          id, key, domain,
+          label_ar as "labelAr",
+          is_system as "isSystem",
+          schema,
+          default_value as "defaultValue",
+          description,
+          created_at as "createdAt",
+          updated_at as "updatedAt";
+      `;
+      const params = [
+        input.key.trim(),
+        input.domain.trim(),
+        input.labelAr ? input.labelAr.trim() : null,
+        input.description ? input.description.trim() : null,
+        JSON.stringify(input.schema),
+        JSON.stringify(input.defaultValue),
+        Boolean(input.isSystem),
+      ];
+      const res = await ex.query<ConfigDefinition>(sql, params);
+      return this.mapDefinitionRow(res.rows[0]);
+    };
+    return executor ? run(executor) : run(await this.defaultExecutor());
+  }
+
+  async updateDefinitionMeta(key: string, input: {
+    labelAr?: string | null;
+    description?: string | null;
+    domain?: string;
+  }, executor?: DbExecutor): Promise<ConfigDefinition> {
+    const run = async (ex: DbExecutor) => {
+      const sets: string[] = ['updated_at = NOW()'];
+      const params: unknown[] = [key.trim()];
+
+      if (input.labelAr !== undefined) {
+        params.push(input.labelAr ? input.labelAr.trim() : null);
+        sets.push(`label_ar = $${params.length}`);
+      }
+      if (input.description !== undefined) {
+        params.push(input.description ? input.description.trim() : null);
+        sets.push(`description = $${params.length}`);
+      }
+      if (input.domain !== undefined) {
+        params.push(input.domain.trim());
+        sets.push(`domain = $${params.length}`);
+      }
+
+      const sql = `
+        UPDATE config_definitions
+        SET ${sets.join(', ')}
+        WHERE key = $1
+        RETURNING
+          id, key, domain,
+          label_ar as "labelAr",
+          is_system as "isSystem",
+          schema,
+          default_value as "defaultValue",
+          description,
+          created_at as "createdAt",
+          updated_at as "updatedAt";
+      `;
+      const res = await ex.query<ConfigDefinition>(sql, params);
+      return this.mapDefinitionRow(res.rows[0]);
     };
     return executor ? run(executor) : run(await this.defaultExecutor());
   }

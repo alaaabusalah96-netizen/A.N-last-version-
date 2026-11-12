@@ -107,6 +107,11 @@
     "test:config-grn-form-resolve-1": "tsx scripts/verifyConfigGrnFormAndResolve1.ts",
     "test:config-grn-integrity-2": "tsx scripts/verifyConfigGrnAccountIntegrity2.ts",
     "test:config-validation-3": "tsx scripts/verifyConfigValidationSemantics3.ts",
+    "test:config-center-4": "tsx scripts/verifyConfigCenter4.ts",
+    "test:dynamic-roles-5": "tsx scripts/verifyDynamicRoles5.ts",
+    "test:user-scopes-6": "tsx scripts/verifyUserScopeIsolation6.ts",
+    "test:gl-mapping-events-7": "tsx scripts/verifyGlMappingEvents7.ts",
+    "test:custom-fields-8": "tsx scripts/verifyCustomFields8.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"

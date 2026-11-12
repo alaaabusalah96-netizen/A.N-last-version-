@@ -6,11 +6,30 @@
 export interface ConfigDefinition {
   id: string;
   key: string;
+  domain: string;
+  labelAr: string | null;
+  isSystem: boolean;
   schema: Record<string, unknown>;
   defaultValue: Record<string, unknown>;
   description: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CreateDefinitionInput {
+  key: string;
+  domain: string;
+  labelAr?: string | null;
+  description?: string | null;
+  schema: Record<string, unknown>;
+  defaultValue: Record<string, unknown>;
+  isSystem?: boolean;
+}
+
+export interface UpdateDefinitionInput {
+  labelAr?: string | null;
+  description?: string | null;
+  domain?: string;
 }
 
 export interface ConfigRegistryVersion {

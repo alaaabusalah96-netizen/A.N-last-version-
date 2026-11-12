@@ -7,6 +7,7 @@ export interface CompanyMembership {
   userId: string;
   companyId: string;
   role: RoleName;
+  roleId?: string | null;
   isActive: boolean;
   createdAt: string;
 }

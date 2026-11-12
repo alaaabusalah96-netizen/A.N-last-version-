@@ -3,9 +3,12 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { defaultConfigService } from '../config-platform/configService.js';
 import { wrap } from '../http/asyncHandler.js';
 import { requirePermission } from '../rbac/requirePermission.js';
+import { requirePlatformAdmin } from '../rbac/requirePlatformAdmin.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { isUuid } from '../http/validators.js';
-import { ValidationError } from '../http/errors.js';
+import { ValidationError, NotFoundError } from '../http/errors.js';
+import { findGlEvent } from '../accounting/glEventCatalog.js';
+import { defaultGlMappingService } from '../accounting/glMappingService.js';
 
 /**
  * Configuration Platform read surface (Wave A / A2).
@@ -131,6 +134,43 @@ companyConfigRoutes.post(
   })
 );
 
+// GET /api/companies/:companyId/gl-events/:eventKey/resolve — resolve wired GL mapping event
+companyConfigRoutes.get(
+  '/gl-events/:eventKey/resolve',
+  requireAuth,
+  requirePermission(PERMISSIONS.COMPANY_SETTINGS_READ),
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const companyId = assertCompanyParam(req);
+    const eventKey = String(req.params.eventKey || '');
+    const resolved = await defaultGlMappingService.resolve(companyId, eventKey);
+    return res.status(200).json({ status: 'ok', resolved });
+  })
+);
+
+// POST /api/companies/:companyId/gl-events/:eventKey/validate — dry-run validation via ConfigService, rejects not_implemented with 400
+companyConfigRoutes.post(
+  '/gl-events/:eventKey/validate',
+  requireAuth,
+  requirePermission(PERMISSIONS.COMPANY_SETTINGS_READ),
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const companyId = assertCompanyParam(req);
+    const eventKey = String(req.params.eventKey || '');
+    const def = findGlEvent(eventKey);
+    if (!def) {
+      throw new NotFoundError(`حدث ربط محاسبي غير معروف: ${eventKey}`);
+    }
+    if (def.status !== 'wired') {
+      throw new ValidationError(
+        `حدث «${def.labelAr}» لسه بلا مسار ترحيل محاسبي في هذه النسخة — `
+        + `الإعداد غير قابل للاستخدام حتى تُنفَّذ دورة الترحيل الخاصة به`
+      );
+    }
+    const content = req.body && req.body.content;
+    const result = await defaultConfigService.validateContent(companyId, eventKey, content);
+    return res.status(200).json({ status: 'ok', ...result });
+  })
+);
+
 // ---- Global definitions catalog (mounted under /api/config) ----
 export const configPlatformRoutes = Router();
 
@@ -142,5 +182,27 @@ configPlatformRoutes.get(
   wrap(async (_req: AuthenticatedRequest, res: Response) => {
     const definitions = await defaultConfigService.listDefinitions();
     return res.status(200).json({ status: 'ok', definitions });
+  })
+);
+
+// POST /api/config/definitions — create definition (platform_admin only)
+configPlatformRoutes.post(
+  '/definitions',
+  requireAuth,
+  requirePlatformAdmin,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const def = await defaultConfigService.createDefinition(req.body, req.user!.id);
+    return res.status(201).json({ status: 'ok', definition: def });
+  })
+);
+
+// PATCH /api/config/definitions/:key — update metadata only (platform_admin only)
+configPlatformRoutes.patch(
+  '/definitions/:key',
+  requireAuth,
+  requirePlatformAdmin,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const def = await defaultConfigService.updateDefinitionMeta(String(req.params.key), req.body, req.user!.id);
+    return res.status(200).json({ status: 'ok', definition: def });
   })
 );

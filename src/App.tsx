@@ -9,6 +9,9 @@ import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
 import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
 import { ConfigPlatformPanel } from './components/config/ConfigPlatformPanel.js';
+import { ConfigDefinitionsPanel } from './components/config/ConfigDefinitionsPanel.js';
+import { RolesPanel } from './components/rbac/RolesPanel.js';
+import { CustomFieldsPanel } from './components/customization/CustomFieldsPanel.js';
 import { AppSidebar } from './components/shell/AppSidebar.js';
 import { apiFetch } from './lib/apiClient.js';
 
@@ -23,7 +26,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'company_settings' | 'org_units' | 'config_platform'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -106,10 +109,16 @@ export default function App() {
                 ? 'المشتريات'
                 : activeNav === 'users'
                 ? 'المستخدمون'
+                : activeNav === 'roles'
+                ? 'الأدوار والصلاحيات'
                 : activeNav === 'org_units'
                 ? 'الوحدات التنظيمية'
                 : activeNav === 'config_platform'
                 ? 'منصة الإعدادات'
+                : activeNav === 'config_definitions'
+                ? 'تعريفات الإعدادات'
+                : activeNav === 'custom_fields'
+                ? 'الحقول الإضافية'
                 : 'إعدادات الشركة'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -123,10 +132,16 @@ export default function App() {
                 ? 'الموردون وسندات استلام البضائع GRN'
                 : activeNav === 'users'
                 ? 'إدارة الحسابات وصلاحيات الوصول'
+                : activeNav === 'roles'
+                ? 'إدارة أدوار الشركة ومصفوفة الصلاحيات'
                 : activeNav === 'org_units'
                 ? 'الفروع والإدارات ومراكز التكلفة'
                 : activeNav === 'config_platform'
                 ? 'تعريفات الإعداد المركزي والمسودات والنشر والإصدارات'
+                : activeNav === 'config_definitions'
+                ? 'إدارة كتالوج نقط التكييف والمخططات والقيود على مستوى المنصة'
+                : activeNav === 'custom_fields'
+                ? 'تعريف الحقول الإضافية وترتيبها وإلزاميتها للأصناف'
                 : 'الإعدادات التشغيلية والمالية للشركة'}
             </p>
           </div>
@@ -145,10 +160,16 @@ export default function App() {
           <PurchasingWorkspace userRole={currentUser.role} />
         ) : activeNav === 'users' ? (
           <UsersAdminWorkspace />
+        ) : activeNav === 'roles' ? (
+          <RolesPanel userRole={currentUser.role} />
         ) : activeNav === 'org_units' ? (
           <OrgUnitsPanel userRole={currentUser.role} />
         ) : activeNav === 'config_platform' ? (
           <ConfigPlatformPanel userRole={currentUser.role} />
+        ) : activeNav === 'config_definitions' ? (
+          <ConfigDefinitionsPanel userRole={currentUser.role} />
+        ) : activeNav === 'custom_fields' ? (
+          <CustomFieldsPanel />
         ) : (
           <CompanySettingsPanel userRole={currentUser.role} />
         )}

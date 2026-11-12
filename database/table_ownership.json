@@ -128,5 +128,25 @@
     "table": "config_drafts",
     "scope": "tenant",
     "reason": "Company-scoped mutable configuration drafts, one per company+definition (Wave A / migration 027)"
+  },
+  {
+    "table": "roles",
+    "scope": "tenant",
+    "reason": "Company-scoped dynamic RBAC roles (B2 / migration 031)"
+  },
+  {
+    "table": "role_permissions",
+    "scope": "shared",
+    "reason": "Permission codes assigned to company-scoped roles via role_id FK and tenant RLS (B2/B3 / migration 031)"
+  },
+  {
+    "table": "custom_field_definitions",
+    "scope": "tenant",
+    "reason": "Company-scoped dynamic custom field definitions per entity type (C6 / migration 034)"
+  },
+  {
+    "table": "custom_field_values",
+    "scope": "tenant",
+    "reason": "Company-scoped indexed dynamic custom field values per entity record (C6 / migration 034)"
   }
 ]

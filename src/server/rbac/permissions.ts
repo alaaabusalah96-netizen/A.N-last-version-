@@ -45,6 +45,59 @@ export const PERMISSIONS = {
   PURCHASING_READ: 'purchasing:read',
   PURCHASING_WRITE: 'purchasing:write',
   PURCHASING_POST: 'purchasing:post',
+
+  // Dynamic Roles & Permissions management
+  ROLES_READ: 'roles.read',
+  ROLES_WRITE: 'roles.write',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;
+
+export interface PermissionCatalogItem {
+  code: PermissionCode;
+  labelAr: string;
+  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المنظمة' | 'الإعدادات' | 'الأدوار';
+}
+
+export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
+  // عام
+  { code: PERMISSIONS.AUDIT_READ, labelAr: 'عرض سجل التدقيق', group: 'عام' },
+
+  // الشركات
+  { code: PERMISSIONS.COMPANY_READ, labelAr: 'عرض الشركات', group: 'الشركات' },
+  { code: PERMISSIONS.COMPANY_WRITE, labelAr: 'تعديل بيانات الشركات (بيانات تجريبية)', group: 'الشركات' },
+
+  // المستخدمون
+  { code: PERMISSIONS.USER_READ, labelAr: 'عرض المستخدمين', group: 'المستخدمون' },
+  { code: PERMISSIONS.USER_WRITE, labelAr: 'إدارة المستخدمين والعضويات', group: 'المستخدمون' },
+
+  // المحاسبة
+  { code: PERMISSIONS.ACCOUNTING_ACCOUNTS_READ, labelAr: 'عرض الدليل المحاسبي', group: 'المحاسبة' },
+  { code: PERMISSIONS.ACCOUNTING_ACCOUNTS_CREATE, labelAr: 'إنشاء حسابات في الدليل', group: 'المحاسبة' },
+  { code: PERMISSIONS.ACCOUNTING_ACCOUNTS_SEED, labelAr: 'تهيئة الدليل المحاسبي الافتراضي', group: 'المحاسبة' },
+  { code: PERMISSIONS.ACCOUNTING_JOURNALS_READ, labelAr: 'عرض القيود اليومية والتقارير', group: 'المحاسبة' },
+  { code: PERMISSIONS.ACCOUNTING_JOURNALS_WRITE, labelAr: 'إنشاء وتعديل مسودات القيود', group: 'المحاسبة' },
+  { code: PERMISSIONS.ACCOUNTING_JOURNALS_POST, labelAr: 'ترحيل القيود المحاسبية', group: 'المحاسبة' },
+
+  // المخزون
+  { code: PERMISSIONS.INVENTORY_READ, labelAr: 'عرض المستودعات والأصناف والأرصدة', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_WRITE, labelAr: 'إنشاء وتعديل المستودعات والأصناف', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_MOVEMENT, labelAr: 'تنفيذ حركات المخزون (استلام/صرف/تحويل)', group: 'المخزون' },
+
+  // المشتريات
+  { code: PERMISSIONS.PURCHASING_READ, labelAr: 'عرض الموردين وسندات الاستلام (GRN)', group: 'المشتريات' },
+  { code: PERMISSIONS.PURCHASING_WRITE, labelAr: 'إنشاء الموردين ومسودات استلام البضائع', group: 'المشتريات' },
+  { code: PERMISSIONS.PURCHASING_POST, labelAr: 'ترحيل سندات استلام البضائع (GRN)', group: 'المشتريات' },
+
+  // المنظمة
+  { code: PERMISSIONS.ORG_UNITS_READ, labelAr: 'عرض الوحدات التنظيمية', group: 'المنظمة' },
+  { code: PERMISSIONS.ORG_UNITS_WRITE, labelAr: 'إدارة الوحدات التنظيمية', group: 'المنظمة' },
+
+  // الإعدادات
+  { code: PERMISSIONS.COMPANY_SETTINGS_READ, labelAr: 'عرض إعدادات الشركة والتكييفات', group: 'الإعدادات' },
+  { code: PERMISSIONS.COMPANY_SETTINGS_WRITE, labelAr: 'تعديل ونشر إعدادات الشركة والتكييفات', group: 'الإعدادات' },
+
+  // الأدوار
+  { code: PERMISSIONS.ROLES_READ, labelAr: 'عرض الأدوار ومصفوفة الصلاحيات', group: 'الأدوار' },
+  { code: PERMISSIONS.ROLES_WRITE, labelAr: 'إنشاء وتعديل الأدوار وتعيين الصلاحيات', group: 'الأدوار' },
+];

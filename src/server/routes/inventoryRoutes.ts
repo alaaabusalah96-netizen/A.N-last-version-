@@ -91,10 +91,16 @@ inventoryRoutes.post(
 
     await assertInventoryPermission(user, PERMISSIONS.INVENTORY_WRITE, companyId);
 
-    const { code, nameAr, nameEn, uom } = req.body;
+    const { code, nameAr, nameEn, uom, customValues } = req.body;
     const item = await defaultItemService.createItem(
       companyId,
-      { code, nameAr, nameEn, uom },
+      {
+        code,
+        nameAr,
+        nameEn,
+        uom,
+        customValues: Array.isArray(customValues) ? customValues : undefined,
+      },
       user.id
     );
 

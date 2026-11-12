@@ -8,6 +8,7 @@ import { wrap } from '../http/asyncHandler.js';
 import { isUuid } from '../http/validators.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../http/errors.js';
 import { defaultReportsService } from '../accounting/reportsService.js';
+import { GL_EVENT_CATALOG } from '../accounting/glEventCatalog.js';
 
 export const accountingRoutes = Router();
 
@@ -385,6 +386,39 @@ accountingRoutes.get(
       asOfDate: (req.query.asOfDate as string) || undefined,
     });
     return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// ==========================================
+// GL Mapping Events Catalog (B5)
+// ==========================================
+
+// GET /api/accounting/gl-events
+accountingRoutes.get(
+  '/gl-events',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = typeof req.query.companyId === 'string' ? req.query.companyId.trim() : '';
+
+    if (companyId) {
+      await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_ACCOUNTS_READ, companyId);
+    } else {
+      const allowed = await defaultRbacService.hasPermission(user, PERMISSIONS.ACCOUNTING_ACCOUNTS_READ);
+      if (!allowed) {
+        throw new ForbiddenError(`Access denied: Missing required permission '${PERMISSIONS.ACCOUNTING_ACCOUNTS_READ}'`);
+      }
+    }
+
+    const events = GL_EVENT_CATALOG.map((e) => ({
+      eventKey: e.eventKey,
+      eventCode: e.eventCode,
+      labelAr: e.labelAr,
+      status: e.status,
+      wiringPoint: e.wiringPoint,
+      fields: e.fields,
+    }));
+    return res.status(200).json({ status: 'ok', events });
   })
 );
 

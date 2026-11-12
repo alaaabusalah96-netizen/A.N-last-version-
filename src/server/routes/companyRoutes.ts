@@ -13,13 +13,17 @@ import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.j
 import { companySettingsRoutes } from './companySettingsRoutes.js';
 import { orgUnitRoutes } from './orgUnitRoutes.js';
 import { companyConfigRoutes } from './configRoutes.js';
+import { companyRoleRoutes } from './roleRoutes.js';
+import { customFieldRoutes } from './customFieldRoutes.js';
 
 export const companyRoutes = Router();
 
-// Nest settings, org-units and configuration-platform routes
+// Nest settings, org-units, roles, custom-fields and configuration-platform routes
 companyRoutes.use('/:companyId', companySettingsRoutes);
 companyRoutes.use('/:companyId', orgUnitRoutes);
 companyRoutes.use('/:companyId', companyConfigRoutes);
+companyRoutes.use('/:companyId', companyRoleRoutes);
+companyRoutes.use('/:companyId', customFieldRoutes);
 
 // GET /api/companies — requireAuth + company:read
 companyRoutes.get(

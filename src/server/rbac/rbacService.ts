@@ -1,10 +1,78 @@
 import { User } from '../auth/userStore.js';
-import { defaultMembershipStore, MembershipStore } from '../org/membershipStore.js';
+import { withTenantTransaction } from '../db/transactionManager.js';
+import { DbExecutor } from '../db/types.js';
+import { CompanyMembership, defaultMembershipStore, MembershipStore } from '../org/membershipStore.js';
 import { PermissionCode } from './permissions.js';
+import { defaultRoleRepository, RoleRepository } from './roleRepository.js';
 import { ROLE_PERMISSIONS, RoleName } from './roles.js';
 
+export type TenantRunner = <T>(companyId: string, fn: (ex: DbExecutor) => Promise<T>) => Promise<T>;
+
+interface CachedPermissionSet {
+  permissions: PermissionCode[];
+  expiresAt: number;
+}
+
 export class RbacService {
-  constructor(private membershipStore: MembershipStore = defaultMembershipStore) {}
+  private cache = new Map<string, CachedPermissionSet>();
+  private readonly ttlMs = 30_000;
+
+  constructor(
+    private membershipStore: MembershipStore = defaultMembershipStore,
+    private roleRepo: RoleRepository = defaultRoleRepository,
+    private runWithTenant: TenantRunner = withTenantTransaction
+  ) {}
+
+  invalidate(companyId?: string): void {
+    if (!companyId) {
+      this.cache.clear();
+      return;
+    }
+    const prefix = `${companyId}:`;
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  private async resolveMembershipPermissions(
+    userId: string,
+    membership: CompanyMembership
+  ): Promise<PermissionCode[]> {
+    const staticFallback = ROLE_PERMISSIONS[membership.role as RoleName] || [];
+
+    // Backward-compatible path when membership.role_id is NULL
+    if (!membership.roleId) {
+      return staticFallback;
+    }
+
+    const cacheKey = `${membership.companyId}:${userId}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.permissions;
+    }
+
+    try {
+      const perms = await this.runWithTenant(membership.companyId, async (tx) => {
+        const role = await this.roleRepo.findById(membership.companyId, membership.roleId!, tx);
+        if (!role || role.isActive === false) {
+          return [] as PermissionCode[];
+        }
+        return await this.roleRepo.listPermissions(membership.roleId!, tx);
+      });
+
+      this.cache.set(cacheKey, {
+        permissions: perms,
+        expiresAt: Date.now() + this.ttlMs,
+      });
+      return perms;
+    } catch (err) {
+      // Fail back strictly to the static conservative role map (never fail-open)
+      console.error('[rbacService] Failed to read dynamic role permissions from DB; falling back to static map:', err);
+      return staticFallback;
+    }
+  }
 
   /**
    * Evaluates if a user has a specific permission.
@@ -14,9 +82,10 @@ export class RbacService {
    *
    * Non-Platform Users:
    * - If companyId IS provided: user must hold an active (isActive !== false) membership
-   *   in that company, and their role within that company must grant the permission.
-   * - If companyId is NOT provided (e.g. listing allowed companies): user is granted access
-   *   if ANY of their active company memberships grants the permission.
+   *   in that company, and their role (dynamic role_id -> role_permissions if assigned,
+   *   otherwise static ROLE_PERMISSIONS fallback) must grant the permission.
+   * - If companyId is NOT provided: user is granted access if ANY active membership
+   *   grants the permission.
    */
   async hasPermission(
     user: Omit<User, 'passwordHash'>,
@@ -25,7 +94,7 @@ export class RbacService {
   ): Promise<boolean> {
     if (!user) return false;
 
-    // Platform admins have full administrative permissions
+    // Platform admins always retain full static permissions regardless of DB state
     if (user.role === 'platform_admin') {
       const allowed = ROLE_PERMISSIONS.platform_admin;
       return allowed.includes(permission);
@@ -38,7 +107,7 @@ export class RbacService {
         return false;
       }
 
-      const rolePerms = ROLE_PERMISSIONS[membership.role as RoleName] || [];
+      const rolePerms = await this.resolveMembershipPermissions(user.id, membership);
       return rolePerms.includes(permission);
     }
 
@@ -46,7 +115,7 @@ export class RbacService {
     const memberships = await this.membershipStore.listByUser(user.id);
     for (const membership of memberships) {
       if (membership.isActive === false) continue;
-      const rolePerms = ROLE_PERMISSIONS[membership.role as RoleName] || [];
+      const rolePerms = await this.resolveMembershipPermissions(user.id, membership);
       if (rolePerms.includes(permission)) {
         return true;
       }

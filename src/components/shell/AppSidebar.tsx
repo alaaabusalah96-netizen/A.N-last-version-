@@ -1,9 +1,9 @@
-import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, SlidersHorizontal } from 'lucide-react';
+import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, SlidersHorizontal, Shield, Sliders } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
 interface AppSidebarProps {
-  activeNav: 'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'company_settings' | 'org_units' | 'config_platform';
-  onNavigate: (nav: 'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'company_settings' | 'org_units' | 'config_platform') => void;
+  activeNav: 'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions';
+  onNavigate: (nav: 'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions') => void;
   userName: string;
   userRole: string;
   onLogout: () => void;
@@ -108,6 +108,20 @@ export function AppSidebar({
           <span>المستخدمون</span>
         </button>
 
+        {(userRole === 'platform_admin' || userRole === 'company_admin') && (
+          <button
+            onClick={() => onNavigate('roles')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeNav === 'roles'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 border border-indigo-500/30'
+                : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <Shield className="w-4 h-4 shrink-0" />
+            <span>الأدوار والصلاحيات</span>
+          </button>
+        )}
+
         <button
           onClick={() => onNavigate('org_units')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
@@ -133,6 +147,18 @@ export function AppSidebar({
         </button>
 
         <button
+          onClick={() => onNavigate('custom_fields')}
+          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+            activeNav === 'custom_fields'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 border border-indigo-500/30'
+              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+          }`}
+        >
+          <Sliders className="w-4 h-4 shrink-0" />
+          <span>الحقول الإضافية</span>
+        </button>
+
+        <button
           onClick={() => onNavigate('config_platform')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'config_platform'
@@ -143,6 +169,20 @@ export function AppSidebar({
           <SlidersHorizontal className="w-4 h-4 shrink-0" />
           <span>منصة الإعدادات</span>
         </button>
+
+        {userRole === 'platform_admin' && (
+          <button
+            onClick={() => onNavigate('config_definitions')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeNav === 'config_definitions'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 border border-indigo-500/30'
+                : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4 shrink-0" />
+            <span>تعريفات الإعدادات</span>
+          </button>
+        )}
       </div>
 
       {/* Sidebar Footer / Logout */}

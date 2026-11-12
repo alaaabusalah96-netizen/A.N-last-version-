@@ -14,6 +14,7 @@ import { userAdminRoutes } from './routes/userAdminRoutes.js';
 import { inventoryRoutes } from './routes/inventoryRoutes.js';
 import { purchasingRoutes } from './routes/purchasingRoutes.js';
 import { configPlatformRoutes } from './routes/configRoutes.js';
+import { rbacRoutes } from './routes/roleRoutes.js';
 import { tenantDemoRoutes } from './routes/tenantDemoRoutes.js';
 
 export function createApp(): Express {
@@ -60,6 +61,9 @@ export function createApp(): Express {
 
   // Configuration Platform — global definitions catalog (Wave A / A2)
   app.use('/api/config', configPlatformRoutes);
+
+  // RBAC permissions catalog (AN-RBAC-ROLES-5)
+  app.use('/api/rbac', rbacRoutes);
 
   // Tenant Demo Routes (Development & Test environments only)
   if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_TENANT_DEMO === '1') {

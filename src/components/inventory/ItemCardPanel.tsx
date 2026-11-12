@@ -10,9 +10,17 @@ import {
   TrendingDown,
   ArrowRightLeft,
   AlertCircle,
+  CheckCircle2,
   FileText,
+  Save,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import {
+  DynamicFieldGroup,
+  DynamicFieldDefinition,
+  DynamicFieldValuesMap,
+  validateRequiredDynamicFields,
+} from '../customization/DynamicFieldGroup.js';
 
 interface Item {
   id: string;
@@ -77,6 +85,15 @@ export function ItemCardPanel({
   const [filterWarehouseId, setFilterWarehouseId] = useState('');
   const [filterType, setFilterType] = useState('');
 
+  // Dynamic Custom Fields
+  const [customFields, setCustomFields] = useState<DynamicFieldDefinition[]>([]);
+  const [customValues, setCustomValues] = useState<DynamicFieldValuesMap>({});
+  const [customFieldErrors, setCustomFieldErrors] = useState<Record<string, string>>({});
+  const [customCanWrite, setCustomCanWrite] = useState(false);
+  const [savingCustom, setSavingCustom] = useState(false);
+  const [customSuccess, setCustomSuccess] = useState<string | null>(null);
+  const [customError, setCustomError] = useState<string | null>(null);
+
   const loadItemData = async () => {
     if (!companyId || !itemId) return;
     setLoading(true);
@@ -86,10 +103,12 @@ export function ItemCardPanel({
       if (filterWarehouseId) movQuery += `&warehouseId=${filterWarehouseId}`;
       if (filterType) movQuery += `&type=${filterType}`;
 
-      const [itemRes, balRes, movRes] = await Promise.all([
+      const [itemRes, balRes, movRes, cvRes, cfRes] = await Promise.all([
         apiFetch(`/api/inventory/items/${itemId}?companyId=${companyId}`),
         apiFetch(`/api/inventory/items/${itemId}/stock?companyId=${companyId}`),
         apiFetch(movQuery),
+        apiFetch(`/api/companies/${companyId}/custom-values/${itemId}`),
+        apiFetch(`/api/companies/${companyId}/custom-fields?entityType=item`),
       ]);
 
       if (itemRes.ok) setItem((await itemRes.json()).item);
@@ -97,6 +116,26 @@ export function ItemCardPanel({
 
       if (balRes.ok) setBalances((await balRes.json()).balances || []);
       if (movRes.ok) setMovements((await movRes.json()).movements || []);
+
+      let activeDefs: DynamicFieldDefinition[] = [];
+      if (cfRes.ok) {
+        const cfData = await cfRes.json();
+        activeDefs = cfData.fields || [];
+      }
+
+      if (cvRes.ok) {
+        const cvData = await cvRes.json();
+        setCustomCanWrite(Boolean(cvData.userCanWrite));
+        if (activeDefs.length === 0 && Array.isArray(cvData.fields)) {
+          activeDefs = cvData.fields;
+        }
+        const map: DynamicFieldValuesMap = {};
+        for (const v of cvData.values || []) {
+          map[v.fieldId] = v.value ?? null;
+        }
+        setCustomValues(map);
+      }
+      setCustomFields(activeDefs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء تحميل بيانات بطاقة الصنف');
     } finally {
@@ -107,6 +146,59 @@ export function ItemCardPanel({
   useEffect(() => {
     loadItemData();
   }, [companyId, itemId, filterWarehouseId, filterType]);
+
+  const handleCustomValueChange = (fieldId: string, val: string | number | boolean | null) => {
+    setCustomValues((prev) => ({ ...prev, [fieldId]: val }));
+    setCustomFieldErrors((prev) => {
+      if (!prev[fieldId]) return prev;
+      const next = { ...prev };
+      delete next[fieldId];
+      return next;
+    });
+  };
+
+  const handleSaveCustomValues = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customCanWrite || customFields.length === 0) return;
+
+    setCustomError(null);
+    setCustomSuccess(null);
+    const clientErrs = validateRequiredDynamicFields(customFields, customValues);
+    setCustomFieldErrors(clientErrs);
+    if (Object.keys(clientErrs).length > 0) {
+      setCustomError('يرجى استكمال الحقول الإلزامية المميزة بعلامة *');
+      return;
+    }
+
+    setSavingCustom(true);
+    try {
+      const payloadValues = customFields
+        .filter((f) => f.isActive)
+        .map((f) => {
+          const v = customValues[f.id];
+          return {
+            fieldId: f.id,
+            value: f.fieldType === 'boolean' ? Boolean(v) : v ?? null,
+          };
+        });
+
+      const res = await apiFetch(`/api/companies/${companyId}/custom-values/${itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: payloadValues }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'فشل حفظ البيانات الإضافية');
+      }
+      setCustomSuccess('تم حفظ البيانات الإضافية للصنف بنجاح');
+      await loadItemData();
+    } catch (err) {
+      setCustomError(err instanceof Error ? err.message : 'خطأ أثناء حفظ البيانات الإضافية');
+    } finally {
+      setSavingCustom(false);
+    }
+  };
 
   const totalStock = balances.reduce((acc, b) => acc + (b.qty || 0), 0);
 
@@ -226,39 +318,84 @@ export function ItemCardPanel({
 
       {/* Sub Tab Panels */}
       {activeSubTab === 'info' && item && (
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">كود الصنف</span>
-            <span className="text-sm font-bold font-mono text-indigo-300">{item.code}</span>
+        <form onSubmit={handleSaveCustomValues} className="flex flex-col gap-6">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+              <span className="text-xs text-slate-400 block mb-1">كود الصنف</span>
+              <span className="text-sm font-bold font-mono text-indigo-300">{item.code}</span>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+              <span className="text-xs text-slate-400 block mb-1">اسم الصنف (بالعربية)</span>
+              <span className="text-sm font-bold text-white">{item.nameAr}</span>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+              <span className="text-xs text-slate-400 block mb-1">اسم الصنف (بالإنجليزية)</span>
+              <span className="text-sm font-bold text-slate-300">{item.nameEn || '—'}</span>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+              <span className="text-xs text-slate-400 block mb-1">وحدة القياس (UOM)</span>
+              <span className="text-sm font-bold font-mono text-emerald-400">{item.uom}</span>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+              <span className="text-xs text-slate-400 block mb-1">إجمالي الكمية المتوفرة</span>
+              <span className="text-sm font-bold font-mono text-white">{totalStock} {item.uom}</span>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+              <span className="text-xs text-slate-400 block mb-1">تاريخ الإنشاء</span>
+              <span className="text-sm font-mono text-slate-300">
+                {new Date(item.createdAt).toLocaleDateString('ar-EG')}
+              </span>
+            </div>
           </div>
 
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">اسم الصنف (بالعربية)</span>
-            <span className="text-sm font-bold text-white">{item.nameAr}</span>
-          </div>
+          {customFields.length > 0 && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h4 className="text-sm font-bold text-white">بيانات إضافية</h4>
+                <span className="text-[11px] text-slate-400">حقول معرفة مسبقًا على مستوى الشركة</span>
+              </div>
 
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">اسم الصنف (بالإنجليزية)</span>
-            <span className="text-sm font-bold text-slate-300">{item.nameEn || '—'}</span>
-          </div>
+              {customError && (
+                <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{customError}</span>
+                </div>
+              )}
+              {customSuccess && (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{customSuccess}</span>
+                </div>
+              )}
 
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">وحدة القياس (UOM)</span>
-            <span className="text-sm font-bold font-mono text-emerald-400">{item.uom}</span>
-          </div>
+              <DynamicFieldGroup
+                fields={customFields}
+                values={customValues}
+                errors={customFieldErrors}
+                onChange={handleCustomValueChange}
+                disabled={!customCanWrite || savingCustom}
+              />
 
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">إجمالي الكمية المتوفرة</span>
-            <span className="text-sm font-bold font-mono text-white">{totalStock} {item.uom}</span>
-          </div>
-
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-            <span className="text-xs text-slate-400 block mb-1">تاريخ الإنشاء</span>
-            <span className="text-sm font-mono text-slate-300">
-              {new Date(item.createdAt).toLocaleDateString('ar-EG')}
-            </span>
-          </div>
-        </div>
+              {customCanWrite && (
+                <div className="flex justify-end pt-3 border-t border-slate-800">
+                  <button
+                    type="submit"
+                    disabled={savingCustom}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{savingCustom ? 'جاري الحفظ...' : 'حفظ البيانات الإضافية'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </form>
       )}
 
       {activeSubTab === 'balances' && (

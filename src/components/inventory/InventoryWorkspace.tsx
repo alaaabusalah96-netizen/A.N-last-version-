@@ -16,6 +16,12 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { ItemCardPanel } from './ItemCardPanel.js';
+import {
+  DynamicFieldGroup,
+  DynamicFieldDefinition,
+  DynamicFieldValuesMap,
+  validateRequiredDynamicFields,
+} from '../customization/DynamicFieldGroup.js';
 
 interface Company {
   id: string;
@@ -98,6 +104,9 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [itemCode, setItemCode] = useState('');
   const [itemNameAr, setItemNameAr] = useState('');
   const [itemUom, setItemUom] = useState('unit');
+  const [itemCustomFields, setItemCustomFields] = useState<DynamicFieldDefinition[]>([]);
+  const [itemCustomValues, setItemCustomValues] = useState<DynamicFieldValuesMap>({});
+  const [itemCustomErrors, setItemCustomErrors] = useState<Record<string, string>>({});
 
   const [movementWarehouseId, setMovementWarehouseId] = useState('');
   const [movementItemId, setMovementItemId] = useState('');
@@ -150,6 +159,19 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
       if (itemRes.ok) setItems((await itemRes.json()).items || []);
       if (balRes.ok) setBalances((await balRes.json()).balances || []);
       if (movRes.ok) setMovements((await movRes.json()).movements || []);
+
+      try {
+        const cfRes = await apiFetch(`/api/companies/${selectedCompanyId}/custom-fields?entityType=item`);
+        if (cfRes.ok) {
+          const cfData = await cfRes.json();
+          setItemCustomFields(cfData.fields || []);
+        } else {
+          setItemCustomFields([]);
+        }
+      } catch (cfErr) {
+        console.error('Failed to load item custom fields:', cfErr);
+        setItemCustomFields([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء تحميل بيانات المخزون');
     } finally {
@@ -192,14 +214,37 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const handleCreateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canWrite) return;
+    const reqErrs = validateRequiredDynamicFields(itemCustomFields, itemCustomValues);
+    setItemCustomErrors(reqErrs);
+    if (Object.keys(reqErrs).length > 0) {
+      setError('يرجى استكمال الحقول الإضافية الإلزامية المميزة بعلامة *');
+      return;
+    }
+
     setActionLoading(true);
     setError(null);
     setSuccess(null);
     try {
+      const customValuesPayload = itemCustomFields
+        .filter((f) => f.isActive)
+        .map((f) => {
+          const v = itemCustomValues[f.id];
+          return {
+            fieldId: f.id,
+            value: f.fieldType === 'boolean' ? Boolean(v) : v ?? null,
+          };
+        });
+
       const res = await apiFetch('/api/inventory/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId: selectedCompanyId, code: itemCode, nameAr: itemNameAr, uom: itemUom }),
+        body: JSON.stringify({
+          companyId: selectedCompanyId,
+          code: itemCode,
+          nameAr: itemNameAr,
+          uom: itemUom,
+          customValues: customValuesPayload,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'فشل في إنشاء الصنف');
@@ -209,6 +254,8 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
       setItemCode('');
       setItemNameAr('');
       setItemUom('unit');
+      setItemCustomValues({});
+      setItemCustomErrors({});
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء إنشاء الصنف');
@@ -823,7 +870,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
       {/* Item Modal */}
       {showItemModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6 flex flex-col gap-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h4 className="font-bold text-white text-sm">إضافة صنف جديد</h4>
               <button onClick={() => setShowItemModal(false)} className="text-slate-400 hover:text-white">
@@ -864,6 +911,28 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
+
+              {itemCustomFields.length > 0 && (
+                <div className="pt-3 border-t border-slate-800 flex flex-col gap-3">
+                  <h5 className="text-xs font-bold text-indigo-300">بيانات إضافية</h5>
+                  <DynamicFieldGroup
+                    fields={itemCustomFields}
+                    values={itemCustomValues}
+                    errors={itemCustomErrors}
+                    onChange={(fid, val) => {
+                      setItemCustomValues((prev) => ({ ...prev, [fid]: val }));
+                      setItemCustomErrors((prev) => {
+                        if (!prev[fid]) return prev;
+                        const next = { ...prev };
+                        delete next[fid];
+                        return next;
+                      });
+                    }}
+                    disabled={actionLoading}
+                  />
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 mt-2">
                 <button
                   type="button"

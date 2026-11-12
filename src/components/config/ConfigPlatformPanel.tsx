@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SlidersHorizontal, Building2, RefreshCw, AlertCircle, Save, CheckCircle2, History, RotateCcw, Eye, Layers } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { AccountOption, usableAccounts, isUsable } from '../../lib/accountRules.js';
 
 interface Company {
   id: string;
@@ -11,8 +12,19 @@ interface Company {
 interface ConfigDefinition {
   id: string;
   key: string;
+  domain?: string;
+  labelAr?: string | null;
+  defaultValue?: Record<string, unknown>;
   description: string | null;
 }
+
+const DOMAIN_LABELS: Record<string, string> = {
+  system: 'النظام (system)',
+  accounting: 'المحاسبة (accounting)',
+  inventory: 'المستودعات (inventory)',
+  purchasing: 'المشتريات (purchasing)',
+  general: 'عام (general)',
+};
 
 interface ConfigVersion {
   id: string;
@@ -28,37 +40,6 @@ interface ResolvedConfig {
   source: 'company_published' | 'platform_default';
   versionNo: number | null;
   content: Record<string, unknown>;
-}
-
-interface AccountOption {
-  id: string;
-  code: string;
-  nameAr: string;
-  isActive?: boolean;
-  isPostable?: boolean;
-  accountType?: string;
-}
-
-/**
- * مرآة لقواعد src/server/config-platform/configAccountRoles.ts.
- * الفلترة هنا للراحة فقط؛ الحكم النهائي في الخادم (WP-1).
- */
-const GRN_ROLE_RULES: Record<string, { label: string; types: string[] }> = {
-  inventory_account_id: { label: 'حساب المخزون', types: ['asset'] },
-  purchases_clearing_account_id: { label: 'حساب المشتريات المعلّقة', types: ['liability'] },
-};
-
-function usableAccounts(list: AccountOption[], field: string): AccountOption[] {
-  const rule = GRN_ROLE_RULES[field];
-  if (!rule) return list;
-  return list.filter(
-    (a) => a.isActive !== false && a.isPostable === true && rule.types.includes(String(a.accountType))
-  );
-}
-
-function isUsable(accountId: string, list: AccountOption[], field: string): boolean {
-  if (!accountId) return true;
-  return usableAccounts(list, field).some((a) => a.id === accountId);
 }
 
 interface ConfigPlatformPanelProps {
@@ -87,6 +68,7 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
   // Draft & Version state
   const [draftContent, setDraftContent] = useState<string>('{}');
   const [draftStatus, setDraftStatus] = useState<string>('');
+  const [hasPersistedDraft, setHasPersistedDraft] = useState<boolean>(false);
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
   const [jsonError, setJsonError] = useState<string | null>(null);
 
@@ -211,6 +193,7 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
           const content = draftBody.draft.content || {};
           setDraftContent(JSON.stringify(content, null, 2));
           setDraftStatus(draftBody.draft.status || 'draft');
+          setHasPersistedDraft(Boolean(draftBody.draft.id));
           setJsonError(null);
 
           if (selectedKey === 'accounting.grn_mapping') {
@@ -471,16 +454,32 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               <span>جاري تحميل التعاريف...</span>
             </div>
+          ) : definitions.length === 0 ? (
+            <div className="text-xs text-amber-400 bg-amber-950/30 border border-amber-800/50 rounded-xl px-3.5 py-2 flex-1">
+              لا توجد تعريفات إعدادات مسجلة حالياً في الكتالوج.
+            </div>
           ) : (
             <select
               value={selectedKey}
               onChange={(e) => setSelectedKey(e.target.value)}
               className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3.5 py-2 focus:outline-none focus:border-indigo-500 flex-1"
             >
-              {definitions.map((d) => (
-                <option key={d.id} value={d.key}>
-                  {d.key} {d.description ? `(${d.description})` : ''}
-                </option>
+              {Object.entries(
+                definitions.reduce<Record<string, ConfigDefinition[]>>((acc, d) => {
+                  const dom = d.domain || 'general';
+                  if (!acc[dom]) acc[dom] = [];
+                  acc[dom].push(d);
+                  return acc;
+                }, {})
+              ).map(([domain, defs]) => (
+                <optgroup key={domain} label={DOMAIN_LABELS[domain] || domain}>
+                  {defs.map((d) => (
+                    <option key={d.id} value={d.key}>
+                      {d.labelAr ? `${d.labelAr} (${d.key})` : d.key}
+                      {d.description ? ` — ${d.description}` : ''}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           )}
@@ -535,27 +534,38 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                 {resolvedConfig.versionNo !== null ? `v${resolvedConfig.versionNo}` : '—'}
               </span>
             </div>
-            <div className="sm:col-span-2 md:col-span-4 bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-1">
-              <span className="text-slate-400 text-[11px]">المحتوى الفعال الناتِج (Effective Content):</span>
-              <div className="text-emerald-400 font-mono text-xs overflow-x-auto">
-                {selectedKey === 'accounting.grn_mapping' ? (
-                  <div className="flex flex-col sm:flex-row gap-4 text-xs font-sans">
-                    <div>
-                      <span className="text-slate-400">حساب المخزون: </span>
-                      <span className="text-white font-semibold font-mono">
-                        {String(resolvedConfig.content?.inventory_account_id || 'غير محدد')}
-                      </span>
+            <div className="sm:col-span-2 md:col-span-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-1">
+                <span className="text-slate-400 text-[11px]">المحتوى الفعال الناتِج (Effective / Published Content):</span>
+                <div className="text-emerald-400 font-mono text-xs overflow-x-auto">
+                  {selectedKey === 'accounting.grn_mapping' ? (
+                    <div className="flex flex-col sm:flex-row gap-4 text-xs font-sans">
+                      <div>
+                        <span className="text-slate-400">حساب المخزون: </span>
+                        <span className="text-white font-semibold font-mono">
+                          {String(resolvedConfig.content?.inventory_account_id || 'غير محدد')}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">حساب المشتريات المعلّقة: </span>
+                        <span className="text-white font-semibold font-mono">
+                          {String(resolvedConfig.content?.purchases_clearing_account_id || 'غير محدد')}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-slate-400">حساب المشتريات المعلّقة: </span>
-                      <span className="text-white font-semibold font-mono">
-                        {String(resolvedConfig.content?.purchases_clearing_account_id || 'غير محدد')}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <pre className="whitespace-pre-wrap">{JSON.stringify(resolvedConfig.content, null, 2)}</pre>
-                )}
+                  ) : (
+                    <pre className="whitespace-pre-wrap">{JSON.stringify(resolvedConfig.content, null, 2)}</pre>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-1">
+                <span className="text-slate-400 text-[11px]">القيمة الافتراضية للمنصة (Platform Default):</span>
+                <div className="text-slate-300 font-mono text-xs overflow-x-auto">
+                  <pre className="whitespace-pre-wrap">
+                    {JSON.stringify(definitions.find((d) => d.key === selectedKey)?.defaultValue ?? {}, null, 2)}
+                  </pre>
+                </div>
               </div>
             </div>
           </div>
@@ -581,6 +591,24 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left Column: Draft Editor & Publish */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col gap-4">
+          {/* Status Bar above Draft Card */}
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800/80 text-[11px]">
+            {resolvedConfig?.source === 'company_published' && resolvedConfig.versionNo !== null ? (
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                منشور v{resolvedConfig.versionNo}
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                لم يُنشر بعد — القيمة الافتراضية
+              </span>
+            )}
+            {hasPersistedDraft && (
+              <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold">
+                مسودة غير منشورة
+              </span>
+            )}
+          </div>
+
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
               <span>محرر المسودة (Draft Editor)</span>
@@ -629,6 +657,25 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
           {/* Dedicated Structured Form for accounting.grn_mapping */}
           {selectedKey === 'accounting.grn_mapping' && (
             <div className="bg-slate-950 border border-indigo-500/20 rounded-xl p-4 flex flex-col gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-indigo-950/30 border border-indigo-500/20 text-[11px] text-indigo-200">
+                <span>هذا الإعداد متاح أيضًا في شاشة الربط المحاسبي</span>
+                <a
+                  href="#/accounting/mapping"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (typeof window !== 'undefined') {
+                      window.location.hash = '#/accounting/mapping';
+                      const sidebarButtons = Array.from(document.querySelectorAll('aside button'));
+                      const acctBtn = sidebarButtons.find((b) => b.textContent?.includes('المحاسبة'));
+                      if (acctBtn instanceof HTMLButtonElement) acctBtn.click();
+                    }
+                  }}
+                  className="font-bold text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                >
+                  فتح شاشة الربط المحاسبي (المحاسبة ← الربط المحاسبي)
+                </a>
+              </div>
+
               <h5 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5" />
                 <span>إعداد ربط استلام البضائع بالدليل المحاسبي (GRN Mapping Form)</span>

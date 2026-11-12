@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, RefreshCw, AlertCircle, CheckCircle, UserCheck, UserX, Key, Shield } from 'lucide-react';
+import { Users, Plus, RefreshCw, AlertCircle, CheckCircle, UserCheck, UserX, Key, Network, X } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { UserScopesPanel } from '../org/UserScopesPanel.js';
+
+interface RoleOption {
+  code: string;
+  nameAr: string;
+}
+
+const STATIC_FALLBACK_ROLES: RoleOption[] = [
+  { code: 'company_user', nameAr: 'مستخدم عادي' },
+  { code: 'company_admin', nameAr: 'مدير شركة' },
+  { code: 'platform_admin', nameAr: 'مدير منصة' },
+];
 
 export function UsersAdminWorkspace() {
   const [users, setUsers] = useState<any[]>([]);
@@ -8,10 +20,18 @@ export function UsersAdminWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Modals
+  const [companies, setCompanies] = useState<Array<{ id: string; code: string; nameAr: string }>>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [roleOptions, setRoleOptions] = useState<RoleOption[]>(STATIC_FALLBACK_ROLES);
+  const [rolesNotInitializedWarning, setRolesNotInitializedWarning] = useState<boolean>(false);
+
+  // Modals & Drawers
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [targetUser, setTargetUser] = useState<any>(null);
+  const [scopeDrawerUser, setScopeDrawerUser] = useState<any>(null);
+  const [canReadScopes, setCanReadScopes] = useState(true);
+  const [canWriteScopes, setCanWriteScopes] = useState(true);
 
   // Form states
   const [username, setUsername] = useState('');
@@ -39,6 +59,71 @@ export function UsersAdminWorkspace() {
     fetchUsers();
   }, [fetchUsers]);
 
+  useEffect(() => {
+    async function loadCompaniesAndPermissions() {
+      try {
+        const [compRes, meRes] = await Promise.all([
+          apiFetch('/api/companies'),
+          apiFetch('/api/auth/me'),
+        ]);
+        if (meRes.ok) {
+          const meBody = await meRes.json();
+          if (Array.isArray(meBody.permissions)) {
+            const perms: string[] = meBody.permissions;
+            setCanReadScopes(perms.includes('org:units:read') || perms.includes('org:units:write'));
+            setCanWriteScopes(perms.includes('org:units:write'));
+          }
+        }
+        if (!compRes.ok) return;
+        const compBody = await compRes.json();
+        const list = compBody.companies || [];
+        setCompanies(list);
+        if (list.length > 0 && !selectedCompanyId) {
+          setSelectedCompanyId(list[0].id);
+        }
+      } catch {
+        // fallback handled by static roles
+      }
+    }
+    loadCompaniesAndPermissions();
+  }, []);
+
+  useEffect(() => {
+    async function loadRolesForCompany() {
+      if (!selectedCompanyId) {
+        setRoleOptions(STATIC_FALLBACK_ROLES);
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/companies/${selectedCompanyId}/roles`);
+        if (!res.ok) {
+          setRoleOptions(STATIC_FALLBACK_ROLES);
+          setRolesNotInitializedWarning(true);
+          return;
+        }
+        const body = await res.json();
+        const dynamicList: Array<{ code: string; nameAr: string; isActive?: boolean }> = (body.roles || []).filter(
+          (r: any) => r.isActive !== false
+        );
+        if (dynamicList.length === 0) {
+          setRoleOptions(STATIC_FALLBACK_ROLES);
+          setRolesNotInitializedWarning(true);
+        } else {
+          const mapped: RoleOption[] = dynamicList.map((r) => ({ code: r.code, nameAr: r.nameAr }));
+          if (!mapped.some((r) => r.code === 'company_admin')) {
+            mapped.push({ code: 'company_admin', nameAr: 'مدير شركة' });
+          }
+          setRoleOptions(mapped);
+          setRolesNotInitializedWarning(false);
+        }
+      } catch {
+        setRoleOptions(STATIC_FALLBACK_ROLES);
+        setRolesNotInitializedWarning(true);
+      }
+    }
+    loadRolesForCompany();
+  }, [selectedCompanyId]);
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -46,7 +131,12 @@ export function UsersAdminWorkspace() {
     try {
       const res = await apiFetch('/api/users', {
         method: 'POST',
-        body: JSON.stringify({ username, password, role }),
+        body: JSON.stringify({
+          username,
+          password,
+          role,
+          ...(selectedCompanyId && role !== 'platform_admin' ? { companyId: selectedCompanyId } : {}),
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -167,8 +257,18 @@ export function UsersAdminWorkspace() {
                   <tr key={u.id} className="hover:bg-slate-800/30 transition">
                     <td className="py-3 px-4 font-semibold text-white">{u.username}</td>
                     <td className="py-3 px-4">
-                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'platform_admin' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-slate-800 text-slate-400'}`}>
-                        {u.role === 'platform_admin' ? 'مدير منصة' : 'مستخدم'}
+                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
+                        u.role === 'platform_admin'
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          : u.role === 'company_admin'
+                          ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {u.role === 'platform_admin'
+                          ? 'مدير منصة'
+                          : u.role === 'company_admin'
+                          ? 'مدير شركة'
+                          : 'مستخدم'}
                       </span>
                     </td>
                     <td className="py-3 px-4">
@@ -181,6 +281,17 @@ export function UsersAdminWorkspace() {
                       </button>
                     </td>
                     <td className="py-3 px-4 flex items-center justify-center gap-2">
+                      {canReadScopes && selectedCompanyId && (
+                        <button
+                          type="button"
+                          onClick={() => setScopeDrawerUser(u)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/70 border border-indigo-800/60 text-indigo-300 text-[11px] font-semibold transition cursor-pointer"
+                          title="إدارة النطاقات التنظيمية للمستخدم"
+                        >
+                          <Network className="w-3.5 h-3.5" />
+                          <span>النطاقات</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setTargetUser(u);
@@ -230,16 +341,40 @@ export function UsersAdminWorkspace() {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
+              {companies.length > 0 && role !== 'platform_admin' && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1">الشركة</label>
+                  <select
+                    value={selectedCompanyId}
+                    onChange={(e) => setSelectedCompanyId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} - {c.nameAr}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1">نوع الحساب</label>
+                <label className="block text-[11px] font-bold text-slate-400 mb-1">نوع الحساب / الدور</label>
                 <select
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="company_user">مستخدم عادي</option>
-                  <option value="platform_admin">مدير منصة (تحذير)</option>
+                  {roleOptions.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.nameAr} ({opt.code})
+                    </option>
+                  ))}
                 </select>
+                {rolesNotInitializedWarning && (
+                  <p className="mt-1.5 text-[11px] text-amber-400">
+                    لم تُهيّأ الأدوار لهذه الشركة بعد — يتم عرض الأدوار الافتراضية مؤقتاً.
+                  </p>
+                )}
               </div>
               <div className="flex gap-2 pt-2">
                 <button
@@ -303,6 +438,61 @@ export function UsersAdminWorkspace() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Drawer: User Org Scopes */}
+      {scopeDrawerUser && selectedCompanyId && canReadScopes && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-end" dir="rtl">
+          <div className="w-full max-w-5xl bg-slate-950 border-r border-slate-800 h-full overflow-y-auto shadow-2xl flex flex-col">
+            <div className="p-5 border-b border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Network className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    نطاقات المستخدم: {scopeDrawerUser.username}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    تحديد الفروع والإدارات ومراكز التكلفة المصرّح بها للمستخدم داخل الشركة
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {companies.length > 1 && (
+                  <select
+                    value={selectedCompanyId}
+                    onChange={(e) => setSelectedCompanyId(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nameAr} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setScopeDrawerUser(null)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                  aria-label="إغلاق لوحة النطاقات"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <UserScopesPanel
+                companyId={selectedCompanyId}
+                canWrite={canWriteScopes}
+                lockedUserId={scopeDrawerUser.id}
+                lockedUsername={scopeDrawerUser.username}
+              />
+            </div>
           </div>
         </div>
       )}

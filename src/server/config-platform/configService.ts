@@ -13,6 +13,8 @@ import {
   SaveDraftInput,
   PublishDraftInput,
   RollbackInput,
+  CreateDefinitionInput,
+  UpdateDefinitionInput,
 } from './configTypes.js';
 
 export type AccountCheckerFactory = (key: string, tx: DbExecutor) => ReferentialChecker;
@@ -38,6 +40,84 @@ export class ConfigService {
 
   async listDefinitions(): Promise<ConfigDefinition[]> {
     return await this.repo.listDefinitions();
+  }
+
+  async createDefinition(input: CreateDefinitionInput, actorId: string): Promise<ConfigDefinition> {
+    if (!actorId || typeof actorId !== 'string') {
+      throw new ValidationError('actorId is required');
+    }
+    if (!input || !input.key || typeof input.key !== 'string') {
+      throw new ValidationError('مفتاح التعريف مطلوب');
+    }
+    const keyPattern = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
+    if (!keyPattern.test(input.key.trim())) {
+      throw new ValidationError('صيغة مفتاح التعريف غير صحيحة (مثال: domain.setting_name)');
+    }
+    if (!input.domain || typeof input.domain !== 'string' || !input.domain.trim()) {
+      throw new ValidationError('مجال التعريف (domain) مطلوب');
+    }
+    if (!input.schema || typeof input.schema !== 'object' || Array.isArray(input.schema) || input.schema.type !== 'object') {
+      throw new ValidationError("مخطط التعريف (schema) مطلوب ويجب أن يكون كائن JSON من النوع type='object'");
+    }
+    if (!input.defaultValue || typeof input.defaultValue !== 'object' || Array.isArray(input.defaultValue)) {
+      throw new ValidationError('القيمة الافتراضية مطلوبة ويجب أن تكون كائن JSON');
+    }
+
+    // Validate defaultValue against schema (forbidden to seed default violating schema)
+    this.validation.validateAgainstSchema(input.defaultValue, input.schema as never);
+
+    const existing = await this.repo.findDefinitionByKey(input.key.trim());
+    if (existing) {
+      throw new ValidationError(`تعريف الإعداد موجود مسبقاً: ${input.key}`);
+    }
+
+    return await this.repo.insertDefinition({
+      key: input.key.trim(),
+      domain: input.domain.trim(),
+      labelAr: input.labelAr,
+      description: input.description,
+      schema: input.schema,
+      defaultValue: input.defaultValue,
+      isSystem: Boolean(input.isSystem),
+    });
+  }
+
+  async updateDefinitionMeta(key: string, input: UpdateDefinitionInput, actorId: string): Promise<ConfigDefinition> {
+    if (!actorId || typeof actorId !== 'string') {
+      throw new ValidationError('actorId is required');
+    }
+    if (!key || typeof key !== 'string' || !key.trim()) {
+      throw new ValidationError('مفتاح التعريف مطلوب');
+    }
+
+    const rawInput = (input || {}) as Record<string, unknown>;
+    if (rawInput.key !== undefined || rawInput.schema !== undefined || rawInput.defaultValue !== undefined) {
+      throw new ValidationError('المفتاح والمخطط والقيمة الافتراضية غير قابل للتعديل بعد الإنشاء');
+    }
+    if (input?.domain !== undefined && (typeof input.domain !== 'string' || !input.domain.trim())) {
+      throw new ValidationError('مجال التعريف (domain) غير صالح');
+    }
+
+    const existing = await this.repo.findDefinitionByKey(key.trim());
+    if (!existing) {
+      throw new NotFoundError(`تعريف الإعداد غير موجود: ${key}`);
+    }
+
+    return await this.repo.updateDefinitionMeta(key.trim(), {
+      labelAr: input?.labelAr,
+      description: input?.description,
+      domain: input?.domain,
+    });
+  }
+
+  /**
+   * حذف تعريف إعداد مرفوض في الحزمة دي:
+   * لأن config_registry.config_definition_id عليه ON DELETE RESTRICT
+   * وconfig_drafts عليه ON DELETE CASCADE — الحذف بيدمّر مسودات بصمت
+   * ويكسر سجل التدقيق للإصدارات المنشورة.
+   */
+  async archiveDefinition(_key: string): Promise<never> {
+    throw new ValidationError('حذف تعريف إعداد غير مسموح — الإصدارات المنشورة سجل تدقيق');
   }
 
   /**

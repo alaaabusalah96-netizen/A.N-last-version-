@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale, Calendar } from 'lucide-react';
+import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale, Calendar, Link2 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountsPanel } from './AccountsPanel.js';
 import { JournalWorkspace } from './JournalWorkspace.js';
 import { TrialBalancePanel } from './TrialBalancePanel.js';
 import { PeriodsPanel } from './PeriodsPanel.js';
 import { ReportsPanel } from './ReportsPanel.js';
+import { GlMappingPanel } from './GlMappingPanel.js';
 
 interface Company {
   id: string;
@@ -24,7 +25,19 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods' | 'reports'>('coa');
+  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods' | 'reports' | 'mapping'>(() =>
+    typeof window !== 'undefined' && window.location.hash === '#/accounting/mapping' ? 'mapping' : 'coa'
+  );
+
+  useEffect(() => {
+    const syncHash = () => {
+      if (window.location.hash === '#/accounting/mapping') {
+        setActiveTab('mapping');
+      }
+    };
+    window.addEventListener('hashchange', syncHash);
+    return () => window.removeEventListener('hashchange', syncHash);
+  }, []);
 
   const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
 
@@ -161,6 +174,18 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
               <FileText className="w-4 h-4" />
               <span>التقارير المالية (Financial Reports)</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('mapping')}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeTab === 'mapping'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Link2 className="w-4 h-4" />
+              <span>الربط المحاسبي</span>
+            </button>
           </div>
         )}
       </div>
@@ -196,6 +221,8 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
         <TrialBalancePanel companyId={selectedCompanyId} />
       ) : activeTab === 'periods' ? (
         <PeriodsPanel companyId={selectedCompanyId} canManage={canWrite} />
+      ) : activeTab === 'mapping' ? (
+        <GlMappingPanel companyId={selectedCompanyId} userRole={userRole} />
       ) : (
         <ReportsPanel companyId={selectedCompanyId} />
       )}

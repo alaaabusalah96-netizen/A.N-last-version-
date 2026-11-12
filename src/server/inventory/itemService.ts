@@ -1,12 +1,15 @@
 import { defaultItemRepository, ItemRepository } from './itemRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
+import { defaultCustomFieldService, CustomFieldService } from '../customization/customFieldService.js';
+import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { Item, CreateItemInput } from './inventoryTypes.js';
 
 export class ItemService {
   constructor(
     private itemRepo: ItemRepository = defaultItemRepository,
-    private auditService: AuditService = defaultAuditService
+    private auditService: AuditService = defaultAuditService,
+    private customFieldService: Pick<CustomFieldService, 'validateValuesAgainstDefinitions' | 'setValues'> = defaultCustomFieldService
   ) {}
 
   async listItems(companyId: string): Promise<Item[]> {
@@ -47,23 +50,48 @@ export class ItemService {
       throw new ValidationError('اسم الصنف بالعربية مطلوب');
     }
 
-    const existing = await this.itemRepo.findByCode(companyId, input.code);
-    if (existing) {
-      throw new ValidationError(`رمز الصنف (${input.code.trim()}) مستخدم مسبقاً لهذه الشركة`);
-    }
+    return await withTenantTransaction(companyId, async (tx) => {
+      const existing = await this.itemRepo.findByCode(companyId, input.code, tx);
+      if (existing) {
+        throw new ValidationError(`رمز الصنف (${input.code.trim()}) مستخدم مسبقاً لهذه الشركة`);
+      }
 
-    const item = await this.itemRepo.create(companyId, input);
+      const customValues = Array.isArray(input.customValues) ? input.customValues : [];
+      await this.customFieldService.validateValuesAgainstDefinitions(
+        companyId,
+        'item',
+        null,
+        customValues,
+        tx
+      );
 
-    await this.auditService.record({
-      actorUserId: actorId || null,
-      companyId,
-      action: 'ITEM_CREATE',
-      entityType: 'inv_item',
-      entityId: item.id,
-      metadata: { code: item.code, nameAr: item.nameAr, uom: item.uom },
+      const item = await this.itemRepo.create(companyId, input, tx);
+
+      if (customValues.length > 0) {
+        await this.customFieldService.setValues(
+          companyId,
+          item.id,
+          customValues,
+          actorId,
+          'item',
+          tx
+        );
+      }
+
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'ITEM_CREATE',
+          entityType: 'inv_item',
+          entityId: item.id,
+          metadata: { code: item.code, nameAr: item.nameAr, uom: item.uom },
+        },
+        { executor: tx }
+      );
+
+      return item;
     });
-
-    return item;
   }
 }
 

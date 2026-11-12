@@ -84,6 +84,35 @@ function makeFakeRepo() {
     async findDefinitionByKey(key: string) {
       return definitions.get(key) || null;
     },
+    async insertDefinition(input: any) {
+      const row = {
+        id: `def-${definitions.size + 1}`,
+        key: input.key,
+        domain: input.domain,
+        labelAr: input.labelAr ?? null,
+        isSystem: Boolean(input.isSystem),
+        schema: input.schema,
+        defaultValue: input.defaultValue,
+        description: input.description ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      definitions.set(input.key, row);
+      return row;
+    },
+    async updateDefinitionMeta(key: string, input: any) {
+      const existing = definitions.get(key);
+      if (!existing) throw new NotFoundError('not found');
+      const updated = {
+        ...existing,
+        labelAr: input.labelAr !== undefined ? input.labelAr : existing.labelAr,
+        description: input.description !== undefined ? input.description : existing.description,
+        domain: input.domain !== undefined ? input.domain : existing.domain,
+        updatedAt: new Date().toISOString(),
+      };
+      definitions.set(key, updated);
+      return updated;
+    },
     async listActiveByCompany(companyId: string) {
       return registry.filter((r) => r.companyId === companyId && r.isActive);
     },
@@ -282,5 +311,95 @@ describe('ConfigService (A2/A3) — Draft → Publish → Rollback lifecycle', (
     seed(fake);
     const svc = makeService(fake);
     await expect(svc.resolveConfig(C, 'nope.nope')).rejects.toThrow(NotFoundError);
+  });
+});
+
+describe('ConfigService (AN-CONFIG-CENTER-4) — Definition Catalog Management', () => {
+  it('createDefinition accepts valid key, schema, and matching defaultValue', async () => {
+    const fake = makeFakeRepo();
+    const svc = makeService(fake);
+    const def = await svc.createDefinition({
+      key: 'inventory.valuation_method',
+      domain: 'inventory',
+      labelAr: 'طريقة التقييم',
+      schema: { type: 'object', properties: { method: { type: 'string' } }, required: ['method'] },
+      defaultValue: { method: 'FIFO' },
+      isSystem: false,
+    }, 'admin-1');
+    expect(def.key).toBe('inventory.valuation_method');
+    expect(def.domain).toBe('inventory');
+    expect(def.isSystem).toBe(false);
+  });
+
+  it('createDefinition rejects malformed key format', async () => {
+    const fake = makeFakeRepo();
+    const svc = makeService(fake);
+    await expect(
+      svc.createDefinition({
+        key: 'BadKey',
+        domain: 'general',
+        schema: { type: 'object', properties: {} },
+        defaultValue: {},
+      }, 'admin-1')
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('createDefinition rejects duplicate key', async () => {
+    const fake = makeFakeRepo();
+    fake._definitions.set('accounting.grn_mapping', {
+      id: 'def-1',
+      key: 'accounting.grn_mapping',
+      domain: 'accounting',
+      labelAr: 'GRN',
+      isSystem: true,
+      schema: GRN_SCHEMA,
+      defaultValue: { inventory_account_id: '', purchases_clearing_account_id: '' },
+      description: null,
+      createdAt: '',
+      updatedAt: '',
+    });
+    const svc = makeService(fake);
+    await expect(
+      svc.createDefinition({
+        key: 'accounting.grn_mapping',
+        domain: 'accounting',
+        schema: { type: 'object', properties: {} },
+        defaultValue: {},
+      }, 'admin-1')
+    ).rejects.toThrow(/موجود/);
+  });
+
+  it('createDefinition rejects defaultValue violating schema', async () => {
+    const fake = makeFakeRepo();
+    const svc = makeService(fake);
+    await expect(
+      svc.createDefinition({
+        key: 'inventory.batch_mode',
+        domain: 'inventory',
+        schema: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] },
+        defaultValue: { enabled: 'not-a-boolean' },
+      }, 'admin-1')
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('updateDefinitionMeta rejects changing schema or key or defaultValue after creation', async () => {
+    const fake = makeFakeRepo();
+    const svc = makeService(fake);
+    await svc.createDefinition({
+      key: 'inventory.valuation_method',
+      domain: 'inventory',
+      schema: { type: 'object', properties: { method: { type: 'string' } } },
+      defaultValue: { method: 'FIFO' },
+    }, 'admin-1');
+
+    await expect(
+      svc.updateDefinitionMeta('inventory.valuation_method', { schema: { type: 'object' } } as any, 'admin-1')
+    ).rejects.toThrow(/غير قابل للتعديل/);
+  });
+
+  it('archiveDefinition always throws ValidationError (audit integrity)', async () => {
+    const fake = makeFakeRepo();
+    const svc = makeService(fake);
+    await expect(svc.archiveDefinition('system.general')).rejects.toThrow(/غير مسموح/);
   });
 });

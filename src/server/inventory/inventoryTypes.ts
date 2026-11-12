@@ -1,3 +1,5 @@
+import type { CustomFieldValueInput } from '../customization/customFieldTypes.js';
+
 export interface Warehouse {
   id: string;
   companyId: string;
@@ -30,6 +32,7 @@ export interface CreateItemInput {
   nameAr: string;
   nameEn?: string;
   uom?: string;
+  customValues?: CustomFieldValueInput[];
 }
 
 export interface StockBalance {

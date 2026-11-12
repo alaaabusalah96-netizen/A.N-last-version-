@@ -27,7 +27,7 @@ export class MembershipRepository {
       VALUES ($1, $2, $3, $4)
       ON CONFLICT (user_id, company_id)
       DO UPDATE SET role = EXCLUDED.role, is_active = EXCLUDED.is_active
-      RETURNING id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt";
+      RETURNING id::text, user_id as "userId", company_id as "companyId", role, role_id as "roleId", is_active as "isActive", created_at as "createdAt";
     `;
 
     const res = await executor.query<CompanyMembership>(sql, [userId, companyId, role, isActive]);
@@ -38,7 +38,7 @@ export class MembershipRepository {
     const executor = await this.getExecutor(customExecutor);
 
     const sql = `
-      SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
+      SELECT id::text, user_id as "userId", company_id as "companyId", role, role_id as "roleId", is_active as "isActive", created_at as "createdAt"
       FROM company_memberships
       WHERE user_id = $1 AND company_id = $2;
     `;
@@ -51,7 +51,7 @@ export class MembershipRepository {
     const executor = await this.getExecutor(customExecutor);
 
     const sql = `
-      SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
+      SELECT id::text, user_id as "userId", company_id as "companyId", role, role_id as "roleId", is_active as "isActive", created_at as "createdAt"
       FROM company_memberships
       WHERE user_id = $1 AND is_active = true;
     `;
@@ -64,7 +64,7 @@ export class MembershipRepository {
     const executor = await this.getExecutor(customExecutor);
 
     const sql = `
-      SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
+      SELECT id::text, user_id as "userId", company_id as "companyId", role, role_id as "roleId", is_active as "isActive", created_at as "createdAt"
       FROM company_memberships
       WHERE company_id = $1 AND is_active = true;
     `;
@@ -77,7 +77,7 @@ export class MembershipRepository {
     const executor = await this.getExecutor(customExecutor);
 
     const sql = `
-      SELECT id::text, user_id as "userId", company_id as "companyId", role, is_active as "isActive", created_at as "createdAt"
+      SELECT id::text, user_id as "userId", company_id as "companyId", role, role_id as "roleId", is_active as "isActive", created_at as "createdAt"
       FROM company_memberships
       WHERE company_id = $1;
     `;

@@ -14,12 +14,15 @@ import { toDecimal, toMoney } from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
 import { defaultConfigService, ConfigService } from '../config-platform/configService.js';
 import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
-import { findRoleRule, GRN_MAPPING_KEY } from '../config-platform/configAccountRoles.js';
+import { findGlEvent } from '../accounting/glEventCatalog.js';
+import { GlMappingService } from '../accounting/glMappingService.js';
 import { DbExecutor } from '../db/types.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class GrnService {
+  private glMappingService: GlMappingService;
+
   constructor(
     private grnRepo: GrnRepository = defaultGrnRepository,
     private supplierRepo: SupplierRepository = defaultSupplierRepository,
@@ -31,7 +34,9 @@ export class GrnService {
     private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository,
     private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
     private accountRepo: AccountRepository = defaultAccountRepository
-  ) {}
+  ) {
+    this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
+  }
 
   async listGrns(companyId: string): Promise<GrnHeader[]> {
     if (!companyId || typeof companyId !== 'string') {
@@ -164,17 +169,18 @@ export class GrnService {
     inventoryAccountId: string;
     purchasesClearingAccountId: string;
     source: 'config_platform' | 'company_settings';
+    versionNo: number | null;
   }> {
     try {
-      const resolved = await this.configService.resolveConfig(companyId, 'accounting.grn_mapping');
-      const c = (resolved && resolved.content) ? resolved.content as Record<string, unknown> : {};
-      const inv = typeof c.inventory_account_id === 'string' ? c.inventory_account_id.trim() : '';
-      const clr = typeof c.purchases_clearing_account_id === 'string' ? c.purchases_clearing_account_id.trim() : '';
+      const resolved = await this.glMappingService.resolve(companyId, 'accounting.grn_mapping');
+      const inv = (resolved.accounts.inventory_account_id || '').trim();
+      const clr = (resolved.accounts.purchases_clearing_account_id || '').trim();
       if (inv !== '' && clr !== '') {
         return {
           inventoryAccountId: inv,
           purchasesClearingAccountId: clr,
           source: 'config_platform',
+          versionNo: resolved.versionNo,
         };
       }
     } catch (err) {
@@ -187,7 +193,7 @@ export class GrnService {
 
     const settings = await this.settingsRepo.getByCompanyId(companyId);
     const gl = this.requireGlAccounts(settings);
-    return { ...gl, source: 'company_settings' };
+    return { ...gl, source: 'company_settings', versionNo: null };
   }
 
   /**
@@ -201,37 +207,19 @@ export class GrnService {
     gl: { inventoryAccountId: string; purchasesClearingAccountId: string },
     tx: DbExecutor
   ): Promise<void> {
-    const targets: Array<{ field: string; accountId: string }> = [
-      { field: 'inventory_account_id', accountId: gl.inventoryAccountId },
-      { field: 'purchases_clearing_account_id', accountId: gl.purchasesClearingAccountId },
-    ];
-
-    for (const target of targets) {
-      const account = await this.accountRepo.findById(companyId, target.accountId, tx);
-      if (!account) {
-        throw new ValidationError(
-          `لا يمكن الترحيل: الحقل ${target.field} بيشير لحساب غير موجود في دليل الشركة (id=${target.accountId})`
-        );
-      }
-      if (!account.isActive) {
-        throw new ValidationError(`لا يمكن الترحيل: الحساب ${account.code} (${account.nameAr}) غير نشط`);
-      }
-
-      const rule = findRoleRule(GRN_MAPPING_KEY, target.field);
-      if (!rule) continue;
-
-      if (rule.requirePostable && !account.isPostable) {
-        throw new ValidationError(
-          `لا يمكن الترحيل: ${rule.labelAr} (${account.code}) حساب رئيسي/تجميعي وغير قابل للترحيل`
-        );
-      }
-      if (!rule.allowedTypes.includes(account.accountType)) {
-        throw new ValidationError(
-          `لا يمكن الترحيل: ${rule.labelAr} (${account.code}) نوعه ${account.accountType} `
-          + `ولازم يكون من نوع (${rule.allowedTypes.join(' / ')})`
-        );
-      }
+    const def = findGlEvent('accounting.grn_mapping');
+    if (!def) {
+      throw new ValidationError('تعريف حدث الربط المحاسبي accounting.grn_mapping مفقود من الكتالوج');
     }
+    await this.glMappingService.assertUsable(
+      companyId,
+      def,
+      {
+        inventory_account_id: gl.inventoryAccountId,
+        purchases_clearing_account_id: gl.purchasesClearingAccountId,
+      },
+      tx
+    );
   }
 
   /**
@@ -345,6 +333,8 @@ export class GrnService {
           entryDate,
           journalEntryId: postedJournal.id,
           glSource: gl.source,
+          glEventKey: 'accounting.grn_mapping',
+          glVersionNo: gl.versionNo,
         },
       }, { executor: tx });
 
