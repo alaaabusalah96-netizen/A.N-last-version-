@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SlidersHorizontal, Building2, RefreshCw, AlertCircle, Save, CheckCircle2, History, RotateCcw } from 'lucide-react';
+import { SlidersHorizontal, Building2, RefreshCw, AlertCircle, Save, CheckCircle2, History, RotateCcw, Eye, Layers } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 
 interface Company {
@@ -22,6 +22,21 @@ interface ConfigVersion {
   publishedAt: string;
 }
 
+interface ResolvedConfig {
+  key: string;
+  definitionId: string;
+  source: 'company_published' | 'platform_default';
+  versionNo: number | null;
+  content: Record<string, unknown>;
+}
+
+interface AccountOption {
+  id: string;
+  code: string;
+  nameAr: string;
+  isActive?: boolean;
+}
+
 interface ConfigPlatformPanelProps {
   userRole?: string;
 }
@@ -35,10 +50,22 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [loadingDefinitions, setLoadingDefinitions] = useState(false);
 
+  // Accounts for accounting.grn_mapping form
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [inventoryAccountId, setInventoryAccountId] = useState<string>('');
+  const [purchasesClearingAccountId, setPurchasesClearingAccountId] = useState<string>('');
+
+  // Resolve Preview State
+  const [resolvedConfig, setResolvedConfig] = useState<ResolvedConfig | null>(null);
+  const [loadingResolve, setLoadingResolve] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  // Draft & Version state
   const [draftContent, setDraftContent] = useState<string>('{}');
   const [draftStatus, setDraftStatus] = useState<string>('');
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
-  
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
   const [changeSummary, setChangeSummary] = useState<string>('');
   const [rollbackVersionNo, setRollbackVersionNo] = useState<number | ''>('');
   const [rollbackSummary, setRollbackSummary] = useState<string>('');
@@ -102,7 +129,46 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
     loadDefinitions();
   }, []);
 
-  // Load key config (draft + versions)
+  // Load COA accounts when grn_mapping is selected
+  useEffect(() => {
+    async function loadAccounts() {
+      if (!selectedCompanyId || selectedKey !== 'accounting.grn_mapping') return;
+      try {
+        const res = await apiFetch(`/api/accounting/accounts?companyId=${selectedCompanyId}`);
+        if (res.ok) {
+          const body = await res.json();
+          const list: AccountOption[] = (body.accounts || []).filter((a: any) => a.isActive !== false);
+          setAccounts(list);
+        }
+      } catch {
+        // ignore error
+      }
+    }
+    loadAccounts();
+  }, [selectedCompanyId, selectedKey]);
+
+  // Fetch Resolve Preview
+  const fetchResolvePreview = async () => {
+    if (!selectedCompanyId || !selectedKey) return;
+    setLoadingResolve(true);
+    setResolveError(null);
+    try {
+      const res = await apiFetch(`/api/companies/${selectedCompanyId}/config/resolve?key=${encodeURIComponent(selectedKey)}`);
+      if (res.ok) {
+        const body = await res.json();
+        setResolvedConfig(body.resolved || null);
+      } else {
+        const errBody = await res.json();
+        setResolveError(errBody.message || 'تعذر حل قيمة الإعداد الفعالة');
+      }
+    } catch {
+      setResolveError('خطأ في الاتصال أثناء حل الإعداد الفعال');
+    } finally {
+      setLoadingResolve(false);
+    }
+  };
+
+  // Load key config (draft + versions + resolve preview)
   const loadKeyConfig = async () => {
     if (!selectedCompanyId || !selectedKey) return;
     setLoadingConfig(true);
@@ -113,8 +179,15 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       if (draftRes.ok) {
         const draftBody = await draftRes.json();
         if (draftBody.draft) {
-          setDraftContent(JSON.stringify(draftBody.draft.content, null, 2));
+          const content = draftBody.draft.content || {};
+          setDraftContent(JSON.stringify(content, null, 2));
           setDraftStatus(draftBody.draft.status || 'draft');
+          setJsonError(null);
+
+          if (selectedKey === 'accounting.grn_mapping') {
+            setInventoryAccountId(typeof content.inventory_account_id === 'string' ? content.inventory_account_id : '');
+            setPurchasesClearingAccountId(typeof content.purchases_clearing_account_id === 'string' ? content.purchases_clearing_account_id : '');
+          }
         }
       }
 
@@ -124,6 +197,9 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
         const verBody = await verRes.json();
         setVersions(verBody.versions || []);
       }
+
+      // 3) Load Resolve Preview
+      await fetchResolvePreview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في جلب بيانات الإعداد');
     } finally {
@@ -134,6 +210,43 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
   useEffect(() => {
     loadKeyConfig();
   }, [selectedCompanyId, selectedKey]);
+
+  // Handle Form Change for inventory_account_id
+  const handleInventoryAccountChange = (invId: string) => {
+    setInventoryAccountId(invId);
+    const obj = {
+      inventory_account_id: invId,
+      purchases_clearing_account_id: purchasesClearingAccountId,
+    };
+    setDraftContent(JSON.stringify(obj, null, 2));
+    setJsonError(null);
+  };
+
+  // Handle Form Change for purchases_clearing_account_id
+  const handlePurchasesClearingAccountChange = (clrId: string) => {
+    setPurchasesClearingAccountId(clrId);
+    const obj = {
+      inventory_account_id: inventoryAccountId,
+      purchases_clearing_account_id: clrId,
+    };
+    setDraftContent(JSON.stringify(obj, null, 2));
+    setJsonError(null);
+  };
+
+  // Handle Textarea JSON Change (Form <-> JSON Sync)
+  const handleJsonTextareaChange = (raw: string) => {
+    setDraftContent(raw);
+    try {
+      const parsed = JSON.parse(raw);
+      setJsonError(null);
+      if (selectedKey === 'accounting.grn_mapping' && typeof parsed === 'object' && parsed !== null) {
+        setInventoryAccountId(typeof parsed.inventory_account_id === 'string' ? parsed.inventory_account_id : '');
+        setPurchasesClearingAccountId(typeof parsed.purchases_clearing_account_id === 'string' ? parsed.purchases_clearing_account_id : '');
+      }
+    } catch {
+      setJsonError('محتوى المسودة غير مطابق لصيغة JSON الصحيحة');
+    }
+  };
 
   // Save Draft
   const handleSaveDraft = async () => {
@@ -149,6 +262,13 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
         throw new Error('محتوى المسودة غير مطابق لصيغة JSON الصحيحة');
       }
 
+      if (selectedKey === 'accounting.grn_mapping') {
+        parsed = {
+          inventory_account_id: inventoryAccountId,
+          purchases_clearing_account_id: purchasesClearingAccountId,
+        };
+      }
+
       const res = await apiFetch(`/api/companies/${selectedCompanyId}/config/draft`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -161,7 +281,7 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       }
 
       setSuccess('تم حفظ المسودة بنجاح');
-      loadKeyConfig();
+      await loadKeyConfig();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في حفظ المسودة');
     } finally {
@@ -189,7 +309,7 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
 
       setSuccess(`تم نشر الإصدار v${body.published?.versionNo} بنجاح`);
       setChangeSummary('');
-      loadKeyConfig();
+      await loadKeyConfig();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في النشر');
     } finally {
@@ -222,13 +342,15 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       setSuccess(`تم التراجع للإصدار v${rollbackVersionNo} بنجاح (تم إنشاء v${body.published?.versionNo})`);
       setRollbackVersionNo('');
       setRollbackSummary('');
-      loadKeyConfig();
+      await loadKeyConfig();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في عملية التراجع');
     } finally {
       setRollingBack(false);
     }
   };
+
+  const currentCompany = companies.find((c) => c.id === selectedCompanyId);
 
   return (
     <div className="w-full flex flex-col gap-6" dir="rtl">
@@ -295,6 +417,81 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
         </div>
       </div>
 
+      {/* Resolve Preview Card */}
+      <div className="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-5 shadow-2xl flex flex-col gap-3">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Eye className="w-4 h-4 text-indigo-400" />
+            <h4 className="text-xs font-bold text-white">معاينة الحل النهائي والنوع الفعال (Resolved Config Preview)</h4>
+          </div>
+          {loadingResolve && (
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              <span>جاري الحل...</span>
+            </div>
+          )}
+        </div>
+
+        {resolveError ? (
+          <div className="text-xs text-amber-400 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{resolveError}</span>
+          </div>
+        ) : resolvedConfig ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <div>
+              <span className="text-slate-400">الشركة: </span>
+              <span className="text-white font-semibold">{currentCompany?.nameAr || selectedCompanyId}</span>
+            </div>
+            <div>
+              <span className="text-slate-400">المفتاح: </span>
+              <span className="text-indigo-300 font-mono font-semibold">{resolvedConfig.key}</span>
+            </div>
+            <div>
+              <span className="text-slate-400">المصدر الفعال: </span>
+              {resolvedConfig.source === 'company_published' ? (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                  شركة منشور (company_published)
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30">
+                  افتراضي المنصة (platform_default)
+                </span>
+              )}
+            </div>
+            <div>
+              <span className="text-slate-400">رقم الإصدار: </span>
+              <span className="text-white font-mono font-bold">
+                {resolvedConfig.versionNo !== null ? `v${resolvedConfig.versionNo}` : '—'}
+              </span>
+            </div>
+            <div className="sm:col-span-2 md:col-span-4 bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-1">
+              <span className="text-slate-400 text-[11px]">المحتوى الفعال الناتِج (Effective Content):</span>
+              <div className="text-emerald-400 font-mono text-xs overflow-x-auto">
+                {selectedKey === 'accounting.grn_mapping' ? (
+                  <div className="flex flex-col sm:flex-row gap-4 text-xs font-sans">
+                    <div>
+                      <span className="text-slate-400">حساب المخزون: </span>
+                      <span className="text-white font-semibold font-mono">
+                        {String(resolvedConfig.content?.inventory_account_id || 'غير محدد')}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">حساب المشتريات المعلّقة: </span>
+                      <span className="text-white font-semibold font-mono">
+                        {String(resolvedConfig.content?.purchases_clearing_account_id || 'غير محدد')}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <pre className="whitespace-pre-wrap">{JSON.stringify(resolvedConfig.content, null, 2)}</pre>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       {/* Status Messages */}
       {error && (
         <div className="p-4 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2">
@@ -325,7 +522,7 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
             </h4>
             <button
               onClick={handleSaveDraft}
-              disabled={!canWrite || savingDraft || loadingConfig}
+              disabled={!canWrite || savingDraft || loadingConfig || !!jsonError}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
             >
               <Save className="w-3.5 h-3.5" />
@@ -333,14 +530,74 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
             </button>
           </div>
 
-          <textarea
-            value={draftContent}
-            onChange={(e) => setDraftContent(e.target.value)}
-            disabled={!canWrite || loadingConfig}
-            rows={12}
-            className="w-full bg-slate-950 border border-slate-800 text-emerald-400 font-mono text-xs rounded-xl p-3.5 focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
-            placeholder="{}"
-          />
+          {/* Dedicated Structured Form for accounting.grn_mapping */}
+          {selectedKey === 'accounting.grn_mapping' && (
+            <div className="bg-slate-950 border border-indigo-500/20 rounded-xl p-4 flex flex-col gap-4">
+              <h5 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5" />
+                <span>إعداد ربط استلام البضائع بالدليل المحاسبي (GRN Mapping Form)</span>
+              </h5>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-300">حساب المخزون (inventory_account_id):</label>
+                <select
+                  value={inventoryAccountId}
+                  onChange={(e) => handleInventoryAccountChange(e.target.value)}
+                  disabled={!canWrite || loadingConfig}
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">-- اختر حساب المخزون --</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.code} - {acc.nameAr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-300">حساب المشتريات المعلّقة (purchases_clearing_account_id):</label>
+                <select
+                  value={purchasesClearingAccountId}
+                  onChange={(e) => handlePurchasesClearingAccountChange(e.target.value)}
+                  disabled={!canWrite || loadingConfig}
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">-- اختر حساب المشتريات المعلّقة --</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.code} - {acc.nameAr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Advanced JSON Editor in Collapsible Details */}
+          <details className="group border border-slate-800 rounded-xl bg-slate-950 p-3" open={selectedKey !== 'accounting.grn_mapping'}>
+            <summary className="text-xs font-bold text-slate-300 cursor-pointer flex items-center justify-between select-none">
+              <span>تحرير JSON متقدم (Advanced JSON)</span>
+              <span className="text-[10px] text-slate-500 group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+
+            <div className="mt-3 flex flex-col gap-2">
+              <textarea
+                value={draftContent}
+                onChange={(e) => handleJsonTextareaChange(e.target.value)}
+                disabled={!canWrite || loadingConfig}
+                rows={10}
+                className="w-full bg-slate-900 border border-slate-800 text-emerald-400 font-mono text-xs rounded-xl p-3.5 focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
+                placeholder="{}"
+              />
+              {jsonError && (
+                <p className="text-red-400 text-[11px] flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{jsonError}</span>
+                </p>
+              )}
+            </div>
+          </details>
 
           {/* Publish Action Box */}
           <div className="pt-4 border-t border-slate-800 flex flex-col gap-3">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, RefreshCw, AlertCircle, Calendar, ArrowLeftRight, PieChart, Landmark } from 'lucide-react';
+import { FileText, RefreshCw, AlertCircle, Calendar, ArrowLeftRight, PieChart, Landmark, Download } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 
 interface AccountOption {
@@ -110,6 +110,54 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
     loadReport();
   }, [reportType, companyId]);
 
+  const handleExportCsv = () => {
+    let csvContent = '';
+    let filename = 'report.csv';
+
+    if (reportType === 'gl' && glData) {
+      filename = `general-ledger-${glData.accountCode || 'report'}.csv`;
+      csvContent = 'تاريخ القيد,البيان,مدين,دائن,الرصيد التراكمي\n';
+      (glData.rows || []).forEach((r: any) => {
+        const memo = (r.lineMemo || '-').replace(/"/g, '""');
+        csvContent += `"${r.entryDate}","${memo}",${r.debit},${r.credit},${r.runningBalance}\n`;
+      });
+    } else if (reportType === 'income' && incomeData) {
+      filename = 'income-statement.csv';
+      csvContent = 'القسم,رمز الحساب,اسم الحساب,المبلغ\n';
+      (incomeData.revenue || []).forEach((r: any) => {
+        csvContent += `"إيرادات","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
+      });
+      (incomeData.expenses || []).forEach((r: any) => {
+        csvContent += `"مصروفات","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
+      });
+      csvContent += `"صافي الدخل","","","${incomeData.netIncome}"\n`;
+    } else if (reportType === 'balance' && balanceData) {
+      filename = 'balance-sheet.csv';
+      csvContent = 'القسم,رمز الحساب,اسم الحساب,المبلغ\n';
+      (balanceData.assets || []).forEach((r: any) => {
+        csvContent += `"أصول","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
+      });
+      (balanceData.liabilities || []).forEach((r: any) => {
+        csvContent += `"التزامات","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
+      });
+      (balanceData.equity || []).forEach((r: any) => {
+        csvContent += `"حقوق ملكية","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
+      });
+    }
+
+    if (!csvContent) return;
+
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="w-full flex flex-col gap-6" dir="rtl">
       {/* Report Header & Filter Card */}
@@ -158,7 +206,7 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
           {reportType === 'gl' && (
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-slate-300">الحساب المحاسبي:</label>
@@ -218,14 +266,23 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
             </div>
           )}
 
-          <div>
+          <div className="flex gap-2">
             <button
               onClick={loadReport}
               disabled={loading}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-indigo-600/20 cursor-pointer"
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-indigo-600/20 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>عرض التقرير</span>
+              <span>عرض</span>
+            </button>
+            <button
+              onClick={handleExportCsv}
+              disabled={loading || (!glData && !incomeData && !balanceData)}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-600/20 cursor-pointer"
+              title="تصدير CSV مع دعم اللغة العربية UTF-8 BOM"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>تصدير CSV</span>
             </button>
           </div>
         </div>
