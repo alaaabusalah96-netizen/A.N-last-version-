@@ -90,6 +90,11 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
   const [jsonError, setJsonError] = useState<string | null>(null);
 
+  // Dry-run validation state
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [validateResult, setValidateResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [validating, setValidating] = useState(false);
+
   const [changeSummary, setChangeSummary] = useState<string>('');
   const [rollbackVersionNo, setRollbackVersionNo] = useState<number | ''>('');
   const [rollbackSummary, setRollbackSummary] = useState<string>('');
@@ -269,6 +274,47 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       }
     } catch {
       setJsonError('محتوى المسودة غير مطابق لصيغة JSON الصحيحة');
+    }
+  };
+
+  const parseDraftContent = (): Record<string, unknown> => {
+    if (selectedKey === 'accounting.grn_mapping') {
+      return {
+        inventory_account_id: inventoryAccountId,
+        purchases_clearing_account_id: purchasesClearingAccountId,
+      };
+    }
+    try {
+      return JSON.parse(draftContent);
+    } catch {
+      return {};
+    }
+  };
+
+  const handleDryRun = async () => {
+    if (!selectedCompanyId || !selectedKey) return;
+    setValidating(true);
+    setValidateResult(null);
+    setFieldErrors({});
+    try {
+      const res = await apiFetch(`/api/companies/${selectedCompanyId}/config/validate?key=${encodeURIComponent(selectedKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: parseDraftContent() }),
+      });
+      const body = await res.json();
+      if (res.ok && body.ok) {
+        setValidateResult({ ok: true, message: 'الإعداد صالح — جاهز للنشر' });
+      } else {
+        setValidateResult({ ok: false, message: body.message || 'الإعداد غير صالح' });
+        if (body.field) {
+          setFieldErrors({ [body.field]: body.message });
+        }
+      }
+    } catch {
+      setValidateResult({ ok: false, message: 'تعذر تنفيذ التحقق المسبق — تحقق من الاتصال' });
+    } finally {
+      setValidating(false);
     }
   };
 
@@ -544,15 +590,41 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                 </span>
               )}
             </h4>
-            <button
-              onClick={handleSaveDraft}
-              disabled={!canWrite || savingDraft || loadingConfig || !!jsonError}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{savingDraft ? 'جاري الحفظ...' : 'حفظ المسودة'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDryRun}
+                disabled={!canWrite || validating || loadingConfig}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${validating ? 'animate-spin' : ''}`} />
+                <span>{validating ? 'جاري التحقق...' : 'تحقق مسبق'}</span>
+              </button>
+              <button
+                onClick={handleSaveDraft}
+                disabled={!canWrite || savingDraft || loadingConfig || !!jsonError}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{savingDraft ? 'جاري الحفظ...' : 'حفظ المسودة'}</span>
+              </button>
+            </div>
           </div>
+
+          {/* Validation Result Banner */}
+          {validateResult && (
+            <div className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
+              validateResult.ok
+                ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                : 'bg-amber-950/40 border-amber-800/60 text-amber-300'
+            }`}>
+              {validateResult.ok ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+              )}
+              <span>{validateResult.message}</span>
+            </div>
+          )}
 
           {/* Dedicated Structured Form for accounting.grn_mapping */}
           {selectedKey === 'accounting.grn_mapping' && (
@@ -577,6 +649,12 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                     </option>
                   ))}
                 </select>
+                {fieldErrors['inventory_account_id'] && (
+                  <p className="text-red-400 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{fieldErrors['inventory_account_id']}</span>
+                  </p>
+                )}
                 {!isUsable(inventoryAccountId, accounts, 'inventory_account_id') && (
                   <p className="text-amber-400 text-[11px] flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -603,6 +681,12 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                     </option>
                   ))}
                 </select>
+                {fieldErrors['purchases_clearing_account_id'] && (
+                  <p className="text-red-400 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{fieldErrors['purchases_clearing_account_id']}</span>
+                  </p>
+                )}
                 {!isUsable(purchasesClearingAccountId, accounts, 'purchases_clearing_account_id') && (
                   <p className="text-amber-400 text-[11px] flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0" />

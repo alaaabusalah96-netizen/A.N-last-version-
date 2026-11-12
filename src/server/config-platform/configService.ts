@@ -4,7 +4,7 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { ValidationError, NotFoundError, ConflictError } from '../http/errors.js';
 import { defaultAccountRepository } from '../accounting/accountRepository.js';
-import { createAccountRoleChecker } from './configAccountRoles.js';
+import { createAccountRoleChecker, validateCrossField } from './configAccountRoles.js';
 import {
   ConfigDefinition,
   ConfigRegistryVersion,
@@ -99,6 +99,67 @@ export class ConfigService {
     });
   }
 
+  // ----------------------------------------------------------------- dry-run validation
+
+  private async runValidationGates(
+    companyId: string,
+    key: string,
+    content: Record<string, unknown>,
+    definition: ConfigDefinition,
+    tx: DbExecutor
+  ): Promise<void> {
+    // 1. Structural validation
+    this.validation.validateAgainstSchema(content, definition.schema as never);
+    // 2. Semantic / Cross-field validation (publish mode = true)
+    validateCrossField(key, content, true);
+    // 3. Referential validation
+    await this.validation.validateReferences(
+      companyId,
+      content,
+      definition.schema as never,
+      this.accountCheckerFactory(key, tx)
+    );
+  }
+
+  /**
+   * Dry-run validation: runs structural, cross-field, and referential validation
+   * without writing anything to database.
+   */
+  async validateContent(
+    companyId: string,
+    key: string,
+    content: unknown
+  ): Promise<{ ok: boolean; message?: string; field?: string }> {
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+    if (!key || typeof key !== 'string') {
+      throw new ValidationError('key is required');
+    }
+    if (!content || typeof content !== 'object' || Array.isArray(content)) {
+      return { ok: false, message: 'المحتوى مطلوب ويجب أن يكون كائن JSON صحيح' };
+    }
+
+    try {
+      await withTenantTransaction(companyId, async (tx) => {
+        const definition = await this.requireDefinition(key, tx);
+        await this.runValidationGates(companyId, key, content as Record<string, unknown>, definition, tx);
+      });
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        const msg = err.message;
+        let field: string | undefined;
+        if (msg.includes(':')) {
+          const path = msg.split(':')[0].trim();
+          field = path.slice(path.lastIndexOf('.') + 1);
+        }
+        return { ok: false, message: msg, field };
+      }
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   // ----------------------------------------------------------------- draft side
 
   async getDraft(companyId: string, key: string): Promise<ConfigDraft> {
@@ -138,6 +199,7 @@ export class ConfigService {
       const definition = await this.requireDefinition(key, tx);
       // Structural validation on every save (fail fast, drafts are cheap)
       this.validation.validateAgainstSchema(input.content, definition.schema as never);
+      validateCrossField(key, input.content, false);
       return await this.repo.upsertDraft(companyId, definition.id, input.content, status, actorId, tx);
     });
   }
@@ -162,15 +224,7 @@ export class ConfigService {
         throw new NotFoundError('لا توجد مسودة لهذا الإعداد — عدّل المسودة أولاً قبل النشر');
       }
 
-      // A4 gate: structural validation
-      this.validation.validateAgainstSchema(draft.content, definition.schema as never);
-      // A4 gate: referential validation (accounts master data)
-      await this.validation.validateReferences(
-        companyId,
-        draft.content,
-        definition.schema as never,
-        this.accountCheckerFactory(key, tx)
-      );
+      await this.runValidationGates(companyId, key, draft.content, definition, tx);
 
       const versionNo = await this.repo.nextVersionNo(companyId, definition.id, tx);
       const published = await this.repo.insertPublishedVersion(

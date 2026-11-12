@@ -121,6 +121,7 @@ const scripts = [
   'scripts/verifyConfigUi1.ts',
   'scripts/verifyConfigGrnFormAndResolve1.ts',
   'scripts/verifyConfigGrnAccountIntegrity2.ts',
+  'scripts/verifyConfigValidationSemantics3.ts',
 ];
 
 export interface BatteryItemReport {

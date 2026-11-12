@@ -15,7 +15,13 @@ export interface JsonSchemaNode {
   enum?: unknown[];
   minimum?: number;
   maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
   items?: JsonSchemaNode;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
 }
 
 export interface ReferentialChecker {
@@ -32,7 +38,7 @@ const SUPPORTED_JSON_TYPES = new Set([
 
 export class ConfigValidationService {
   validateAgainstSchema(
-    content: Record<string, unknown>,
+    content: unknown,
     schema: JsonSchemaNode,
     basePath = 'content'
   ): void {
@@ -48,6 +54,24 @@ export class ConfigValidationService {
 
     if (Array.isArray(schema.enum) && !schema.enum.includes(content)) {
       throw new ValidationError(`${basePath}: القيمة غير مسموحة (مسموح: ${schema.enum.join(', ')})`);
+    }
+
+    if (typeof content === 'string') {
+      const str = content as string;
+      if (schema.minLength !== undefined && str.length < schema.minLength) {
+        throw new ValidationError(`${basePath}: طول القيمة أقل من الحد الأدنى (${schema.minLength})`);
+      }
+      if (schema.maxLength !== undefined && str.length > schema.maxLength) {
+        throw new ValidationError(`${basePath}: طول القيمة أكبر من الحد الأقصى (${schema.maxLength})`);
+      }
+      if (schema.pattern) {
+        let re: RegExp;
+        try { re = new RegExp(schema.pattern); }
+        catch { throw new ValidationError(`${basePath}: نمط التحقق في المخطط غير صالح (pattern)`); }
+        if (!re.test(str)) {
+          throw new ValidationError(`${basePath}: القيمة لا تطابق الصيغة المطلوبة (pattern)`);
+        }
+      }
     }
 
     if (typeof content === 'number' && schema.minimum !== undefined && content < schema.minimum) {
@@ -83,8 +107,22 @@ export class ConfigValidationService {
       }
     }
 
-    if (schema.type === 'array' && Array.isArray(content) && schema.items) {
-      content.forEach((item, i) => this.validateAgainstSchema(item, schema.items!, `${basePath}[${i}]`));
+    if (schema.type === 'array' && Array.isArray(content)) {
+      if (schema.minItems !== undefined && content.length < schema.minItems) {
+        throw new ValidationError(`${basePath}: عدد العناصر أقل من الحد الأدنى (${schema.minItems})`);
+      }
+      if (schema.maxItems !== undefined && content.length > schema.maxItems) {
+        throw new ValidationError(`${basePath}: عدد العناصر أكبر من الحد الأقصى (${schema.maxItems})`);
+      }
+      if (schema.uniqueItems === true) {
+        const seen = new Set(content.map((v: unknown) => JSON.stringify(v)));
+        if (seen.size !== content.length) {
+          throw new ValidationError(`${basePath}: العناصر مكررة — يجب أن تكون فريدة`);
+        }
+      }
+      if (schema.items) {
+        content.forEach((item, i) => this.validateAgainstSchema(item, schema.items!, `${basePath}[${i}]`));
+      }
     }
   }
 

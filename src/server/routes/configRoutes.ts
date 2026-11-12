@@ -117,6 +117,20 @@ companyConfigRoutes.post(
   })
 );
 
+// POST /api/companies/:companyId/config/validate — dry-run validation, no writes
+companyConfigRoutes.post(
+  '/config/validate',
+  requireAuth,
+  requirePermission(PERMISSIONS.COMPANY_SETTINGS_READ),
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const companyId = assertCompanyParam(req);
+    const key = String(req.query.key || (req.body && req.body.key) || '');
+    const content = req.body && req.body.content;
+    const result = await defaultConfigService.validateContent(companyId, key, content);
+    return res.status(200).json({ status: 'ok', ...result });
+  })
+);
+
 // ---- Global definitions catalog (mounted under /api/config) ----
 export const configPlatformRoutes = Router();
 

@@ -80,3 +80,47 @@ export function createAccountRoleChecker(key: string, lookup: AccountLookup) {
     }
   };
 }
+
+export interface CrossFieldRule {
+  fields: string[];
+  check: (content: Record<string, unknown>) => string | null; // نص الخطأ أو null
+}
+
+export const CROSS_FIELD_RULES: Readonly<Record<string, readonly CrossFieldRule[]>> = {
+  [GRN_MAPPING_KEY]: [
+    {
+      fields: ['inventory_account_id', 'purchases_clearing_account_id'],
+      check: (c) => {
+        const inv = String(c.inventory_account_id ?? '').trim();
+        const clr = String(c.purchases_clearing_account_id ?? '').trim();
+        if (inv === '' || clr === '') {
+          return 'الإعداد غير مكتمل: لازم تحدد حساب المخزون وحساب المشتريات المعلّقة قبل النشر';
+        }
+        if (inv === clr) {
+          return 'غير مسموح: حساب المخزون وحساب المشتريات المعلّقة لا يمكن أن يكونا نفس الحساب';
+        }
+        return null;
+      },
+    },
+  ],
+};
+
+export function validateCrossField(key: string, content: unknown, isPublish = true): void {
+  const rules = CROSS_FIELD_RULES[key] || [];
+  if (rules.length === 0) return;
+  const obj = (content && typeof content === 'object' && !Array.isArray(content))
+    ? content as Record<string, unknown> : {};
+
+  if (key === GRN_MAPPING_KEY) {
+    const inv = String(obj.inventory_account_id ?? '').trim();
+    const clr = String(obj.purchases_clearing_account_id ?? '').trim();
+    if (inv !== '' && clr !== '' && inv === clr) {
+      throw new ValidationError('غير مسموح: حساب المخزون وحساب المشتريات المعلّقة لا يمكن أن يكونا نفس الحساب');
+    }
+    if (isPublish) {
+      if (inv === '' || clr === '') {
+        throw new ValidationError('الإعداد غير مكتمل: لازم تحدد حساب المخزون وحساب المشتريات المعلّقة قبل النشر');
+      }
+    }
+  }
+}
