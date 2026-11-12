@@ -4,6 +4,7 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { ValidationError, NotFoundError, ConflictError } from '../http/errors.js';
 import { defaultAccountRepository } from '../accounting/accountRepository.js';
+import { createAccountRoleChecker } from './configAccountRoles.js';
 import {
   ConfigDefinition,
   ConfigRegistryVersion,
@@ -14,27 +15,23 @@ import {
   RollbackInput,
 } from './configTypes.js';
 
+export type AccountCheckerFactory = (key: string, tx: DbExecutor) => ReferentialChecker;
+
 /**
- * Default referential checker: resolves `_account_id` fields against the
- * tenant's chart of accounts (A4 referential integrity gate).
+ * الـchecker الافتراضي: يرجع القواعد من configAccountRoles (مصدر واحد)
+ * ويقرأ الحساب من مخزن الشركة عبر نفس المعاملة.
  */
-export function defaultAccountCheckerFactory(tx: DbExecutor): ReferentialChecker {
-  return async (companyId: string, path: string, value: string) => {
-    const account = await defaultAccountRepository.findById(companyId, value, tx);
-    if (!account) {
-      throw new ValidationError(`${path}: الحساب المحاسبي المشار إليه غير موجود في بيانات الشركة (id=${value})`);
-    }
-    if (!account.isActive) {
-      throw new ValidationError(`${path}: الحساب المحاسبي المشار إليه غير نشط (${account.code})`);
-    }
-  };
+export function defaultAccountCheckerFactory(key: string, tx: DbExecutor): ReferentialChecker {
+  return createAccountRoleChecker(key, (companyId: string, accountId: string) =>
+    defaultAccountRepository.findById(companyId, accountId, tx)
+  );
 }
 
 export class ConfigService {
   constructor(
     private repo: ConfigRepository = defaultConfigRepository,
     private validation: ConfigValidationService = defaultConfigValidationService,
-    private accountCheckerFactory: (tx: DbExecutor) => ReferentialChecker = defaultAccountCheckerFactory
+    private accountCheckerFactory: AccountCheckerFactory = defaultAccountCheckerFactory
   ) {}
 
   // ------------------------------------------------------------------ read side
@@ -172,7 +169,7 @@ export class ConfigService {
         companyId,
         draft.content,
         definition.schema as never,
-        this.accountCheckerFactory(tx)
+        this.accountCheckerFactory(key, tx)
       );
 
       const versionNo = await this.repo.nextVersionNo(companyId, definition.id, tx);

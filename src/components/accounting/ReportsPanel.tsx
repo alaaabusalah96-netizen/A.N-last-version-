@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, RefreshCw, AlertCircle, Calendar, ArrowLeftRight, PieChart, Landmark, Download } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import {
+  buildGeneralLedgerCsv,
+  buildIncomeStatementCsv,
+  buildBalanceSheetCsv,
+  withBom,
+} from '../../lib/csvExport.js';
 
 interface AccountOption {
   id: string;
@@ -111,44 +117,23 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
   }, [reportType, companyId]);
 
   const handleExportCsv = () => {
-    let csvContent = '';
+    let csv = '';
     let filename = 'report.csv';
 
     if (reportType === 'gl' && glData) {
       filename = `general-ledger-${glData.accountCode || 'report'}.csv`;
-      csvContent = 'تاريخ القيد,البيان,مدين,دائن,الرصيد التراكمي\n';
-      (glData.rows || []).forEach((r: any) => {
-        const memo = (r.lineMemo || '-').replace(/"/g, '""');
-        csvContent += `"${r.entryDate}","${memo}",${r.debit},${r.credit},${r.runningBalance}\n`;
-      });
+      csv = buildGeneralLedgerCsv(glData);
     } else if (reportType === 'income' && incomeData) {
       filename = 'income-statement.csv';
-      csvContent = 'القسم,رمز الحساب,اسم الحساب,المبلغ\n';
-      (incomeData.revenue || []).forEach((r: any) => {
-        csvContent += `"إيرادات","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
-      });
-      (incomeData.expenses || []).forEach((r: any) => {
-        csvContent += `"مصروفات","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
-      });
-      csvContent += `"صافي الدخل","","","${incomeData.netIncome}"\n`;
+      csv = buildIncomeStatementCsv(incomeData);
     } else if (reportType === 'balance' && balanceData) {
       filename = 'balance-sheet.csv';
-      csvContent = 'القسم,رمز الحساب,اسم الحساب,المبلغ\n';
-      (balanceData.assets || []).forEach((r: any) => {
-        csvContent += `"أصول","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
-      });
-      (balanceData.liabilities || []).forEach((r: any) => {
-        csvContent += `"التزامات","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
-      });
-      (balanceData.equity || []).forEach((r: any) => {
-        csvContent += `"حقوق ملكية","${r.accountCode}","${(r.accountNameAr || '').replace(/"/g, '""')}",${r.amount}\n`;
-      });
+      csv = buildBalanceSheetCsv(balanceData);
     }
 
-    if (!csvContent) return;
+    if (!csv) return;
 
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([withBom(csv)], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
@@ -156,6 +141,7 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (

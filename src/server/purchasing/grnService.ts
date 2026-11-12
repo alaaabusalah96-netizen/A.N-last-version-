@@ -13,6 +13,9 @@ import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
 import { toDecimal, toMoney } from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
 import { defaultConfigService, ConfigService } from '../config-platform/configService.js';
+import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
+import { findRoleRule, GRN_MAPPING_KEY } from '../config-platform/configAccountRoles.js';
+import { DbExecutor } from '../db/types.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -26,7 +29,8 @@ export class GrnService {
     private auditService: AuditService = defaultAuditService,
     private journalRepo: JournalRepository = defaultJournalRepository,
     private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository,
-    private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService
+    private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
+    private accountRepo: AccountRepository = defaultAccountRepository
   ) {}
 
   async listGrns(companyId: string): Promise<GrnHeader[]> {
@@ -173,13 +177,61 @@ export class GrnService {
           source: 'config_platform',
         };
       }
-    } catch {
-      // تعريف مفقود أو قاعدة غير متاحة -> نكمل على fallback المتوافق
+    } catch (err) {
+      // تعريف مفقود أو محتوى غير متاح = السبب المتوقع للـfallback المتوافق.
+      // أي خطأ تاني (عطل قاعدة/صلاحيات) لازم يظهر، مش يتحوّل بصمت.
+      if (!(err instanceof NotFoundError) && !(err instanceof Error && /not found|غير موجود/i.test(err.message))) {
+        throw err;
+      }
     }
 
     const settings = await this.settingsRepo.getByCompanyId(companyId);
     const gl = this.requireGlAccounts(settings);
     return { ...gl, source: 'company_settings' };
+  }
+
+  /**
+   * قيد محاسبي على مسار الترحيل نفسه، مش على مسار النشر بس.
+   * بيشتغل مهما كان مصدر الحسابات (منصة الإعدادات أو إعدادات الشركة القديمة)،
+   * عشان أي إعداد اتحفظ قبل التشديد ما يعديش في الترحيل.
+   * لازم يتنفّذ **قبل** أي كتابة على المخزون.
+   */
+  private async assertGlAccountsUsable(
+    companyId: string,
+    gl: { inventoryAccountId: string; purchasesClearingAccountId: string },
+    tx: DbExecutor
+  ): Promise<void> {
+    const targets: Array<{ field: string; accountId: string }> = [
+      { field: 'inventory_account_id', accountId: gl.inventoryAccountId },
+      { field: 'purchases_clearing_account_id', accountId: gl.purchasesClearingAccountId },
+    ];
+
+    for (const target of targets) {
+      const account = await this.accountRepo.findById(companyId, target.accountId, tx);
+      if (!account) {
+        throw new ValidationError(
+          `لا يمكن الترحيل: الحقل ${target.field} بيشير لحساب غير موجود في دليل الشركة (id=${target.accountId})`
+        );
+      }
+      if (!account.isActive) {
+        throw new ValidationError(`لا يمكن الترحيل: الحساب ${account.code} (${account.nameAr}) غير نشط`);
+      }
+
+      const rule = findRoleRule(GRN_MAPPING_KEY, target.field);
+      if (!rule) continue;
+
+      if (rule.requirePostable && !account.isPostable) {
+        throw new ValidationError(
+          `لا يمكن الترحيل: ${rule.labelAr} (${account.code}) حساب رئيسي/تجميعي وغير قابل للترحيل`
+        );
+      }
+      if (!rule.allowedTypes.includes(account.accountType)) {
+        throw new ValidationError(
+          `لا يمكن الترحيل: ${rule.labelAr} (${account.code}) نوعه ${account.accountType} `
+          + `ولازم يكون من نوع (${rule.allowedTypes.join(' / ')})`
+        );
+      }
+    }
   }
 
   /**
@@ -247,6 +299,8 @@ export class GrnService {
         );
       }
 
+      await this.assertGlAccountsUsable(companyId, gl, tx);
+
       const entryDate = this.resolveEntryDate(grn);
       const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
 
@@ -302,3 +356,4 @@ export class GrnService {
 }
 
 export const defaultGrnService = new GrnService();
+

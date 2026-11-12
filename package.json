@@ -105,9 +105,10 @@
     "test:financial-reports-1": "tsx scripts/verifyFinancialReports1.ts",
     "test:config-ui-1": "tsx scripts/verifyConfigUi1.ts",
     "test:config-grn-form-resolve-1": "tsx scripts/verifyConfigGrnFormAndResolve1.ts",
+    "test:config-grn-integrity-2": "tsx scripts/verifyConfigGrnAccountIntegrity2.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"
+    "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

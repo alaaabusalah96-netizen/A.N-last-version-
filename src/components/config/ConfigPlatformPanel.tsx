@@ -35,6 +35,30 @@ interface AccountOption {
   code: string;
   nameAr: string;
   isActive?: boolean;
+  isPostable?: boolean;
+  accountType?: string;
+}
+
+/**
+ * مرآة لقواعد src/server/config-platform/configAccountRoles.ts.
+ * الفلترة هنا للراحة فقط؛ الحكم النهائي في الخادم (WP-1).
+ */
+const GRN_ROLE_RULES: Record<string, { label: string; types: string[] }> = {
+  inventory_account_id: { label: 'حساب المخزون', types: ['asset'] },
+  purchases_clearing_account_id: { label: 'حساب المشتريات المعلّقة', types: ['liability'] },
+};
+
+function usableAccounts(list: AccountOption[], field: string): AccountOption[] {
+  const rule = GRN_ROLE_RULES[field];
+  if (!rule) return list;
+  return list.filter(
+    (a) => a.isActive !== false && a.isPostable === true && rule.types.includes(String(a.accountType))
+  );
+}
+
+function isUsable(accountId: string, list: AccountOption[], field: string): boolean {
+  if (!accountId) return true;
+  return usableAccounts(list, field).some((a) => a.id === accountId);
 }
 
 interface ConfigPlatformPanelProps {
@@ -547,12 +571,21 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                   className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 >
                   <option value="">-- اختر حساب المخزون --</option>
-                  {accounts.map((acc) => (
+                  {usableAccounts(accounts, 'inventory_account_id').map((acc) => (
                     <option key={acc.id} value={acc.id}>
                       {acc.code} - {acc.nameAr}
                     </option>
                   ))}
                 </select>
+                {!isUsable(inventoryAccountId, accounts, 'inventory_account_id') && (
+                  <p className="text-amber-400 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      الحساب المختار غير صالح لدور حساب المخزون (لازم يكون حساباً فرعياً من نوع أصول وقابلاً للترحيل).
+                      النشر هيرفضه من الخادم.
+                    </span>
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -564,12 +597,21 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                   className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 >
                   <option value="">-- اختر حساب المشتريات المعلّقة --</option>
-                  {accounts.map((acc) => (
+                  {usableAccounts(accounts, 'purchases_clearing_account_id').map((acc) => (
                     <option key={acc.id} value={acc.id}>
                       {acc.code} - {acc.nameAr}
                     </option>
                   ))}
                 </select>
+                {!isUsable(purchasesClearingAccountId, accounts, 'purchases_clearing_account_id') && (
+                  <p className="text-amber-400 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      الحساب المختار غير صالح لدور حساب المشتريات المعلّقة (لازم يكون حساباً فرعياً من نوع التزامات وقابلاً للترحيل).
+                      النشر هيرفضه من الخادم.
+                    </span>
+                  </p>
+                )}
               </div>
             </div>
           )}

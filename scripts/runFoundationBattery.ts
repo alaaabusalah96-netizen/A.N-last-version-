@@ -120,6 +120,7 @@ const scripts = [
   'scripts/verifyFinancialReports1.ts',
   'scripts/verifyConfigUi1.ts',
   'scripts/verifyConfigGrnFormAndResolve1.ts',
+  'scripts/verifyConfigGrnAccountIntegrity2.ts',
 ];
 
 export interface BatteryItemReport {
