@@ -12,12 +12,14 @@ import { isUuid, isValidCompanyCode } from '../http/validators.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.js';
 import { companySettingsRoutes } from './companySettingsRoutes.js';
 import { orgUnitRoutes } from './orgUnitRoutes.js';
+import { companyConfigRoutes } from './configRoutes.js';
 
 export const companyRoutes = Router();
 
-// Nest settings and org-units routes
+// Nest settings, org-units and configuration-platform routes
 companyRoutes.use('/:companyId', companySettingsRoutes);
 companyRoutes.use('/:companyId', orgUnitRoutes);
+companyRoutes.use('/:companyId', companyConfigRoutes);
 
 // GET /api/companies — requireAuth + company:read
 companyRoutes.get(

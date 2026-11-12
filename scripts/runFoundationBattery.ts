@@ -112,6 +112,7 @@ const scripts = [
   'scripts/verifyFixSettingsFkNullSemantics1.ts',
   'scripts/verifyNumericQtyCost1.ts',
   'scripts/verifyGrnGlOrderAndMe1.ts',
+  'scripts/verifyWaveACompletion1.ts',
 ];
 
 export interface BatteryItemReport {

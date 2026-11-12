@@ -13,6 +13,7 @@ import { accountingRoutes } from './routes/accountingRoutes.js';
 import { userAdminRoutes } from './routes/userAdminRoutes.js';
 import { inventoryRoutes } from './routes/inventoryRoutes.js';
 import { purchasingRoutes } from './routes/purchasingRoutes.js';
+import { configPlatformRoutes } from './routes/configRoutes.js';
 import { tenantDemoRoutes } from './routes/tenantDemoRoutes.js';
 
 export function createApp(): Express {
@@ -56,6 +57,9 @@ export function createApp(): Express {
   app.use('/api/users', userAdminRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/purchasing', purchasingRoutes);
+
+  // Configuration Platform — global definitions catalog (Wave A / A2)
+  app.use('/api/config', configPlatformRoutes);
 
   // Tenant Demo Routes (Development & Test environments only)
   if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_TENANT_DEMO === '1') {

@@ -10,6 +10,12 @@
 ---
 
 ## 2. سجل الحزم وحالتها الحالية الدقيقة
+- **AN-WAVE-A-COMPLETION-1**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Scope: Wave A كاملة (A1 تثبيت + A2 Configuration Registry + A3 Versioning & Publishing + A4 Validation Engine) وفق `docs/foundation/configuration-platform/`.
+  - Key files: `database/migrations/027_config_platform_registry.sql`, `src/server/config-platform/*`, `src/server/routes/configRoutes.ts`, `scripts/verifyWaveACompletion1.ts`.
+  - Verification: typecheck=0, build=OK, 60/60 unit tests, S1–S17 + T1–T6 live proofs (RLS isolation + immutability on PG16).
+  - Status basis: local verification; formal `INTEGRATION_TESTED` awaits first green CI run on pushed SHA.
+
 - **P00-CONSTITUTION-1**: `IMPLEMENTED`
 - **P01-PLATFORM-SCAFFOLD-1**: `IMPLEMENTED` + `UNIT_TESTED`
 - **P02a-DB-FOUNDATION-1**: `IMPLEMENTED`
