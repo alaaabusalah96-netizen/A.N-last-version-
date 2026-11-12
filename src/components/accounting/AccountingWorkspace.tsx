@@ -5,6 +5,7 @@ import { AccountsPanel } from './AccountsPanel.js';
 import { JournalWorkspace } from './JournalWorkspace.js';
 import { TrialBalancePanel } from './TrialBalancePanel.js';
 import { PeriodsPanel } from './PeriodsPanel.js';
+import { ReportsPanel } from './ReportsPanel.js';
 
 interface Company {
   id: string;
@@ -23,7 +24,7 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods'>('coa');
+  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods' | 'reports'>('coa');
 
   const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
 
@@ -148,6 +149,18 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
               <Calendar className="w-4 h-4" />
               <span>الفترات المالية (Accounting Periods)</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeTab === 'reports'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              <span>التقارير المالية (Financial Reports)</span>
+            </button>
           </div>
         )}
       </div>
@@ -181,8 +194,10 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
         />
       ) : activeTab === 'tb' ? (
         <TrialBalancePanel companyId={selectedCompanyId} />
-      ) : (
+      ) : activeTab === 'periods' ? (
         <PeriodsPanel companyId={selectedCompanyId} canManage={canWrite} />
+      ) : (
+        <ReportsPanel companyId={selectedCompanyId} />
       )}
     </div>
   );

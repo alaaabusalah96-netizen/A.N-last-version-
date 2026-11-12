@@ -1,6 +1,7 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { JournalEntry, JournalLine, CreateJournalLineInput } from './journalTypes.js';
+import { toDecimal } from '../lib/numeric.js';
 
 export class JournalRepository {
   /**
@@ -107,8 +108,8 @@ export class JournalRepository {
             company_id as "companyId", 
             entry_id as "entryId", 
             account_id as "accountId", 
-            debit::float, 
-            credit::float, 
+            debit::text as "debit", 
+            credit::text as "credit", 
             line_memo as "lineMemo"
         `;
         const lineRes = await executor.query<JournalLine>(lineSql, [
@@ -176,8 +177,8 @@ export class JournalRepository {
           l.company_id as "companyId", 
           l.entry_id as "entryId", 
           l.account_id as "accountId", 
-          l.debit::float, 
-          l.credit::float, 
+          l.debit::text as "debit", 
+          l.credit::text as "credit", 
           l.line_memo as "lineMemo",
           a.code as "accountCode",
           a.name_ar as "accountNameAr"
@@ -187,7 +188,11 @@ export class JournalRepository {
         ORDER BY l.debit DESC, l.credit DESC
       `;
       const linesRes = await executor.query<JournalLine>(linesSql, [entryId, companyId]);
-      entry.lines = linesRes.rows;
+      entry.lines = linesRes.rows.map((r: any) => ({
+        ...r,
+        debit: toDecimal(r.debit, 2),
+        credit: toDecimal(r.credit, 2),
+      }));
       return entry;
     };
 

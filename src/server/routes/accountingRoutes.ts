@@ -7,6 +7,7 @@ import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
 import { isUuid } from '../http/validators.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../http/errors.js';
+import { defaultReportsService } from '../accounting/reportsService.js';
 
 export const accountingRoutes = Router();
 
@@ -336,6 +337,54 @@ accountingRoutes.post(
     const { defaultPeriodService } = await import('../accounting/periodService.js');
     const period = await defaultPeriodService.reopenPeriod(companyId, id, user.id);
     return res.status(200).json({ status: 'ok', period });
+  })
+);
+
+// GET /api/accounting/reports/general-ledger?companyId=&accountId=&fromDate=&toDate=
+accountingRoutes.get(
+  '/reports/general-ledger',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const accountId = (req.query.accountId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const report = await defaultReportsService.getGeneralLedger(companyId, accountId, {
+      fromDate: (req.query.fromDate as string) || undefined,
+      toDate: (req.query.toDate as string) || undefined,
+    });
+    return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// GET /api/accounting/reports/income-statement?companyId=&fromDate=&toDate=
+accountingRoutes.get(
+  '/reports/income-statement',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const report = await defaultReportsService.getIncomeStatement(companyId, {
+      fromDate: (req.query.fromDate as string) || undefined,
+      toDate: (req.query.toDate as string) || undefined,
+    });
+    return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// GET /api/accounting/reports/balance-sheet?companyId=&asOfDate=
+accountingRoutes.get(
+  '/reports/balance-sheet',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const report = await defaultReportsService.getBalanceSheet(companyId, {
+      asOfDate: (req.query.asOfDate as string) || undefined,
+    });
+    return res.status(200).json({ status: 'ok', report });
   })
 );
 

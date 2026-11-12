@@ -187,17 +187,18 @@ async function verify() {
     check('T6', r6.rows.length === 1 && Number(r6.rows[0].version_no) === 2,
       'live: publish v2 flipped the single-active pointer correctly');
 
-    // Cleanup proof data — published registry rows are immutable by design
+    // Cleanup proof data. published registry rows are immutable by design
     // (CONFIG_REGISTRY_IMMUTABLE blocks DELETE), so teardown deactivates the
-    // proof rows instead of deleting them, and never lets cleanup noise crash
-    // the harness after all checks already passed.
+    // proof rows. Cleanup failure is a FAIL, not a warning: leaving proof
+    // data behind pollutes later runs and hides real defects.
     try {
       await client.query(
         `UPDATE config_registry SET is_active = false WHERE config_definition_id = $1;`,
         [definitionId]
       );
+      check('T7', true, 'live: proof rows deactivated (cleanup)');
     } catch (e: any) {
-      console.error(`[WARN] cleanup: could not deactivate proof rows (${String(e?.message || e)}) — proof data remains inactive-inert; no FAIL impact`);
+      check('T7', false, `cleanup FAILED: could not deactivate proof rows (${String(e?.message || e)})`);
     }
   } finally {
     await client.end();

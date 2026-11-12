@@ -189,6 +189,13 @@ export class ConfigRepository {
 
   async nextVersionNo(companyId: string, definitionId: string, executor?: DbExecutor): Promise<number> {
     const run = async (ex: DbExecutor) => {
+      // قفل روی على مستوى (شركة × تعريف) داخل المعاملة الحالية.
+      // بيمنع نشرين متزامنين من أخذ نفس version_no.
+      await ex.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2));`,
+        [companyId, definitionId]
+      );
+
       const res = await ex.query<{ next: number }>(
         `SELECT COALESCE(MAX(version_no), 0) + 1 AS next FROM config_registry WHERE company_id = $1 AND config_definition_id = $2;`,
         [companyId, definitionId]

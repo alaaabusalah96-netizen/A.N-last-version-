@@ -98,6 +98,12 @@
     "test:numeric-qty-cost-1": "tsx scripts/verifyNumericQtyCost1.ts",
     "test:grn-gl-me-1": "tsx scripts/verifyGrnGlOrderAndMe1.ts",
     "test:wave-a-completion-1": "tsx scripts/verifyWaveACompletion1.ts",
+    "test:db-mode-fail-closed-1": "tsx scripts/verifyDbModeFailClosed1.ts",
+    "test:money-precision-1": "tsx scripts/verifyMoneyPrecision1.ts",
+    "test:grn-integrity-1": "tsx scripts/verifyGrnIntegrity1.ts",
+    "test:config-hardening-1": "tsx scripts/verifyConfigHardening1.ts",
+    "test:financial-reports-1": "tsx scripts/verifyFinancialReports1.ts",
+    "test:config-ui-1": "tsx scripts/verifyConfigUi1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts"

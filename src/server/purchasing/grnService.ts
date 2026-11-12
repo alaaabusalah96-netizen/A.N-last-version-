@@ -12,6 +12,7 @@ import { ValidationError, NotFoundError } from '../http/errors.js';
 import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
 import { toDecimal, toMoney } from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
+import { defaultConfigService, ConfigService } from '../config-platform/configService.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -24,7 +25,8 @@ export class GrnService {
     private stockRepo: StockRepository = defaultStockRepository,
     private auditService: AuditService = defaultAuditService,
     private journalRepo: JournalRepository = defaultJournalRepository,
-    private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository
+    private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository,
+    private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService
   ) {}
 
   async listGrns(companyId: string): Promise<GrnHeader[]> {
@@ -93,6 +95,15 @@ export class GrnService {
         if (typeof line.qty !== 'number' || isNaN(line.qty) || line.qty <= 0) {
           throw new ValidationError('كمية البند يجب أن تكون عدداً أكبر من الصفر');
         }
+        if (line.unitCost !== undefined && line.unitCost !== null) {
+          const rawCost = typeof line.unitCost === 'number' ? line.unitCost : Number(line.unitCost);
+          if (!Number.isFinite(rawCost)) {
+            throw new ValidationError('تكلفة الوحدة في البند يجب أن تكون رقماً صالحاً');
+          }
+          if (toDecimal(line.unitCost, 4) < 0) {
+            throw new ValidationError('تكلفة الوحدة في البند لا يمكن أن تكون بالسالب');
+          }
+        }
         const item = await this.itemRepo.findById(companyId, line.itemId, tx);
         if (!item) {
           throw new NotFoundError('أحد الأصناف المحددة في البنود غير موجود');
@@ -139,6 +150,39 @@ export class GrnService {
   }
 
   /**
+   * مصدر حسابات الترحيل: منصة الإعدادات أولاً (accounting.grn_mapping)،
+   * ثم إعدادات الشركة القديمة كـfallback متوافق.
+   * لا يوجد أي مسار بيفشل بصمت: لو الاتنين فاضيين -> ValidationError.
+   */
+  private async resolveGlMapping(
+    companyId: string
+  ): Promise<{
+    inventoryAccountId: string;
+    purchasesClearingAccountId: string;
+    source: 'config_platform' | 'company_settings';
+  }> {
+    try {
+      const resolved = await this.configService.resolveConfig(companyId, 'accounting.grn_mapping');
+      const c = (resolved && resolved.content) ? resolved.content as Record<string, unknown> : {};
+      const inv = typeof c.inventory_account_id === 'string' ? c.inventory_account_id.trim() : '';
+      const clr = typeof c.purchases_clearing_account_id === 'string' ? c.purchases_clearing_account_id.trim() : '';
+      if (inv !== '' && clr !== '') {
+        return {
+          inventoryAccountId: inv,
+          purchasesClearingAccountId: clr,
+          source: 'config_platform',
+        };
+      }
+    } catch {
+      // تعريف مفقود أو قاعدة غير متاحة -> نكمل على fallback المتوافق
+    }
+
+    const settings = await this.settingsRepo.getByCompanyId(companyId);
+    const gl = this.requireGlAccounts(settings);
+    return { ...gl, source: 'company_settings' };
+  }
+
+  /**
    * Confirm & Post Goods Receipt Note (ترحيل سند استلام البضائع إلى المخزون)
    * Atomic stock increase across all GRN lines in a single tenant transaction.
    */
@@ -180,8 +224,17 @@ export class GrnService {
         }
       }
 
-      const settings = await this.settingsRepo.getByCompanyId(companyId);
-      const gl = this.requireGlAccounts(settings);
+      const gl = await this.resolveGlMapping(companyId);
+
+      // فحص تكلفة كل بند منفرداً — الإجمالي الموجب لا يكفي
+      for (const line of grn.lines) {
+        const lineCost = toDecimal(line.unitCost ?? 0, 4);
+        if (!(lineCost > 0)) {
+          throw new ValidationError(
+            `البند رقم ${line.lineNo}: تكلفة الوحدة يجب أن تكون أكبر من صفر قبل الترحيل المحاسبي.`
+          );
+        }
+      }
 
       let totalAmount = 0;
       for (const line of grn.lines) {
@@ -237,6 +290,7 @@ export class GrnService {
           totalAmount,
           entryDate,
           journalEntryId: postedJournal.id,
+          glSource: gl.source,
         },
       }, { executor: tx });
 

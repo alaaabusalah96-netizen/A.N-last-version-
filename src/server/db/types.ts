@@ -3,7 +3,9 @@
  * Engine-agnostic data layer contracts
  */
 
-export type DatabaseMode = 'central' | 'per_company' | 'on_prem' | 'hybrid';
+export type DatabaseMode = 'central' | 'per_company' | 'on_prem';
+
+export const DATABASE_MODES: readonly DatabaseMode[] = ['central', 'per_company', 'on_prem'];
 
 export interface TenantDbRef {
   companyId: string;

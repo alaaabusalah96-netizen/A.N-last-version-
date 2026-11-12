@@ -2,6 +2,7 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { defaultOrgUnitService } from '../org/orgUnitService.js';
 import { ForbiddenError, ValidationError } from '../http/errors.js';
+import { toMinorUnits, fromMinorUnits } from '../lib/numeric.js';
 
 export interface TrialBalanceRow {
   accountId: string;
@@ -87,9 +88,9 @@ export class TrialBalanceService {
           a.name_ar as "accountNameAr",
           a.name_en as "accountNameEn",
           a.account_type as "accountType",
-          COALESCE(x.total_debit, 0)::float as "totalDebit",
-          COALESCE(x.total_credit, 0)::float as "totalCredit",
-          (COALESCE(x.total_debit, 0) - COALESCE(x.total_credit, 0))::float as "netBalance"
+          COALESCE(x.total_debit, 0)::text as "totalDebit",
+          COALESCE(x.total_credit, 0)::text as "totalCredit",
+          (COALESCE(x.total_debit, 0) - COALESCE(x.total_credit, 0))::text as "netBalance"
         FROM accounts a
         LEFT JOIN (
           SELECT 
@@ -115,27 +116,28 @@ export class TrialBalanceService {
         opts?.orgUnitId || null,
       ]);
 
-      const rows = res.rows;
+      const mappedRows: TrialBalanceRow[] = res.rows.map((r: any) => ({
+        ...r,
+        totalDebit: Number(fromMinorUnits(toMinorUnits(r.totalDebit, 2), 2)),
+        totalCredit: Number(fromMinorUnits(toMinorUnits(r.totalCredit, 2), 2)),
+        netBalance: Number(fromMinorUnits(toMinorUnits(r.netBalance, 2), 2)),
+      }));
 
-      let grandTotalDebit = 0;
-      let grandTotalCredit = 0;
-
-      for (const row of rows) {
-        grandTotalDebit += Math.round((row.totalDebit || 0) * 100);
-        grandTotalCredit += Math.round((row.totalCredit || 0) * 100);
+      let debitUnits = BigInt(0);
+      let creditUnits = BigInt(0);
+      for (const row of res.rows) {
+        debitUnits += toMinorUnits((row as any).totalDebit, 2);
+        creditUnits += toMinorUnits((row as any).totalCredit, 2);
       }
-
-      const finalDebit = grandTotalDebit / 100;
-      const finalCredit = grandTotalCredit / 100;
 
       return {
         asOfDate: opts?.asOfDate || null,
         orgUnitId: opts?.orgUnitId || null,
         orgUnitNameAr,
-        rows,
-        grandTotalDebit: finalDebit,
-        grandTotalCredit: finalCredit,
-        isBalanced: Math.abs(grandTotalDebit - grandTotalCredit) === 0,
+        rows: mappedRows,
+        grandTotalDebit: Number(fromMinorUnits(debitUnits, 2)),
+        grandTotalCredit: Number(fromMinorUnits(creditUnits, 2)),
+        isBalanced: debitUnits === creditUnits,
       };
     });
   }

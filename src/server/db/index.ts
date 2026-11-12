@@ -88,6 +88,13 @@ export async function getExecutorForCompany(companyId: string): Promise<DbExecut
   // 1) Resolve tenant reference
   const ref = defaultResolver.resolve(normalizedCompanyId);
 
+  if (ref.mode !== 'central' && ref.connectionKey === 'default') {
+    throw new Error(
+      `TENANT_DB_ROUTE_MISSING: company '${normalizedCompanyId}' resolved to the central connection `
+      + `while DB_MODE='${ref.mode}'. This is a fail-closed guard.`
+    );
+  }
+
   // 2) Check cache
   if (executorPromiseCache.has(ref.connectionKey)) {
     return executorPromiseCache.get(ref.connectionKey)!;
@@ -95,7 +102,7 @@ export async function getExecutorForCompany(companyId: string): Promise<DbExecut
 
   // 3) Resolve config from registry or fallback to central DATABASE_URL
   let rawConfig = defaultRegistry.get(ref.connectionKey);
-  if (!rawConfig && ref.connectionKey === 'default') {
+  if (!rawConfig && ref.connectionKey === 'default' && ref.mode === 'central') {
     const databaseUrl = process.env.DATABASE_URL;
     if (databaseUrl && databaseUrl.trim() !== '') {
       rawConfig = { connectionString: databaseUrl };

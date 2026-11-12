@@ -1,4 +1,4 @@
-import { DatabaseMode, TenantDbRef } from './types.js';
+import { DatabaseMode, TenantDbRef, DATABASE_MODES } from './types.js';
 
 /**
  * Tenant-to-Database Resolver
@@ -18,12 +18,19 @@ export class TenantDatabaseResolver {
   private overrides: Map<string, TenantDbRef> = new Map();
 
   constructor() {
-    const envMode = (process.env.DB_MODE || 'central').toLowerCase();
-    if (['central', 'per_company', 'on_prem', 'hybrid'].includes(envMode)) {
-      this.defaultMode = envMode as DatabaseMode;
-    } else {
+    const raw = (process.env.DB_MODE || '').trim();
+    if (raw === '') {
       this.defaultMode = 'central';
+      return;
     }
+    const envMode = raw.toLowerCase();
+    if (envMode === 'hybrid') {
+      throw new Error("DB_MODE_INVALID: mode 'hybrid' is not supported — choose central, per_company or on_prem");
+    }
+    if (!DATABASE_MODES.includes(envMode as DatabaseMode)) {
+      throw new Error(`DB_MODE_INVALID: unsupported DB_MODE '${raw}' — choose central, per_company or on_prem`);
+    }
+    this.defaultMode = envMode as DatabaseMode;
   }
 
   /**
@@ -34,6 +41,18 @@ export class TenantDatabaseResolver {
       throw new Error('companyId is required for tenant routing override');
     }
     this.overrides.set(companyId, ref);
+  }
+
+  hasTenantRoute(companyId: string): boolean {
+    return this.overrides.has(companyId);
+  }
+
+  getMode(): DatabaseMode {
+    return this.defaultMode;
+  }
+
+  clearTenantRoutes(): void {
+    this.overrides.clear();
   }
 
   /**
@@ -49,11 +68,14 @@ export class TenantDatabaseResolver {
       return override;
     }
 
-    return {
-      companyId,
-      mode: this.defaultMode,
-      connectionKey: 'default',
-    };
+    if (this.defaultMode === 'central') {
+      return { companyId, mode: 'central', connectionKey: 'default' };
+    }
+
+    throw new Error(
+      `TENANT_DB_ROUTE_MISSING: DB_MODE='${this.defaultMode}' requires an explicit database route `
+      + `for company '${companyId}'. Refusing to fall back to the central connection.`
+    );
   }
 }
 

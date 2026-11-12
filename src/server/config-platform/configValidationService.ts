@@ -22,12 +22,26 @@ export interface ReferentialChecker {
   (companyId: string, path: string, value: string): Promise<void>;
 }
 
+/**
+ * أنواع JSON-Schema المدعومة صريحاً.
+ * أي نوع برّه القائمة = رفض، مش قبول ضمني.
+ */
+const SUPPORTED_JSON_TYPES = new Set([
+  'object', 'array', 'string', 'number', 'integer', 'boolean', 'null',
+]);
+
 export class ConfigValidationService {
   validateAgainstSchema(
     content: Record<string, unknown>,
     schema: JsonSchemaNode,
     basePath = 'content'
   ): void {
+    if (schema.type && !SUPPORTED_JSON_TYPES.has(schema.type)) {
+      throw new ValidationError(
+        `${basePath}: نوع مخطط غير مدعوم (${schema.type}). الأنواع المدعومة: ${[...SUPPORTED_JSON_TYPES].join(', ')}`
+      );
+    }
+
     if (schema.type && !this.matchesType(content, schema.type)) {
       throw new ValidationError(`${basePath}: النوع غير مطابق للمخطط (متوقع: ${schema.type})`);
     }
@@ -80,22 +94,36 @@ export class ConfigValidationService {
    */
   async validateReferences(
     companyId: string,
-    content: Record<string, unknown>,
+    content: unknown,
     schema: JsonSchemaNode,
     checkAccount: ReferentialChecker,
     basePath = 'content'
   ): Promise<void> {
-    if (!content || typeof content !== 'object' || Array.isArray(content)) return;
+    if (content === null || content === undefined) return;
 
-    for (const [key, value] of Object.entries(content)) {
+    // المصفوفات: انزل لعناصرها بنفس مخطط items (كانت الفجوة الأساسية)
+    if (Array.isArray(content)) {
+      const itemSchema = schema?.items ?? { type: 'object' };
+      for (let i = 0; i < content.length; i += 1) {
+        await this.validateReferences(companyId, content[i], itemSchema, checkAccount, `${basePath}[${i}]`);
+      }
+      return;
+    }
+
+    if (typeof content !== 'object') return;
+
+    const obj = content as Record<string, unknown>;
+    for (const [key, value] of Object.entries(obj)) {
       const path = `${basePath}.${key}`;
+
       if (key.endsWith('_account_id') && typeof value === 'string' && value.trim() !== '') {
         await checkAccount(companyId, path, value);
         continue;
       }
-      const childSchema = schema.properties?.[key];
-      if (childSchema && value && typeof value === 'object') {
-        await this.validateReferences(companyId, value as Record<string, unknown>, childSchema, checkAccount, path);
+
+      const childSchema = schema?.properties?.[key] ?? { type: typeof value === 'object' ? 'object' : 'string' };
+      if (value !== null && value !== undefined && typeof value === 'object') {
+        await this.validateReferences(companyId, value, childSchema, checkAccount, path);
       }
     }
   }
@@ -109,11 +137,15 @@ export class ConfigValidationService {
       case 'string':
         return typeof value === 'string';
       case 'number':
-        return typeof value === 'number' && !isNaN(value);
+        return typeof value === 'number' && Number.isFinite(value);
+      case 'integer':
+        return typeof value === 'number' && Number.isInteger(value);
       case 'boolean':
         return typeof value === 'boolean';
+      case 'null':
+        return value === null;
       default:
-        return true;
+        return false;
     }
   }
 }

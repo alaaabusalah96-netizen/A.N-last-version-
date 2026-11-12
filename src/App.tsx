@@ -8,6 +8,7 @@ import { PurchasingWorkspace } from './components/purchasing/PurchasingWorkspace
 import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
 import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
+import { ConfigPlatformPanel } from './components/config/ConfigPlatformPanel.js';
 import { AppSidebar } from './components/shell/AppSidebar.js';
 import { apiFetch } from './lib/apiClient.js';
 
@@ -22,7 +23,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'company_settings' | 'org_units'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'company_settings' | 'org_units' | 'config_platform'>('companies');
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -107,6 +108,8 @@ export default function App() {
                 ? 'المستخدمون'
                 : activeNav === 'org_units'
                 ? 'الوحدات التنظيمية'
+                : activeNav === 'config_platform'
+                ? 'منصة الإعدادات'
                 : 'إعدادات الشركة'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -122,6 +125,8 @@ export default function App() {
                 ? 'إدارة الحسابات وصلاحيات الوصول'
                 : activeNav === 'org_units'
                 ? 'الفروع والإدارات ومراكز التكلفة'
+                : activeNav === 'config_platform'
+                ? 'تعريفات الإعداد المركزي والمسودات والنشر والإصدارات'
                 : 'الإعدادات التشغيلية والمالية للشركة'}
             </p>
           </div>
@@ -142,6 +147,8 @@ export default function App() {
           <UsersAdminWorkspace />
         ) : activeNav === 'org_units' ? (
           <OrgUnitsPanel userRole={currentUser.role} />
+        ) : activeNav === 'config_platform' ? (
+          <ConfigPlatformPanel userRole={currentUser.role} />
         ) : (
           <CompanySettingsPanel userRole={currentUser.role} />
         )}
