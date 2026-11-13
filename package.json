@@ -118,6 +118,7 @@
     "test:audit-governance-1": "tsx scripts/verifyAuditGovernance1.ts",
     "test:sidebar-layout-1": "tsx scripts/verifySidebarLayout1.ts",
     "test:docs-consistency-1": "tsx scripts/verifyDocsConsistency1.ts",
+    "test:p2p-cycle-1": "tsx scripts/verifyP2PCycle1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"

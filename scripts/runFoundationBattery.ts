@@ -133,6 +133,7 @@ const scripts = [
   'scripts/verifyAuditGovernance1.ts',
   'scripts/verifySidebarLayout1.ts',
   'scripts/verifyDocsConsistency1.ts',
+  'scripts/verifyP2PCycle1.ts',
 ];
 
 export interface BatteryItemReport {
