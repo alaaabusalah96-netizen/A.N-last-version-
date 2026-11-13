@@ -1,20 +1,35 @@
-import { defaultUserRepository } from '../auth/userRepository.js';
-import { defaultMembershipStore } from '../org/membershipStore.js';
-import { defaultAuditService } from '../audit/auditService.js';
-import { defaultRbacService } from '../rbac/rbacService.js';
-import { defaultRoleService } from '../rbac/roleService.js';
+import { defaultUserRepository, UserRepository } from '../auth/userRepository.js';
+import { defaultMembershipStore, MembershipStore } from '../org/membershipStore.js';
+import { AuditService, defaultAuditService } from '../audit/auditService.js';
+import { defaultRbacService, RbacService } from '../rbac/rbacService.js';
+import { defaultRoleService, RoleService } from '../rbac/roleService.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { RoleName } from '../rbac/roles.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
 import { AuthenticatedRequest } from '../auth/authMiddleware.js';
+import { withTenantTransaction } from '../db/transactionManager.js';
+import { DbExecutor } from '../db/types.js';
+
+export type TenantTxRunner = <T>(companyId: string, fn: (ex: DbExecutor) => Promise<T>) => Promise<T>;
+export type GlobalTxRunner = <T>(fn: (ex: DbExecutor) => Promise<T>) => Promise<T>;
 
 export class UserAdminService {
+  constructor(
+    private userRepo: UserRepository = defaultUserRepository,
+    private membershipStore: MembershipStore = defaultMembershipStore,
+    private auditService: AuditService = defaultAuditService,
+    private rbacService: RbacService = defaultRbacService,
+    private roleService: RoleService = defaultRoleService,
+    private runWithTenant: TenantTxRunner = withTenantTransaction,
+    private runGlobalTx: GlobalTxRunner = (fn) => this.userRepo.withTransaction(fn)
+  ) {}
+
   async listUsers(actor: AuthenticatedRequest['user'], companyId?: string): Promise<any[]> {
     if (!actor) throw new ForbiddenError('Authentication required');
 
     // Platform admin without companyId can list globally
     if (actor.role === 'platform_admin' && !companyId) {
-      return await defaultUserRepository.listUsersAdmin();
+      return await this.userRepo.listUsersAdmin();
     }
 
     // All tenant actors (and platform_admin filtering by company) must provide companyId
@@ -22,11 +37,11 @@ export class UserAdminService {
       throw new ValidationError('companyId is required for company-scoped user listing');
     }
 
-    const isAllowed = await defaultRbacService.hasPermission(actor, PERMISSIONS.USER_READ, companyId);
+    const isAllowed = await this.rbacService.hasPermission(actor, PERMISSIONS.USER_READ, companyId);
     if (!isAllowed) throw new ForbiddenError('Missing USER_READ permission');
 
     // C5: Filter users by membership in the company
-    return await defaultUserRepository.listUsersByCompany(companyId);
+    return await this.userRepo.listUsersByCompany(companyId);
   }
 
   async createUser(
@@ -44,44 +59,75 @@ export class UserAdminService {
       throw new ValidationError('companyId is required for user creation by non-platform admins');
     }
 
-    const isAllowed = await defaultRbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, input.companyId);
+    const isAllowed = await this.rbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, input.companyId);
     if (!isAllowed) throw new ForbiddenError('Missing USER_WRITE permission');
 
-    let validatedRoleId: string | null = null;
-    if (input.roleId) {
-      if (!input.companyId || input.role === 'platform_admin') {
-        throw new ValidationError('لا يمكن تعيين دور شركة ديناميكي بدون تحديد شركة');
-      }
-      const validatedRole = await defaultRoleService.validateAssignableRole(input.companyId, input.roleId);
-      validatedRoleId = validatedRole.id;
+    if (input.roleId && (!input.companyId || input.role === 'platform_admin')) {
+      throw new ValidationError('لا يمكن تعيين دور شركة ديناميكي بدون تحديد شركة');
     }
 
-    const user = await defaultUserRepository.createUser({
-      username: input.username,
-      passwordHash: input.passwordHash,
-      role: (input.role === 'platform_admin' ? 'platform_admin' : 'user') as 'platform_admin' | 'user',
-    });
+    const executeInTx = async (fn: (tx: DbExecutor) => Promise<any>) => {
+      if (input.companyId) {
+        return await this.runWithTenant(input.companyId, fn);
+      }
+      return await this.runGlobalTx(fn);
+    };
+
+    let createdUser: any;
+    try {
+      createdUser = await executeInTx(async (tx) => {
+        let validatedRoleId: string | null = null;
+        if (input.roleId && input.companyId) {
+          const validatedRole = await this.roleService.validateAssignableRole(input.companyId, input.roleId, tx);
+          validatedRoleId = validatedRole.id;
+        }
+
+        const user = await this.userRepo.createUser(
+          {
+            username: input.username,
+            passwordHash: input.passwordHash,
+            role: (input.role === 'platform_admin' ? 'platform_admin' : 'user') as 'platform_admin' | 'user',
+          },
+          tx
+        );
+
+        if (input.companyId) {
+          await this.membershipStore.addMember(
+            user.id,
+            input.companyId,
+            (input.role === 'company_admin' ? 'company_admin' : 'company_user') as RoleName,
+            true,
+            validatedRoleId,
+            tx
+          );
+        }
+
+        await this.auditService.record(
+          {
+            actorUserId: actor.id,
+            companyId: input.companyId || null,
+            action: 'USER_CREATE',
+            entityType: 'user',
+            entityId: user.id,
+            metadata: { username: user.username, role: user.role, roleId: validatedRoleId },
+          },
+          { mode: 'required', executor: tx }
+        );
+
+        return user;
+      });
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        throw new ValidationError('المستخدم موجود مسبقًا');
+      }
+      throw err;
+    }
 
     if (input.companyId) {
-      await defaultMembershipStore.addMember(
-        user.id,
-        input.companyId,
-        (input.role === 'company_admin' ? 'company_admin' : 'company_user') as RoleName,
-        true,
-        validatedRoleId
-      );
-      defaultRbacService.invalidate(input.companyId, user.id);
+      this.rbacService.invalidate(input.companyId, createdUser.id);
     }
 
-    await defaultAuditService.record({
-      actorUserId: actor.id,
-      companyId: input.companyId || null,
-      action: 'USER_CREATE',
-      entityType: 'user',
-      entityId: user.id,
-      metadata: { username: user.username, role: user.role, roleId: validatedRoleId }
-    });
-    return user;
+    return createdUser;
   }
 
   async addMembership(
@@ -90,30 +136,36 @@ export class UserAdminService {
   ): Promise<void> {
     if (!actor) throw new ForbiddenError('Authentication required');
 
-    const isAllowed = await defaultRbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, input.companyId);
+    const isAllowed = await this.rbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, input.companyId);
     if (!isAllowed) throw new ForbiddenError('Missing USER_WRITE permission');
 
     if (input.role === 'platform_admin') {
       throw new ForbiddenError('Cannot assign platform_admin role via membership');
     }
 
-    let validatedRoleId: string | null = null;
-    if (input.roleId) {
-      const validatedRole = await defaultRoleService.validateAssignableRole(input.companyId, input.roleId);
-      validatedRoleId = validatedRole.id;
-    }
+    await this.runWithTenant(input.companyId, async (tx) => {
+      let validatedRoleId: string | null = null;
+      if (input.roleId) {
+        const validatedRole = await this.roleService.validateAssignableRole(input.companyId, input.roleId, tx);
+        validatedRoleId = validatedRole.id;
+      }
 
-    await defaultMembershipStore.addMember(input.userId, input.companyId, input.role, true, validatedRoleId);
-    defaultRbacService.invalidate(input.companyId, input.userId);
+      await this.membershipStore.addMember(input.userId, input.companyId, input.role, true, validatedRoleId, tx);
 
-    await defaultAuditService.record({
-      actorUserId: actor.id,
-      companyId: input.companyId,
-      action: 'MEMBERSHIP_ADD',
-      entityType: 'membership',
-      entityId: input.userId,
-      metadata: { role: input.role, roleId: validatedRoleId }
+      await this.auditService.record(
+        {
+          actorUserId: actor.id,
+          companyId: input.companyId,
+          action: 'MEMBERSHIP_ADD',
+          entityType: 'membership',
+          entityId: input.userId,
+          metadata: { role: input.role, roleId: validatedRoleId },
+        },
+        { mode: 'required', executor: tx }
+      );
     });
+
+    this.rbacService.invalidate(input.companyId, input.userId);
   }
 
   async setMembershipActive(
@@ -126,23 +178,32 @@ export class UserAdminService {
     if (!actor) throw new ForbiddenError('Authentication required');
     if (!companyId) throw new ValidationError('companyId is required');
 
-    const isAllowed = await defaultRbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, companyId);
+    const isAllowed = await this.rbacService.hasPermission(actor, PERMISSIONS.USER_WRITE, companyId);
     if (!isAllowed) throw new ForbiddenError('Missing USER_WRITE permission');
 
-    // C3: Scoped update with companyId and optional userId to prevent IDOR
-    const success = await defaultMembershipStore.setStatusById(membershipId, companyId, isActive, userId);
-    if (!success) {
-      throw new NotFoundError('Membership not found in this company');
-    }
+    const success = await this.runWithTenant(companyId, async (tx) => {
+      // C3: Scoped update with companyId and optional userId to prevent IDOR
+      const updated = await this.membershipStore.setStatusById(membershipId, companyId, isActive, userId, tx);
+      if (!updated) {
+        throw new NotFoundError('Membership not found in this company');
+      }
 
-    await defaultAuditService.record({
-      actorUserId: actor.id,
-      companyId,
-      action: 'MEMBERSHIP_SET_ACTIVE',
-      entityType: 'membership',
-      entityId: membershipId,
-      metadata: { isActive, userId }
+      await this.auditService.record(
+        {
+          actorUserId: actor.id,
+          companyId,
+          action: 'MEMBERSHIP_SET_ACTIVE',
+          entityType: 'membership',
+          entityId: membershipId,
+          metadata: { isActive, userId },
+        },
+        { mode: 'required', executor: tx }
+      );
+
+      return updated;
     });
+
+    this.rbacService.invalidate(companyId, userId);
     return success;
   }
 

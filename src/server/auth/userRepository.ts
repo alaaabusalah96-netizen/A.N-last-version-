@@ -1,8 +1,13 @@
 import { getDefaultExecutor } from '../db/index.js';
+import { tenantContextStorage } from '../db/tenantContext.js';
+import { DbExecutor } from '../db/types.js';
 import { User, CreateUserInput } from './userStore.js';
 
 export class UserRepository {
-  private async getExecutor() {
+  private async getExecutor(customExecutor?: DbExecutor): Promise<DbExecutor> {
+    if (customExecutor) return customExecutor;
+    const ctxExecutor = tenantContextStorage.getCurrentExecutor();
+    if (ctxExecutor) return ctxExecutor;
     const executor = await getDefaultExecutor();
     if (!executor) {
       throw new Error('DB_UNAVAILABLE: Database executor not available for UserRepository');
@@ -10,8 +15,13 @@ export class UserRepository {
     return executor;
   }
 
-  async createUser(input: CreateUserInput): Promise<User> {
+  async withTransaction<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
     const executor = await this.getExecutor();
+    return await executor.withTransaction(fn);
+  }
+
+  async createUser(input: CreateUserInput, customExecutor?: DbExecutor): Promise<User> {
+    const executor = await this.getExecutor(customExecutor);
     const normalizedUsername = input.username.trim().toLowerCase();
 
     const sql = `
@@ -29,8 +39,8 @@ export class UserRepository {
     return res.rows[0];
   }
 
-  async findByUsername(username: string): Promise<User | null> {
-    const executor = await this.getExecutor();
+  async findByUsername(username: string, customExecutor?: DbExecutor): Promise<User | null> {
+    const executor = await this.getExecutor(customExecutor);
     const normalized = username.trim().toLowerCase();
 
     const sql = `
