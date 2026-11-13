@@ -133,6 +133,9 @@ jobs:
           DATABASE_SSL: disable
           C2_ALLOW_DISPOSABLE: "1"
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Run Foundation Test Battery
         id: battery
         run: npm run test:foundation

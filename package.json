@@ -119,6 +119,7 @@
     "test:sidebar-layout-1": "tsx scripts/verifySidebarLayout1.ts",
     "test:docs-consistency-1": "tsx scripts/verifyDocsConsistency1.ts",
     "test:p2p-cycle-1": "tsx scripts/verifyP2PCycle1.ts",
+    "test:purch-po-1": "tsx scripts/verifyPurchPo1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"
@@ -151,6 +152,7 @@
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
     "esbuild": "^0.27.0",
+    "playwright": "^1.65.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",

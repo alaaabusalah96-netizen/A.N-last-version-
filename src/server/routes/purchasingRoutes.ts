@@ -3,6 +3,7 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultSupplierService } from '../purchasing/supplierService.js';
 import { defaultGrnService } from '../purchasing/grnService.js';
+import { defaultPurchaseOrderService } from '../purchasing/purchaseOrderService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -129,5 +130,112 @@ purchasingRoutes.post(
     const grn = await defaultGrnService.postGrn(companyId, grnId, user.id);
 
     return res.status(200).json({ status: 'ok', grn });
+  })
+);
+
+// 3. Purchase Orders (PO) API
+purchasingRoutes.get(
+  '/purchase-orders',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+
+    const purchaseOrders = await defaultPurchaseOrderService.listPurchaseOrders(companyId);
+    return res.status(200).json({ status: 'ok', purchaseOrders });
+  })
+);
+
+purchasingRoutes.get(
+  '/purchase-orders/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const poId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(poId)) {
+      throw new ValidationError('Invalid purchase order ID format');
+    }
+
+    const purchaseOrder = await defaultPurchaseOrderService.getPurchaseOrder(companyId, poId);
+    return res.status(200).json({ status: 'ok', purchaseOrder });
+  })
+);
+
+purchasingRoutes.post(
+  '/purchase-orders',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+
+    const { supplierId, expectedDate, memo, lines } = req.body || {};
+    const purchaseOrder = await defaultPurchaseOrderService.createPurchaseOrder(
+      companyId,
+      { supplierId, expectedDate, memo, lines },
+      user.id
+    );
+
+    return res.status(201).json({ status: 'ok', purchaseOrder });
+  })
+);
+
+purchasingRoutes.post(
+  '/purchase-orders/:id/approve',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const poId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_POST, companyId);
+    if (!isUuid(poId)) {
+      throw new ValidationError('Invalid purchase order ID format');
+    }
+
+    const purchaseOrder = await defaultPurchaseOrderService.approvePurchaseOrder(companyId, poId, user.id);
+    return res.status(200).json({ status: 'ok', purchaseOrder });
+  })
+);
+
+purchasingRoutes.post(
+  '/purchase-orders/:id/close',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const poId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_POST, companyId);
+    if (!isUuid(poId)) {
+      throw new ValidationError('Invalid purchase order ID format');
+    }
+
+    const purchaseOrder = await defaultPurchaseOrderService.closePurchaseOrder(companyId, poId, user.id);
+    return res.status(200).json({ status: 'ok', purchaseOrder });
+  })
+);
+
+purchasingRoutes.post(
+  '/purchase-orders/:id/cancel',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const poId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_POST, companyId);
+    if (!isUuid(poId)) {
+      throw new ValidationError('Invalid purchase order ID format');
+    }
+
+    const purchaseOrder = await defaultPurchaseOrderService.cancelPurchaseOrder(companyId, poId, user.id);
+    return res.status(200).json({ status: 'ok', purchaseOrder });
   })
 );

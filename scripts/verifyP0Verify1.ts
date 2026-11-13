@@ -94,7 +94,7 @@ async function runVerification() {
 
   // V7 (C5 Static): userAdminService listUsers calls listUsersByCompany for tenant admins
   const v7TenantList =
-    userAdminServiceContent.includes('defaultUserRepository.listUsersByCompany(companyId)') &&
+    userAdminServiceContent.includes('this.userRepo.listUsersByCompany(companyId)') &&
     userAdminServiceContent.includes('companyId is required for company-scoped user listing');
   assertCheck('V7', 'userAdminService.listUsers scopes user listing to company memberships', v7TenantList);
 
