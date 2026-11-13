@@ -121,6 +121,7 @@
     "test:p2p-cycle-1": "tsx scripts/verifyP2PCycle1.ts",
     "test:purch-po-1": "tsx scripts/verifyPurchPo1.ts",
     "test:purch-grn-po-link-1": "tsx scripts/verifyPurchGrnPoLink1.ts",
+    "test:purch-po-ci-1": "tsx scripts/verifyPurchPoCi1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"
