@@ -9,7 +9,7 @@
 
 ## 2. قائمة الملفات والمكونات المنفذة
 1. `src/server/db/types.ts`:
-   - تعريف `DatabaseMode` ('central' | 'per_company' | 'on_prem' | 'hybrid')
+   - تعريف `DatabaseMode` المنفذ فعليًا: `'central' | 'per_company' | 'on_prem'` *(محدّث 2026-11-12: ما كان معرّفًا حينها في مسودة P02a كان يتضمن `'hybrid'`، ثم أُزيل ورُفض معماريًا — mode 'hybrid' is not supported)*
    - تعريف `TenantDbRef` لعزل بيانات الشركات
    - تعريف `QueryResult` و `DbExecutor` (مع دعم query, withTransaction, health, close)
 2. `src/server/db/DatabaseEngine.ts`:
@@ -17,7 +17,7 @@
 3. `src/server/db/ConnectionRegistry.ts`:
    - فئة `ConnectionRegistry` لإدارة تكوينات الاتصال بأمان مع حجب كلمات المرور
 4. `src/server/db/TenantDatabaseResolver.ts`:
-   - فئة `TenantDatabaseResolver` لتوجيه طلبات المستأجرين للاتصال الصحيح وعزل الشركات
+   - فئة `TenantDatabaseResolver` لتوجيه طلبات المستأجرين للاتصال الصحيح وعزل الشركات، مع رفض `'hybrid'` صراحة (`DB_MODE_INVALID: mode 'hybrid' is not supported`) ومنع التحويل الصامت للقاعدة المركزية (`TENANT_DB_ROUTE_MISSING`).
 5. `src/server/db/adapters/PostgresqlAdapter.ts`:
    - محول PostgreSQL المرجعي المبني على `pg.Pool` و `PostgresExecutor`
    - دعم المعاملات التلقائية (BEGIN/COMMIT/ROLLBACK) وفحص الصحة (SELECT 1)

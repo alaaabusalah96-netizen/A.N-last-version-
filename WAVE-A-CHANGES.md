@@ -53,3 +53,9 @@
 2. طبقة Org-Unit Override في ترتيب الحل (مستوى أول في §3 وثيقة 03) مؤجلة لـWave B/C عمدًا.
 3. B1..B6 وC1..C12 لم تُمس — قيد "Don't build Wave C features in Wave A" (وثيقة 05).
 4. نقاط جاهزية البيع السابقة (قائمة الدخل/الميزانية، توسيع اختبارات grnService/stockService) خارجة عن نطاق الموجة A.
+
+## نطاق الحقول المخصصة الفعلي (Custom Fields Scope — محدث 2026-11-12)
+- **الكيان المدعوم فعليًا**: الحقول المخصصة مدعومة ومنفذة فعليًا على **الصنف (`item` فقط)** عبر `SUPPORTED_ENTITY_TYPES = ['item']` في `src/server/customization/customFieldService.ts`.
+- **الكيانات الأخرى في المخطط**: الكيانات الأخرى (`supplier` / `customer` / `document`) مسموح بها على مستوى مخطط قاعدة البيانات (`database/migrations/034_custom_fields.sql`) ولكنها **غير منفذة** في طبقة الخدمة، وتظهر في الواجهة (`src/components/customization/CustomFieldsPanel.tsx`) معطلة بصراحة بعبارة «غير مدعوم بعد».
+- **خطة التوسع وضبط الإعلان**: أي توسع لكيان إضافي يتم عبر حزمة مستقلة لكل كيان على حدة وفق نمط `AN-CUSTOM-FIELDS-8`، ويُمنع الإعلان عن دعم أوسع خارج هذا النطاق قبل إتمام حزمة الكيان المعني.
+
