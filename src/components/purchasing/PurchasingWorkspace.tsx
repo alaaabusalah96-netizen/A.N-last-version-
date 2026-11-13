@@ -137,10 +137,11 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   ]);
 
   // GRN Form state
+  const [grnPoId, setGrnPoId] = useState('');
   const [grnSupplierId, setGrnSupplierId] = useState('');
   const [grnWarehouseId, setGrnWarehouseId] = useState('');
   const [grnMemo, setGrnMemo] = useState('');
-  const [grnLines, setGrnLines] = useState<{ itemId: string; qty: string; unitCost: string }[]>([
+  const [grnLines, setGrnLines] = useState<{ itemId: string; qty: string; unitCost: string; poLineId?: string }[]>([
     { itemId: '', qty: '1', unitCost: '' },
   ]);
 
@@ -326,6 +327,35 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     }
   };
 
+  const handleGrnPoChange = async (selectedPoId: string) => {
+    setGrnPoId(selectedPoId);
+    if (!selectedPoId) return;
+
+    try {
+      const res = await apiFetch(`/api/purchasing/purchase-orders/${selectedPoId}/remaining?companyId=${selectedCompanyId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const po = data.purchaseOrder;
+        if (po && po.supplierId) {
+          setGrnSupplierId(po.supplierId);
+        }
+        if (Array.isArray(data.lines)) {
+          const mappedLines = data.lines.map((l: any) => ({
+            itemId: l.itemId,
+            qty: String(l.remainingQty > 0 ? l.remainingQty : l.qty),
+            unitCost: l.unitCost ? String(l.unitCost) : '',
+            poLineId: l.id,
+          }));
+          if (mappedLines.length > 0) {
+            setGrnLines(mappedLines);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch PO remaining lines:', err);
+    }
+  };
+
   const handleAddGrnLine = () => {
     setGrnLines([...grnLines, { itemId: '', qty: '1', unitCost: '' }]);
   };
@@ -345,6 +375,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
         itemId: l.itemId,
         qty: Number(l.qty),
         unitCost: l.unitCost ? Number(l.unitCost) : undefined,
+        poLineId: l.poLineId || undefined,
       }));
 
       const res = await apiFetch('/api/purchasing/grn', {
@@ -355,6 +386,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
           supplierId: grnSupplierId,
           warehouseId: grnWarehouseId,
           memo: grnMemo,
+          poId: grnPoId || undefined,
           lines: formattedLines,
         }),
       });
@@ -363,6 +395,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
 
       setSuccess('تم إنشاء مسودة سند استلام البضائع (GRN) بنجاح');
       setShowGrnModal(false);
+      setGrnPoId('');
       setGrnSupplierId('');
       setGrnWarehouseId('');
       setGrnMemo('');
@@ -941,6 +974,24 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
               </button>
             </div>
             <form onSubmit={handleCreateGrn} className="flex flex-col gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">الربط بأمر شراء معتمد (اختياري)</label>
+                <select
+                  value={grnPoId}
+                  onChange={(e) => handleGrnPoChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">-- بدون أمر شراء (استلام مباشر) --</option>
+                  {purchaseOrders
+                    .filter((p) => p.status === 'approved')
+                    .map((po) => (
+                      <option key={po.id} value={po.id}>
+                        {po.poNo || po.id.slice(0, 8)} - {po.supplierNameAr}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">المورد *</label>
@@ -948,7 +999,8 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                     required
                     value={grnSupplierId}
                     onChange={(e) => setGrnSupplierId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    disabled={Boolean(grnPoId)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-60"
                   >
                     <option value="">-- اختر المورد --</option>
                     {suppliers.map((s) => (
@@ -992,27 +1044,30 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
               <div className="border border-slate-800 rounded-xl p-3 bg-slate-950/60 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-300">بنود الاصناف المستلمة</span>
-                  <button
-                    type="button"
-                    onClick={handleAddGrnLine}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>إضافة بند</span>
-                  </button>
+                  {!grnPoId && (
+                    <button
+                      type="button"
+                      onClick={handleAddGrnLine}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>إضافة بند</span>
+                    </button>
+                  )}
                 </div>
 
                 {grnLines.map((line, idx) => (
                   <div key={idx} className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-slate-900 p-2 rounded-lg border border-slate-800">
                     <select
                       required
+                      disabled={Boolean(grnPoId)}
                       value={line.itemId}
                       onChange={(e) => {
                         const newLines = [...grnLines];
                         newLines[idx].itemId = e.target.value;
                         setGrnLines(newLines);
                       }}
-                      className="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none"
+                      className="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none disabled:opacity-60"
                     >
                       <option value="">-- اختر الصنف --</option>
                       {items.map((i) => (
@@ -1037,7 +1092,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                       className="w-24 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none"
                     />
 
-                    {grnLines.length > 1 && (
+                    {!grnPoId && grnLines.length > 1 && (
                       <button
                         type="button"
                         onClick={() => handleRemoveGrnLine(idx)}

@@ -80,6 +80,9 @@ export class GrnService {
       throw new ValidationError('يجب إضافة صنف واحد على الأقل في سند الاستلام');
     }
 
+    const extendedInput = input as any;
+    const poId = extendedInput.poId && typeof extendedInput.poId === 'string' ? extendedInput.poId.trim() : null;
+
     return await withTenantTransaction(companyId, async (tx) => {
       const supplier = await this.supplierRepo.findById(companyId, input.supplierId, tx);
       if (!supplier) {
@@ -97,12 +100,33 @@ export class GrnService {
         throw new ValidationError('المستودع المحدد غير نشط');
       }
 
+      if (poId) {
+        const poCheck = await tx.query<{ id: string; status: string; supplierId: string }>(
+          `SELECT id, status, supplier_id as "supplierId" FROM purch_purchase_orders WHERE id = $1 AND company_id = $2`,
+          [poId, companyId]
+        );
+        const po = poCheck.rows[0];
+        if (!po) {
+          throw new NotFoundError('أمر الشراء المرتبط غير موجود');
+        }
+        if (po.status !== 'approved') {
+          throw new ValidationError('لا يمكن إنشاء سند استلام من أمر شراء غير معتمد');
+        }
+        if (po.supplierId !== input.supplierId) {
+          throw new ValidationError('المورد في سند الاستلام لا يطابق مورد أمر الشراء');
+        }
+      }
+
       for (const line of input.lines) {
+        const lineExt = line as any;
         if (!line.itemId || typeof line.itemId !== 'string') {
           throw new ValidationError('كافة بنود السند تتطلب صنفاً محدداً');
         }
         if (typeof line.qty !== 'number' || isNaN(line.qty) || line.qty <= 0) {
           throw new ValidationError('كمية البند يجب أن تكون عدداً أكبر من الصفر');
+        }
+        if (poId && (!lineExt.poLineId || typeof lineExt.poLineId !== 'string')) {
+          throw new ValidationError('كافة بنود سند الاستلام المرتبط بأمر شراء تتطلب تحديد بند أمر الشراء (poLineId)');
         }
         if (line.unitCost !== undefined && line.unitCost !== null) {
           const rawCost = typeof line.unitCost === 'number' ? line.unitCost : Number(line.unitCost);
@@ -124,16 +148,33 @@ export class GrnService {
 
       const grn = await this.grnRepo.createDraft(companyId, input, actorId, tx);
 
+      if (poId) {
+        await tx.query(
+          `UPDATE purch_grn SET po_id = $1 WHERE id = $2 AND company_id = $3`,
+          [poId, grn.id, companyId]
+        );
+        for (let i = 0; i < input.lines.length; i++) {
+          const lExt = input.lines[i] as any;
+          if (lExt.poLineId && grn.lines && grn.lines[i]) {
+            await tx.query(
+              `UPDATE purch_grn_lines SET po_line_id = $1 WHERE id = $2 AND company_id = $3`,
+              [lExt.poLineId, grn.lines[i].id, companyId]
+            );
+          }
+        }
+      }
+
       await this.auditService.record({
         actorUserId: actorId || null,
         companyId,
         action: 'GRN_CREATE_DRAFT',
         entityType: 'purch_grn',
         entityId: grn.id,
-        metadata: { supplierId: input.supplierId, warehouseId: input.warehouseId, lineCount: input.lines.length },
+        metadata: { supplierId: input.supplierId, warehouseId: input.warehouseId, lineCount: input.lines.length, poId: poId || null },
       }, { executor: tx });
 
-      return grn;
+      const finalGrn = await this.grnRepo.findById(companyId, grn.id, tx);
+      return finalGrn || grn;
     });
   }
 
@@ -158,11 +199,6 @@ export class GrnService {
     };
   }
 
-  /**
-   * مصدر حسابات الترحيل: منصة الإعدادات أولاً (accounting.grn_mapping)،
-   * ثم إعدادات الشركة القديمة كـfallback متوافق.
-   * لا يوجد أي مسار بيفشل بصمت: لو الاتنين فاضيين -> ValidationError.
-   */
   private async resolveGlMapping(
     companyId: string
   ): Promise<{
@@ -184,8 +220,6 @@ export class GrnService {
         };
       }
     } catch (err) {
-      // تعريف مفقود أو محتوى غير متاح = السبب المتوقع للـfallback المتوافق.
-      // أي خطأ تاني (عطل قاعدة/صلاحيات) لازم يظهر، مش يتحوّل بصمت.
       if (!(err instanceof NotFoundError) && !(err instanceof Error && /not found|غير موجود/i.test(err.message))) {
         throw err;
       }
@@ -196,12 +230,6 @@ export class GrnService {
     return { ...gl, source: 'company_settings', versionNo: null };
   }
 
-  /**
-   * قيد محاسبي على مسار الترحيل نفسه، مش على مسار النشر بس.
-   * بيشتغل مهما كان مصدر الحسابات (منصة الإعدادات أو إعدادات الشركة القديمة)،
-   * عشان أي إعداد اتحفظ قبل التشديد ما يعديش في الترحيل.
-   * لازم يتنفّذ **قبل** أي كتابة على المخزون.
-   */
   private async assertGlAccountsUsable(
     companyId: string,
     gl: { inventoryAccountId: string; purchasesClearingAccountId: string },
@@ -254,6 +282,56 @@ export class GrnService {
       const warehouse = await this.warehouseRepo.findById(companyId, grn.warehouseId, tx);
       if (!warehouse || !warehouse.isActive) {
         throw new ValidationError('مستودع الاستلام غير موجود أو غير نشط');
+      }
+
+      // Check if GRN is linked to a Purchase Order
+      const poQuery = await tx.query<{ poId: string | null }>(
+        `SELECT po_id as "poId" FROM purch_grn WHERE id = $1 AND company_id = $2`,
+        [grnId, companyId]
+      );
+      const poId = poQuery.rows[0]?.poId || null;
+
+      if (poId) {
+        const poCheck = await tx.query<{ status: string; supplierId: string }>(
+          `SELECT status, supplier_id as "supplierId" FROM purch_purchase_orders WHERE id = $1 AND company_id = $2`,
+          [poId, companyId]
+        );
+        const po = poCheck.rows[0];
+        if (!po || po.status !== 'approved') {
+          throw new ValidationError('أمر الشراء المرتبط غير موجود أو ليس في حالة معتمد');
+        }
+        if (po.supplierId !== grn.supplierId) {
+          throw new ValidationError('المورد في سند الاستلام لا يطابق المورد في أمر الشراء');
+        }
+
+        // Verify and atomically increment received_qty on PO lines
+        for (const line of grn.lines) {
+          const lExt = line as any;
+          const poLineId = lExt.poLineId;
+          if (!poLineId) {
+            // Fallback fetch from purch_grn_lines table if not on line object
+            const lineDb = await tx.query<{ poLineId: string | null }>(
+              `SELECT po_line_id as "poLineId" FROM purch_grn_lines WHERE id = $1 AND company_id = $2`,
+              [line.id, companyId]
+            );
+            const resolvedPoLineId = lineDb.rows[0]?.poLineId;
+            if (!resolvedPoLineId) {
+              throw new ValidationError('بند سند الاستلام غير مربوط ببند أمر شراء صالح');
+            }
+            lExt.poLineId = resolvedPoLineId;
+          }
+
+          const updatePoLineRes = await tx.query(
+            `UPDATE purch_po_lines
+             SET received_qty = received_qty + $1
+             WHERE id = $2 AND company_id = $3 AND received_qty + $1 <= qty`,
+            [line.qty, lExt.poLineId, companyId]
+          );
+
+          if ((updatePoLineRes.rowCount ?? 0) === 0) {
+            throw new ValidationError('تجاوز الكمية المستلمة الكمية المطلوبة في أمر الشراء للبند المحدد');
+          }
+        }
       }
 
       // READ-ONLY validation — no stock/GL writes yet
@@ -319,6 +397,22 @@ export class GrnService {
       const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '', false, tx);
       await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', postedJournal.id, tx);
 
+      // If linked to PO, check if all PO lines are fully received -> auto close PO
+      if (poId) {
+        const unreceivedRes = await tx.query<{ cnt: number }>(
+          `SELECT COUNT(*)::int as cnt FROM purch_po_lines WHERE po_id = $1 AND company_id = $2 AND received_qty < qty`,
+          [poId, companyId]
+        );
+        if ((unreceivedRes.rows[0]?.cnt ?? 0) === 0) {
+          await tx.query(
+            `UPDATE purch_purchase_orders
+             SET status = 'closed', closed_at = NOW(), closed_by = $1
+             WHERE id = $2 AND company_id = $3 AND status = 'approved'`,
+            [actorId || null, poId, companyId]
+          );
+        }
+      }
+
       await this.auditService.record({
         actorUserId: actorId || '',
         companyId,
@@ -335,6 +429,7 @@ export class GrnService {
           glSource: gl.source,
           glEventKey: 'accounting.grn_mapping',
           glVersionNo: gl.versionNo,
+          poId: poId || null,
         },
       }, { executor: tx });
 
@@ -346,4 +441,3 @@ export class GrnService {
 }
 
 export const defaultGrnService = new GrnService();
-

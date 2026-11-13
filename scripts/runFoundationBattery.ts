@@ -135,6 +135,7 @@ const scripts = [
   'scripts/verifyDocsConsistency1.ts',
   'scripts/verifyP2PCycle1.ts',
   'scripts/verifyPurchPo1.ts',
+  'scripts/verifyPurchGrnPoLink1.ts',
 ];
 
 export interface BatteryItemReport {

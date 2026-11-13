@@ -166,6 +166,33 @@ purchasingRoutes.get(
   })
 );
 
+purchasingRoutes.get(
+  '/purchase-orders/:id/remaining',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const poId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(poId)) {
+      throw new ValidationError('Invalid purchase order ID format');
+    }
+
+    const purchaseOrder = await defaultPurchaseOrderService.getPurchaseOrder(companyId, poId);
+    const linesWithRemaining = (purchaseOrder.lines || []).map((l) => ({
+      ...l,
+      remainingQty: Math.max(0, Number(l.qty) - Number(l.receivedQty || 0)),
+    }));
+
+    return res.status(200).json({
+      status: 'ok',
+      purchaseOrder,
+      lines: linesWithRemaining,
+    });
+  })
+);
+
 purchasingRoutes.post(
   '/purchase-orders',
   requireAuth,
