@@ -173,7 +173,7 @@ export class RoleService {
           entityId: created.id,
           metadata: { code: created.code, cloneFromCode: input.cloneFromCode || null },
         },
-        { mode: 'best_effort', executor: tx }
+        { mode: 'required', executor: tx }
       );
 
       this.onInvalidate(companyId);
@@ -216,7 +216,7 @@ export class RoleService {
           entityId: roleId,
           metadata: { ...input },
         },
-        { mode: 'best_effort', executor: tx }
+        { mode: 'required', executor: tx }
       );
       return updated;
     });
@@ -274,7 +274,7 @@ export class RoleService {
           entityId: roleId,
           metadata: { code: role.code, count: saved.length },
         },
-        { mode: 'best_effort', executor: tx }
+        { mode: 'required', executor: tx }
       );
 
       this.onInvalidate(companyId);
@@ -326,7 +326,7 @@ export class RoleService {
           entityId: roleId,
           metadata: { isActive },
         },
-        { mode: 'best_effort', executor: tx }
+        { mode: 'required', executor: tx }
       );
 
       this.onInvalidate(companyId);
