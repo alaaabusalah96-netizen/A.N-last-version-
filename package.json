@@ -113,6 +113,7 @@
     "test:gl-mapping-events-7": "tsx scripts/verifyGlMappingEvents7.ts",
     "test:custom-fields-8": "tsx scripts/verifyCustomFields8.ts",
     "test:rbac-assignment-9": "tsx scripts/verifyRbacAssignment9.ts",
+    "test:rbac-same-company-fk-1": "tsx scripts/verifyRbacSameCompanyFk1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"

@@ -128,6 +128,7 @@ const scripts = [
   'scripts/verifyGlMappingEvents7.ts',
   'scripts/verifyCustomFields8.ts',
   'scripts/verifyRbacAssignment9.ts',
+  'scripts/verifyRbacSameCompanyFk1.ts',
 ];
 
 export interface BatteryItemReport {
