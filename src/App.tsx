@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Menu } from 'lucide-react';
 import { LoginForm } from './components/LoginForm.js';
 import { CompaniesPanel } from './components/CompaniesPanel.js';
 import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
@@ -27,6 +27,10 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.matchMedia('(min-width: 1024px)').matches;
+  });
 
   // Check existing session via GET /api/auth/me
   const checkCurrentSession = async () => {
@@ -48,6 +52,23 @@ export default function App() {
   useEffect(() => {
     checkCurrentSession();
   }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = (e: MediaQueryListEvent) => {
+      setSidebarOpen(e.matches);
+    };
+    setSidebarOpen(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const handleNavigate = (nav: typeof activeNav) => {
+    setActiveNav(nav);
+    if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches) {
+      setSidebarOpen(false);
+    }
+  };
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -83,22 +104,35 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-row font-sans" dir="rtl">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-row font-sans overflow-x-hidden" dir="rtl">
       {/* Scrollable Right Sidebar */}
       <AppSidebar
         activeNav={activeNav}
-        onNavigate={setActiveNav}
+        onNavigate={handleNavigate}
         userName={currentUser.username}
         userRole={currentUser.role}
         onLogout={handleLogout}
         loggingOut={loggingOut}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0 overflow-y-auto p-6 md:p-10 flex flex-col gap-6">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <div>
-            <h2 className="text-xl font-bold text-white">
+      <main className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 md:p-10 flex flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3 min-w-0">
+            {!sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="فتح القائمة"
+                className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-white truncate">
               {activeNav === 'companies'
                 ? 'الشركات'
                 : activeNav === 'accounting'
@@ -143,9 +177,10 @@ export default function App() {
                 : activeNav === 'custom_fields'
                 ? 'تعريف الحقول الإضافية وترتيبها وإلزاميتها للأصناف'
                 : 'الإعدادات التشغيلية والمالية للشركة'}
-            </p>
+              </p>
+            </div>
           </div>
-          <div className="text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+          <div className="text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl shrink-0">
             جلسة نشطة: <span className="text-emerald-400 font-semibold">{currentUser.username}</span>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, SlidersHorizontal, Shield, Sliders } from 'lucide-react';
+import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, SlidersHorizontal, Shield, Sliders, X } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
 interface AppSidebarProps {
@@ -8,6 +8,8 @@ interface AppSidebarProps {
   userRole: string;
   onLogout: () => void;
   loggingOut?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export function AppSidebar({
@@ -17,19 +19,50 @@ export function AppSidebar({
   userRole,
   onLogout,
   loggingOut,
+  isOpen = true,
+  onClose,
 }: AppSidebarProps) {
   return (
-    <aside className="w-64 bg-slate-900/95 border-l border-slate-800 flex flex-col h-screen sticky top-0 shrink-0 select-none overflow-y-auto overflow-x-hidden" dir="rtl">
-      {/* Brand Header */}
-      <div className="p-5 border-b border-slate-800/80 flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
-          <Layers className="w-5 h-5" />
+    <>
+      {isOpen && (
+        <div
+          data-sidebar-backdrop="true"
+          onClick={onClose}
+          aria-hidden="true"
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-30 lg:hidden"
+        />
+      )}
+      <aside
+        data-sidebar-open={isOpen ? 'true' : 'false'}
+        className={`w-64 bg-slate-900/95 border-l border-slate-800 flex-col h-screen shrink-0 select-none overflow-y-auto overflow-x-hidden ${
+          isOpen
+            ? 'flex fixed inset-y-0 right-0 z-40 shadow-2xl lg:shadow-none lg:sticky lg:top-0 lg:z-20'
+            : 'hidden'
+        }`}
+        dir="rtl"
+      >
+        {/* Brand Header */}
+        <div className="p-5 border-b border-slate-800/80 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-sm font-bold tracking-tight text-white">A.N ERP</h1>
+              <p className="text-[11px] text-slate-400">منصة إدارة الأعمال</p>
+            </div>
+          </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="إغلاق القائمة"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
-        <div>
-          <h1 className="text-sm font-bold tracking-tight text-white">A.N ERP</h1>
-          <p className="text-[11px] text-slate-400">منصة إدارة الأعمال</p>
-        </div>
-      </div>
 
       {/* User Info Card */}
       <div className="p-4 m-3 bg-slate-950/60 border border-slate-800/80 rounded-xl">
@@ -196,6 +229,7 @@ export function AppSidebar({
           <span>تسجيل الخروج</span>
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
