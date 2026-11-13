@@ -10,6 +10,30 @@
 ---
 
 ## 2. سجل الحزم وحالتها الحالية الدقيقة
+- **AN-FIX-CI-GREEN-14**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Fixed V7 test assertion in `scripts/verifyP0Verify1.ts`, added Playwright dev dependency and Chromium browser install step to `.github/workflows/foundation-ci.yml`, bringing Foundation battery to zero failures (`81 PASS | 0 FAIL | 25 BLOCKED | 1 SKIPPED`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
+
+- **AN-PURCH-PO-15**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered Purchase Orders (أوامر الشراء) feature slice. (1) Migration 036 (`036_purchasing_po.sql`): Created `purch_purchase_orders` and `purch_po_lines` tables with forced RLS, an_app isolation policies, composite tenant foreign keys, and privilege grants/revokes. (2) Backend Services & Repository: Created `purchaseOrderRepository.ts` and `purchaseOrderService.ts` enforcing strict tenant scoping (`company_id`), transactional creation with lines, state transitions (`draft` -> `approved` -> `closed` / `cancelled`), monotonic sequence allocation (`PO-XXXXXX`), and required in-transaction audit logging (`PO_CREATE`, `PO_APPROVE`, `PO_CLOSE`, `PO_CANCEL`). (3) HTTP API & Security: Mounted purchasing routes under `/api/purchasing/purchase-orders` guarded by `assertPurchasingPermission` (`PURCHASING_READ`, `WRITE`, `POST`). (4) UI: Added «أوامر الشراء» tab, draft PO creation modal, and permission-gated action buttons in `PurchasingWorkspace.tsx`. (5) Verification: Created static test harness `scripts/verifyPurchPo1.ts` (`npm run test:purch-po-1`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES` (Purchasing module expanded with PO lifecycle)
+
+- **AN-PURCH-GRN-PO-LINK-16**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered GRN to Purchase Order linking and automated receipt reconciliation. (1) Migration 037 (`037_purch_grn_po_link.sql`): Added optional `po_id` to `purch_grn` and `po_line_id` to `purch_grn_lines` with `ON DELETE SET NULL` and indexes. (2) Backend Services: Extended `grnService.ts` to accept optional `poId` on draft creation, validate approved PO and supplier match, execute atomic `received_qty` increments on `purch_po_lines` with strict upper-bound guard (`received_qty + qty <= qty`), automatically close PO (`status = 'closed'`) upon full receipt of all lines, and rollback atomically on any validation or execution error. (3) HTTP API: Added `GET /purchase-orders/:id/remaining` returning remaining quantities per line. (4) UI: Updated `PurchasingWorkspace.tsx` GRN modal with approved PO selection and auto-filling of remaining quantities and `poLineId`. (5) Verification: Created test harness `scripts/verifyPurchGrnPoLink1.ts` (`npm run test:purch-grn-po-link-1`).
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
+
+- **AN-PURCH-PO-DOCS-17**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Updated foundation and module boundary documentation (`docs/foundation/MODULE_BOUNDARIES.md` and `docs/foundation/AI_PROJECT_STATE.md`) reflecting completed Purchasing Order lifecycle (AN-PURCH-PO-15) and GRN-to-PO reconciliation linking (AN-PURCH-GRN-PO-LINK-16). Verified internal documentation consistency via `scripts/verifyDocsConsistency1.ts`.
+  - P05_STARTED: `YES`
+  - MODULES_STARTED: `YES`
+
 - **AN-WAVE-A-COMPLETION-1**: `IMPLEMENTED` + `UNIT_TESTED`
   - Scope: Wave A كاملة (A1 تثبيت + A2 Configuration Registry + A3 Versioning & Publishing + A4 Validation Engine) وفق `docs/foundation/configuration-platform/`.
   - Key files: `database/migrations/027_config_platform_registry.sql`, `src/server/config-platform/*`, `src/server/routes/configRoutes.ts`, `scripts/verifyWaveACompletion1.ts`.
