@@ -111,7 +111,15 @@ export class RbacService {
 
     // Explicit companyId provided
     if (companyId) {
-      const membership = await this.membershipStore.getMembership(user.id, companyId);
+      // Resolve membership through the injected tenant runner so the read
+      // happens on the same tenant-scoped executor as the permission lookup.
+      // A direct membershipStore call without an executor falls through to
+      // getDefaultExecutor() (a separate connection) which cannot observe
+      // rows created inside the caller's transaction — producing null/stale
+      // membership and false permission denials (R3/R4/R8 class of failure).
+      const membership = await this.runWithTenant(companyId, (tx) =>
+        this.membershipStore.getMembership(user.id, companyId, tx)
+      );
       if (!membership || membership.isActive === false) {
         return false;
       }
