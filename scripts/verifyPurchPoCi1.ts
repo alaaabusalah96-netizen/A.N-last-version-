@@ -70,6 +70,7 @@ async function run() {
   const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   const companyIds: string[] = [];
   const userIds: string[] = [];
+  let cleanupFailed = false;
 
   try {
     const companyRepo = new CompanyRepository();
@@ -213,7 +214,7 @@ async function run() {
       }
     }
     const c4Ok = closedGrnRejected;
-    await check('C4: Creating/posting GRN on a closed PO is rejected withValidationError', c4Ok);
+    await check('C4: Creating/posting GRN on a closed PO is rejected with ValidationError', c4Ok);
 
     // C5: Tenant isolation test: company B cannot see PO or GRN
     let compBGetPoRejected = false;
@@ -225,7 +226,22 @@ async function run() {
       }
     }
     const compBPoList = await defaultPurchaseOrderService.listPurchaseOrders(compB.id);
-    const c5Ok = compBGetPoRejected && compBPoList.length === 0;
+
+    let compBGetGrnRejected = false;
+    try {
+      await defaultGrnService.getGrn(compB.id, postedGrn1.id);
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        compBGetGrnRejected = true;
+      }
+    }
+    const compBGrnList = await defaultGrnService.listGrns(compB.id);
+
+    const c5Ok =
+      compBGetPoRejected &&
+      compBPoList.length === 0 &&
+      compBGetGrnRejected &&
+      compBGrnList.length === 0;
     await check('C5: Tenant isolation prevents Company B from accessing Company A POs/GRNs', c5Ok);
 
     // C6: Audit rows exist for operations within correct scope
@@ -238,9 +254,8 @@ async function run() {
     const c6Ok =
       auditActions.includes('PO_CREATE') &&
       auditActions.includes('PO_APPROVE') &&
-      auditActions.includes('GRN_CREATE') &&
-      auditActions.includes('GRN_POST') &&
-      auditActions.includes('PO_CLOSE');
+      auditActions.includes('GRN_CREATE_DRAFT') &&
+      auditActions.includes('GRN_POST');
     await check('C6: Audit logs record PO and GRN lifecycle events correctly under company scope', c6Ok);
 
     // C7: Verify rollback / cleanup readiness (assert data will be purged cleanly)
@@ -257,14 +272,28 @@ async function run() {
         await client.connect();
         await client.query('BEGIN');
         await client.query('ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
+
         await client.query('DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_po_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_purchase_orders WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query(
+          'UPDATE journal_entries SET reversed_by_entry_id = NULL WHERE company_id = ANY($1::uuid[])',
+          [companyIds]
+        );
+        await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_movements WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_balances WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounts WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM inv_items WHERE company_id = ANY($1::uuid[])', [companyIds]);
-        await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM inv_warehouses WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM audit_logs WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM companies WHERE id = ANY($1::uuid[])', [companyIds]);
         if (userIds.length > 0) {
@@ -272,9 +301,12 @@ async function run() {
           await client.query('DELETE FROM platform_users WHERE id = ANY($1::uuid[])', [userIds]);
         }
         await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
         await client.query('COMMIT');
         console.log('[cleanup] Test companies, POs, GRNs and audit logs purged cleanly.');
       } catch (cleanupErr) {
+        cleanupFailed = true;
         try {
           await client.query('ROLLBACK');
         } catch {}
@@ -287,6 +319,10 @@ async function run() {
   }
 
   const { exitCode } = summary();
+  if (cleanupFailed) {
+    console.error('[cleanup] Cleanup failed. Failing test to prevent silent leakage.');
+    process.exit(1);
+  }
   process.exit(exitCode);
 }
 

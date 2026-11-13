@@ -136,6 +136,30 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Start Application Server for Browser Verification
+        run: |
+          node dist/server.cjs &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          echo "Waiting for app server to become healthy..."
+          for i in {1..60}; do
+            if curl -sSf http://127.0.0.1:3000/api/health; then
+              echo "App server is up and healthy!"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App server failed to start within 60s."
+          kill $SERVER_PID || true
+          exit 1
+        env:
+          PORT: "3000"
+          NODE_ENV: test
+          DATABASE_URL: postgresql://an_app:AppRoleSecurePass123!@localhost:5432/an_foundation
+          CSRF_SECRET: test_csrf_secret_minimum_32_chars_long_key_for_ci
+          DATABASE_SSL: disable
+          ENABLE_TENANT_DEMO: "1"
+
       - name: Run Foundation Test Battery
         id: battery
         run: npm run test:foundation
@@ -153,6 +177,16 @@ jobs:
           PLATFORM_ADMIN_PASSWORD: CiAdminSecurePass123!
           SESSION_TTL_HOURS: "12"
           SESSION_COOKIE_NAME: an_session
+          VERIFY_APP_URL: http://127.0.0.1:3000
+          VERIFY_SESSION_SHIM: "1"
+
+      - name: Stop Application Server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
+          pkill -f "node dist/server.cjs" || true
 
       - name: Publish Summary to GitHub Step Summary
         if: always()

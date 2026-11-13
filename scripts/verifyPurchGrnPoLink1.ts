@@ -44,7 +44,7 @@ async function run() {
 
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl || dbUrl.trim() === '') {
-    blocked('DATABASE_URL is not set. G1-G6 loopback PostgreSQL GRN-PO link proofs are BLOCKED.');
+    blocked('DATABASE_URL is not set. G1-G6, G8-G9 loopback PostgreSQL GRN-PO link proofs are BLOCKED.');
     const { exitCode } = summary();
     process.exit(exitCode);
     return;
@@ -64,7 +64,7 @@ async function run() {
 
   const executor = await getDefaultExecutor();
   if (!executor) {
-    blocked('Unable to connect to database executor. G1-G6 GRN-PO link proofs are BLOCKED.');
+    blocked('Unable to connect to database executor. G1-G6, G8-G9 GRN-PO link proofs are BLOCKED.');
     const { exitCode } = summary();
     process.exit(exitCode);
     return;
@@ -73,6 +73,7 @@ async function run() {
   const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   const companyIds: string[] = [];
   const userIds: string[] = [];
+  let cleanupFailed = false;
 
   try {
     const companyRepo = new CompanyRepository();
@@ -115,6 +116,11 @@ async function run() {
     const itemA = await defaultItemService.createItem(
       compA.id,
       { code: `ITM-LKA-${unique}`, nameAr: 'صنف ربط PO', uom: 'قطعة' },
+      userA.id
+    );
+    const itemDiff = await defaultItemService.createItem(
+      compA.id,
+      { code: `ITM-LKD-${unique}`, nameAr: 'صنف مختلف لاختبار G9', uom: 'قطعة' },
       userA.id
     );
 
@@ -246,6 +252,73 @@ async function run() {
     const postedGrnStandard = await defaultGrnService.postGrn(compA.id, grnStandard.id, userA.id);
     const g6Ok = postedGrnStandard.status === 'posted';
     await check('G6: Standard GRN without poId continues to post successfully with zero regressions', g6Ok);
+
+    // G8: GRN on PO-A with line poLineId from PO-B in same company -> rejected
+    const poB2Draft = await defaultPurchaseOrderService.createPurchaseOrder(
+      compA.id,
+      {
+        supplierId: supplierA.id,
+        memo: 'PO-B for G8 test',
+        lines: [{ itemId: itemA.id, qty: 8, unitCost: 50 }],
+      },
+      userA.id
+    );
+    const poB2Approved = await defaultPurchaseOrderService.approvePurchaseOrder(compA.id, poB2Draft.id, userA.id);
+    const poB2LineId = poB2Approved.lines![0].id;
+
+    // Create a new PO-C to test cross-PO line link
+    const poC3Draft = await defaultPurchaseOrderService.createPurchaseOrder(
+      compA.id,
+      {
+        supplierId: supplierA.id,
+        memo: 'PO-C for G8 test',
+        lines: [{ itemId: itemA.id, qty: 5, unitCost: 50 }],
+      },
+      userA.id
+    );
+    const poC3Approved = await defaultPurchaseOrderService.approvePurchaseOrder(compA.id, poC3Draft.id, userA.id);
+
+    let crossPoLineRejected = false;
+    try {
+      await defaultGrnService.createGrn(
+        compA.id,
+        {
+          supplierId: supplierA.id,
+          warehouseId: warehouseA.id,
+          memo: 'Cross PO Line Link Attempt',
+          poId: poC3Approved.id,
+          lines: [{ itemId: itemA.id, qty: 2, unitCost: 50, poLineId: poB2LineId } as any],
+        } as any,
+        userA.id
+      );
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        crossPoLineRejected = true;
+      }
+    }
+    await check('G8: GRN on PO-A with line poLineId from PO-B in same company is rejected with ValidationError', crossPoLineRejected);
+
+    // G9: Line with itemId different from PO line itemId -> rejected
+    let wrongItemRejected = false;
+    try {
+      await defaultGrnService.createGrn(
+        compA.id,
+        {
+          supplierId: supplierA.id,
+          warehouseId: warehouseA.id,
+          memo: 'Mismatch Item Link Attempt',
+          poId: poB2Approved.id,
+          lines: [{ itemId: itemDiff.id, qty: 2, unitCost: 50, poLineId: poB2LineId } as any],
+        } as any,
+        userA.id
+      );
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        wrongItemRejected = true;
+      }
+    }
+    await check('G9: GRN line with itemId different from PO line itemId is rejected with ValidationError', wrongItemRejected);
+
   } catch (err) {
     await check('GRN-PO Link verification unexpected error', false, err instanceof Error ? err.message : String(err));
   } finally {
@@ -256,14 +329,28 @@ async function run() {
         await client.connect();
         await client.query('BEGIN');
         await client.query('ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
+
         await client.query('DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_po_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_purchase_orders WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query(
+          'UPDATE journal_entries SET reversed_by_entry_id = NULL WHERE company_id = ANY($1::uuid[])',
+          [companyIds]
+        );
+        await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_movements WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_balances WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounts WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM inv_items WHERE company_id = ANY($1::uuid[])', [companyIds]);
-        await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM inv_warehouses WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM audit_logs WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM companies WHERE id = ANY($1::uuid[])', [companyIds]);
         if (userIds.length > 0) {
@@ -271,9 +358,12 @@ async function run() {
           await client.query('DELETE FROM platform_users WHERE id = ANY($1::uuid[])', [userIds]);
         }
         await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
         await client.query('COMMIT');
         console.log(`[cleanup] Test companies and link records purged cleanly.`);
       } catch (cleanupErr) {
+        cleanupFailed = true;
         try {
           await client.query('ROLLBACK');
         } catch {}
@@ -286,6 +376,10 @@ async function run() {
   }
 
   const { exitCode } = summary();
+  if (cleanupFailed) {
+    console.error('[cleanup] Cleanup failed. Failing test to prevent silent leakage.');
+    process.exit(1);
+  }
   process.exit(exitCode);
 }
 

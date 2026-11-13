@@ -128,6 +128,22 @@ export class GrnService {
         if (poId && (!lineExt.poLineId || typeof lineExt.poLineId !== 'string')) {
           throw new ValidationError('كافة بنود سند الاستلام المرتبط بأمر شراء تتطلب تحديد بند أمر الشراء (poLineId)');
         }
+        if (poId && lineExt.poLineId) {
+          const poLineQuery = await tx.query<{ poId: string; itemId: string }>(
+            `SELECT po_id as "poId", item_id as "itemId" FROM purch_po_lines WHERE id = $1 AND company_id = $2`,
+            [lineExt.poLineId, companyId]
+          );
+          const poLine = poLineQuery.rows[0];
+          if (!poLine) {
+            throw new ValidationError('بند أمر الشراء المختار غير موجود');
+          }
+          if (poLine.poId !== poId) {
+            throw new ValidationError('بند أمر الشراء لا يتبع أمر الشراء المحدد في السند (خطأ ربط عرضي)');
+          }
+          if (poLine.itemId !== line.itemId) {
+            throw new ValidationError('الصنف في بند سند الاستلام لا يطابق الصنف في بند أمر الشراء');
+          }
+        }
         if (line.unitCost !== undefined && line.unitCost !== null) {
           const rawCost = typeof line.unitCost === 'number' ? line.unitCost : Number(line.unitCost);
           if (!Number.isFinite(rawCost)) {

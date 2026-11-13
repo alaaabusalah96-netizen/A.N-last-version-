@@ -148,5 +148,15 @@
     "table": "custom_field_values",
     "scope": "tenant",
     "reason": "Company-scoped indexed dynamic custom field values per entity record (C6 / migration 034)"
+  },
+  {
+    "table": "purch_purchase_orders",
+    "scope": "tenant",
+    "reason": "Per-company purchase orders header"
+  },
+  {
+    "table": "purch_po_lines",
+    "scope": "tenant",
+    "reason": "Per-company purchase orders item lines"
   }
 ]

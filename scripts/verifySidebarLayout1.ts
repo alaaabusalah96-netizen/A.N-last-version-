@@ -47,16 +47,25 @@ function resolvePlaywright(): any | null {
   return null;
 }
 
-function resolveChromiumExecutable(): string | undefined {
+function resolveChromiumExecutable(pw?: any): string | undefined {
   if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH && fs.existsSync(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH)) {
     return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
   }
   const known = [
     '/ms-playwright/chromium_headless_shell-1247/chrome-headless-shell-linux64/chrome-headless-shell',
+    '/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-linux64/chrome-headless-shell',
     '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell',
   ];
   for (const p of known) {
     if (fs.existsSync(p)) return p;
+  }
+  if (pw && typeof pw.chromium?.executablePath === 'function') {
+    try {
+      const pwPath = pw.chromium.executablePath();
+      if (pwPath && fs.existsSync(pwPath)) {
+        return pwPath;
+      }
+    } catch {}
   }
   return undefined;
 }
@@ -197,7 +206,7 @@ async function main() {
     process.exit(2);
   }
 
-  const executablePath = resolveChromiumExecutable();
+  const executablePath = resolveChromiumExecutable(pw);
   if (!executablePath) {
     console.log('[BLOCKED] Chromium headless binary not found in this environment.');
     process.exit(2);

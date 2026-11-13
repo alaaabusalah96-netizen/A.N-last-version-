@@ -266,7 +266,7 @@ async function run() {
          FROM audit_logs
          WHERE company_id = $1
            AND entity_type = 'purch_purchase_orders'
-           AND entity_id = ANY($2::uuid[])`,
+           AND entity_id = ANY($2::text[])`,
         [compA.id, poIds]
       );
       return res.rows.map((r) => r.action);
