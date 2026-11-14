@@ -38,6 +38,18 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     allowedTypes: ['asset'],
     requirePostable: true,
   },
+  cash_register_gl_account: {
+    field: 'cash_register_gl_account',
+    labelAr: 'حساب النقدية',
+    allowedTypes: ['asset'],
+    requirePostable: true,
+  },
+  custody_expense_account: {
+    field: 'custody_expense_account',
+    labelAr: 'حساب المصروف',
+    allowedTypes: ['expense'],
+    requirePostable: true,
+  },
 };
 
 export function usableAccounts(

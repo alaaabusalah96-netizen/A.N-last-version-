@@ -5,6 +5,7 @@ import { CompaniesPanel } from './components/CompaniesPanel.js';
 import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
 import { InventoryWorkspace } from './components/inventory/InventoryWorkspace.js';
 import { PurchasingWorkspace } from './components/purchasing/PurchasingWorkspace.js';
+import { CashCustodyWorkspace } from './components/cash/CashCustodyWorkspace.js';
 import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
 import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
@@ -20,13 +21,14 @@ interface AuthUser {
   username: string;
   role: string;
   companyId?: string | null;
+  permissions?: string[];
 }
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'cash' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     return window.matchMedia('(min-width: 1024px)').matches;
@@ -38,7 +40,10 @@ export default function App() {
       const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        setCurrentUser(data.user);
+        setCurrentUser({
+          ...(data.user || {}),
+          permissions: Array.isArray(data.permissions) ? data.permissions : [],
+        });
       } else {
         setCurrentUser(null);
       }
@@ -98,7 +103,12 @@ export default function App() {
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 font-sans" dir="rtl">
-        <LoginForm onLoginSuccess={(user) => setCurrentUser(user)} />
+        <LoginForm
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            checkCurrentSession();
+          }}
+        />
       </div>
     );
   }
@@ -111,6 +121,7 @@ export default function App() {
         onNavigate={handleNavigate}
         userName={currentUser.username}
         userRole={currentUser.role}
+        permissions={currentUser.permissions || []}
         onLogout={handleLogout}
         loggingOut={loggingOut}
         isOpen={sidebarOpen}
@@ -141,6 +152,8 @@ export default function App() {
                 ? 'المخزون'
                 : activeNav === 'purchasing'
                 ? 'المشتريات'
+                : activeNav === 'cash'
+                ? 'الخزينة والعهد'
                 : activeNav === 'users'
                 ? 'المستخدمون'
                 : activeNav === 'roles'
@@ -164,6 +177,8 @@ export default function App() {
                 ? 'المستودعات والأصناف والأرصدة والحركات'
                 : activeNav === 'purchasing'
                 ? 'الموردون وسندات استلام البضائع GRN'
+                : activeNav === 'cash'
+                ? 'إدارة الصناديق النقدية وعهد الموظفين والأرصدة المفتوحة'
                 : activeNav === 'users'
                 ? 'إدارة الحسابات وصلاحيات الوصول'
                 : activeNav === 'roles'
@@ -193,6 +208,8 @@ export default function App() {
           <InventoryWorkspace userRole={currentUser.role} />
         ) : activeNav === 'purchasing' ? (
           <PurchasingWorkspace userRole={currentUser.role} />
+        ) : activeNav === 'cash' ? (
+          <CashCustodyWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
         ) : activeNav === 'users' ? (
           <UsersAdminWorkspace />
         ) : activeNav === 'roles' ? (

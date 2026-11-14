@@ -1,11 +1,26 @@
-import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, SlidersHorizontal, Shield, Sliders, X } from 'lucide-react';
+import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, Wallet, SlidersHorizontal, Shield, Sliders, X } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
+type NavKey =
+  | 'companies'
+  | 'accounting'
+  | 'inventory'
+  | 'purchasing'
+  | 'cash'
+  | 'users'
+  | 'roles'
+  | 'company_settings'
+  | 'custom_fields'
+  | 'org_units'
+  | 'config_platform'
+  | 'config_definitions';
+
 interface AppSidebarProps {
-  activeNav: 'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions';
-  onNavigate: (nav: 'companies' | 'accounting' | 'inventory' | 'purchasing' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions') => void;
+  activeNav: NavKey;
+  onNavigate: (nav: NavKey) => void;
   userName: string;
   userRole: string;
+  permissions?: string[];
   onLogout: () => void;
   loggingOut?: boolean;
   isOpen?: boolean;
@@ -17,6 +32,7 @@ export function AppSidebar({
   onNavigate,
   userName,
   userRole,
+  permissions = [],
   onLogout,
   loggingOut,
   isOpen = true,
@@ -128,6 +144,23 @@ export function AppSidebar({
           <ShoppingBag className="w-4 h-4 shrink-0" />
           <span>المشتريات</span>
         </button>
+
+        {(userRole === 'platform_admin' ||
+          userRole === 'company_admin' ||
+          permissions.length === 0 ||
+          permissions.includes('cash:read')) && (
+          <button
+            onClick={() => onNavigate('cash')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeNav === 'cash'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 border border-indigo-500/30'
+                : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <Wallet className="w-4 h-4 shrink-0" />
+            <span>الخزينة والعهد</span>
+          </button>
+        )}
 
         <button
           onClick={() => onNavigate('users')}

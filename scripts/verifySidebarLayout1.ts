@@ -15,6 +15,7 @@ const ALL_TABS: TabSpec[] = [
   { key: 'accounting', label: 'المحاسبة', title: 'المحاسبة' },
   { key: 'inventory', label: 'المخزون', title: 'المخزون' },
   { key: 'purchasing', label: 'المشتريات', title: 'المشتريات' },
+  { key: 'cash', label: 'الخزينة والعهد', title: 'الخزينة والعهد' },
   { key: 'users', label: 'المستخدمون', title: 'المستخدمون' },
   { key: 'roles', label: 'الأدوار والصلاحيات', title: 'الأدوار والصلاحيات' },
   { key: 'org_units', label: 'الوحدات التنظيمية', title: 'الوحدات التنظيمية' },
@@ -124,6 +125,12 @@ async function installSessionShim(page: any) {
           'roles.write',
           'config.read',
           'config.write',
+          'cash:read',
+          'cash:write',
+          'custody:request',
+          'custody:approve',
+          'custody:disburse',
+          'custody:settle',
         ],
         memberships: [],
       });
@@ -157,8 +164,9 @@ async function installSessionShim(page: any) {
       return json({
         status: 'ok',
         accounts: [
-          { id: 'acc-1', companyId: sampleCompany.id, code: '1101', name: 'الصندوق الرئيسي', type: 'asset', isActive: true },
-          { id: 'acc-2', companyId: sampleCompany.id, code: '2101', name: 'الموردون', type: 'liability', isActive: true },
+          { id: 'acc-1', companyId: sampleCompany.id, code: '1101', name: 'الصندوق الرئيسي', nameAr: 'الصندوق الرئيسي', type: 'asset', accountType: 'asset', isPostable: true, isActive: true },
+          { id: 'acc-2', companyId: sampleCompany.id, code: '2101', name: 'الموردون', nameAr: 'الموردون', type: 'liability', accountType: 'liability', isPostable: true, isActive: true },
+          { id: 'acc-3', companyId: sampleCompany.id, code: '5101', name: 'مصروفات عمومية', nameAr: 'مصروفات عمومية', type: 'expense', accountType: 'expense', isPostable: true, isActive: true },
         ],
       });
     }
@@ -176,6 +184,27 @@ async function installSessionShim(page: any) {
     }
     if (pathname.startsWith('/api/purchasing/')) {
       return json({ status: 'ok', suppliers: [], receipts: [], grns: [] });
+    }
+    if (pathname === '/api/cash/registers') {
+      return json({ status: 'ok', registers: [] });
+    }
+    if (pathname.startsWith('/api/cash/registers/') && pathname.endsWith('/balance')) {
+      return json({
+        status: 'ok',
+        balance: { registerId: 'reg-1', openingBalance: 0, totalIn: 0, totalOut: 0, currentBalance: 0 },
+      });
+    }
+    if (pathname === '/api/cash/custodies/employees') {
+      return json({ status: 'ok', employees: [] });
+    }
+    if (pathname.startsWith('/api/cash/custodies/') && pathname.endsWith('/movements')) {
+      return json({ status: 'ok', movements: [] });
+    }
+    if (pathname.startsWith('/api/cash/custodies')) {
+      return json({ status: 'ok', custodies: [] });
+    }
+    if (pathname === '/api/cash/reports/open-custodies') {
+      return json({ status: 'ok', summary: [] });
     }
     if (pathname === '/api/users') {
       return json({
