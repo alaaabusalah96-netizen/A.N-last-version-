@@ -12,6 +12,8 @@ import { defaultWarehouseService } from '../src/server/inventory/warehouseServic
 import { defaultItemService } from '../src/server/inventory/itemService.js';
 import { defaultPurchaseOrderService } from '../src/server/purchasing/purchaseOrderService.js';
 import { defaultGrnService } from '../src/server/purchasing/grnService.js';
+import { defaultAccountService } from '../src/server/accounting/accountService.js';
+import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
 
 console.log('========================================================================');
@@ -29,6 +31,37 @@ function assertLoopbackUrl(raw: string, varName: string): URL {
     throw new Error(`${varName} host '${parsed.hostname}' is not loopback. Refusing destructive test run.`);
   }
   return parsed;
+}
+
+async function wirePurchasingGl(companyId: string, actorId: string, tag: string) {
+  const inv = await defaultAccountService.createAccount(
+    companyId,
+    {
+      code: `INV-${tag}`.slice(0, 20),
+      nameAr: 'حساب مخزون (اختبار)',
+      accountType: 'asset',
+      isPostable: true,
+    },
+    actorId
+  );
+  const clr = await defaultAccountService.createAccount(
+    companyId,
+    {
+      code: `CLR-${tag}`.slice(0, 20),
+      nameAr: 'مشتريات معلقة (اختبار)',
+      accountType: 'liability',
+      isPostable: true,
+    },
+    actorId
+  );
+  await defaultCompanySettingsRepository.upsert(
+    companyId,
+    {
+      inventoryAccountId: inv.id,
+      purchasesClearingAccountId: clr.id,
+    },
+    actorId
+  );
 }
 
 async function run() {
@@ -102,6 +135,9 @@ async function run() {
       createdBy: userB.id,
     });
     companyIds.push(compA.id, compB.id);
+
+    await wirePurchasingGl(compA.id, userA.id, `A${unique}`);
+    await wirePurchasingGl(compB.id, userB.id, `B${unique}`);
 
     const supplierA = await defaultSupplierService.createSupplier(
       compA.id,
