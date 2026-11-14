@@ -158,5 +158,20 @@
     "table": "purch_po_lines",
     "scope": "tenant",
     "reason": "Per-company purchase orders item lines"
+  },
+  {
+    "table": "cash_registers",
+    "scope": "tenant",
+    "reason": "Per-company cash registers and treasury master"
+  },
+  {
+    "table": "custody_records",
+    "scope": "tenant",
+    "reason": "Per-company employee cash custody records"
+  },
+  {
+    "table": "custody_movements",
+    "scope": "tenant",
+    "reason": "Per-company cash custody register movements"
   }
 ]

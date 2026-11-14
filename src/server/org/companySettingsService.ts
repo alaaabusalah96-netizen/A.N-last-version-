@@ -47,6 +47,22 @@ export class CompanySettingsService {
         if (!account) throw new ValidationError('Invalid purchases clearing account');
       }
 
+      if (typeof input.custodyReceivableAccountId === 'string' && input.custodyReceivableAccountId.trim() !== '') {
+        const account = await defaultAccountRepository.findById(companyId, input.custodyReceivableAccountId, tx);
+        if (!account) {
+          throw new ValidationError('حساب ذمة عهد الموظفين غير موجود في دليل الحسابات');
+        }
+        if (!account.isActive) {
+          throw new ValidationError('حساب ذمة عهد الموظفين غير نشط');
+        }
+        if (!account.isPostable) {
+          throw new ValidationError('حساب ذمة عهد الموظفين يجب أن يكون حساباً فرعياً قابلاً للترحيل');
+        }
+        if (account.accountType !== 'asset') {
+          throw new ValidationError('حساب ذمة عهد الموظفين يجب أن يكون من نوع الأصول (asset)');
+        }
+      }
+
       const settings = await this.repo.upsert(companyId, input, actorId, tx);
 
       await defaultAuditService.record({

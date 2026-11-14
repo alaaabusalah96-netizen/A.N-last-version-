@@ -59,6 +59,7 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [inventoryAccountId, setInventoryAccountId] = useState<string>('');
   const [purchasesClearingAccountId, setPurchasesClearingAccountId] = useState<string>('');
+  const [custodyReceivableAccountId, setCustodyReceivableAccountId] = useState<string>('');
 
   // Resolve Preview State
   const [resolvedConfig, setResolvedConfig] = useState<ResolvedConfig | null>(null);
@@ -140,10 +141,12 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
     loadDefinitions();
   }, []);
 
-  // Load COA accounts when grn_mapping is selected
+  const STRUCTURED_KEYS = ['accounting.grn_mapping', 'accounting.custody_mapping'];
+
+  // Load COA accounts when structured accounting keys are selected
   useEffect(() => {
     async function loadAccounts() {
-      if (!selectedCompanyId || selectedKey !== 'accounting.grn_mapping') return;
+      if (!selectedCompanyId || !STRUCTURED_KEYS.includes(selectedKey)) return;
       try {
         const res = await apiFetch(`/api/accounting/accounts?companyId=${selectedCompanyId}`);
         if (res.ok) {
@@ -199,6 +202,8 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
           if (selectedKey === 'accounting.grn_mapping') {
             setInventoryAccountId(typeof content.inventory_account_id === 'string' ? content.inventory_account_id : '');
             setPurchasesClearingAccountId(typeof content.purchases_clearing_account_id === 'string' ? content.purchases_clearing_account_id : '');
+          } else if (selectedKey === 'accounting.custody_mapping') {
+            setCustodyReceivableAccountId(typeof content.custody_receivable_account_id === 'string' ? content.custody_receivable_account_id : '');
           }
         }
       }
@@ -245,6 +250,16 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
     setJsonError(null);
   };
 
+  // Handle Form Change for custody_receivable_account_id
+  const handleCustodyReceivableAccountChange = (acctId: string) => {
+    setCustodyReceivableAccountId(acctId);
+    const obj = {
+      custody_receivable_account_id: acctId,
+    };
+    setDraftContent(JSON.stringify(obj, null, 2));
+    setJsonError(null);
+  };
+
   // Handle Textarea JSON Change (Form <-> JSON Sync)
   const handleJsonTextareaChange = (raw: string) => {
     setDraftContent(raw);
@@ -254,6 +269,8 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       if (selectedKey === 'accounting.grn_mapping' && typeof parsed === 'object' && parsed !== null) {
         setInventoryAccountId(typeof parsed.inventory_account_id === 'string' ? parsed.inventory_account_id : '');
         setPurchasesClearingAccountId(typeof parsed.purchases_clearing_account_id === 'string' ? parsed.purchases_clearing_account_id : '');
+      } else if (selectedKey === 'accounting.custody_mapping' && typeof parsed === 'object' && parsed !== null) {
+        setCustodyReceivableAccountId(typeof parsed.custody_receivable_account_id === 'string' ? parsed.custody_receivable_account_id : '');
       }
     } catch {
       setJsonError('محتوى المسودة غير مطابق لصيغة JSON الصحيحة');
@@ -265,6 +282,11 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
       return {
         inventory_account_id: inventoryAccountId,
         purchases_clearing_account_id: purchasesClearingAccountId,
+      };
+    }
+    if (selectedKey === 'accounting.custody_mapping') {
+      return {
+        custody_receivable_account_id: custodyReceivableAccountId,
       };
     }
     try {
@@ -319,6 +341,10 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
         parsed = {
           inventory_account_id: inventoryAccountId,
           purchases_clearing_account_id: purchasesClearingAccountId,
+        };
+      } else if (selectedKey === 'accounting.custody_mapping') {
+        parsed = {
+          custody_receivable_account_id: custodyReceivableAccountId,
         };
       }
 
@@ -553,6 +579,15 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
                         </span>
                       </div>
                     </div>
+                  ) : selectedKey === 'accounting.custody_mapping' ? (
+                    <div className="flex flex-col sm:flex-row gap-4 text-xs font-sans">
+                      <div>
+                        <span className="text-slate-400">حساب ذمة عهد الموظفين: </span>
+                        <span className="text-white font-semibold font-mono">
+                          {String(resolvedConfig.content?.custody_receivable_account_id || 'غير محدد')}
+                        </span>
+                      </div>
+                    </div>
                   ) : (
                     <pre className="whitespace-pre-wrap">{JSON.stringify(resolvedConfig.content, null, 2)}</pre>
                   )}
@@ -747,8 +782,69 @@ export function ConfigPlatformPanel({ userRole }: ConfigPlatformPanelProps) {
             </div>
           )}
 
+          {/* Dedicated Structured Form for accounting.custody_mapping */}
+          {selectedKey === 'accounting.custody_mapping' && (
+            <div className="bg-slate-950 border border-indigo-500/20 rounded-xl p-4 flex flex-col gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-indigo-950/30 border border-indigo-500/20 text-[11px] text-indigo-200">
+                <span>هذا الإعداد متاح أيضًا في إعدادات الشركة (القسم المالي)</span>
+                <a
+                  href="#/companies"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (typeof window !== 'undefined') {
+                      window.location.hash = '#/companies';
+                      const sidebarButtons = Array.from(document.querySelectorAll('aside button'));
+                      const compBtn = sidebarButtons.find((b) => b.textContent?.includes('الشركات'));
+                      if (compBtn instanceof HTMLButtonElement) compBtn.click();
+                    }
+                  }}
+                  className="font-bold text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                >
+                  فتح شاشة إعدادات الشركة
+                </a>
+              </div>
+
+              <h5 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5" />
+                <span>إعداد ربط عهد الموظفين بالدليل المحاسبي (Custody Mapping Form)</span>
+              </h5>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-300">حساب ذمة عهد الموظفين (custody_receivable_account_id):</label>
+                <select
+                  value={custodyReceivableAccountId}
+                  onChange={(e) => handleCustodyReceivableAccountChange(e.target.value)}
+                  disabled={!canWrite || loadingConfig}
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">-- اختر حساب ذمة عهد الموظفين --</option>
+                  {usableAccounts(accounts, 'custody_receivable_account_id').map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.code} - {acc.nameAr}
+                    </option>
+                  ))}
+                </select>
+                {fieldErrors['custody_receivable_account_id'] && (
+                  <p className="text-red-400 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{fieldErrors['custody_receivable_account_id']}</span>
+                  </p>
+                )}
+                {!isUsable(custodyReceivableAccountId, accounts, 'custody_receivable_account_id') && (
+                  <p className="text-amber-400 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      الحساب المختار غير صالح لدور حساب ذمة عهد الموظفين (لازم يكون حساباً فرعياً من نوع أصول وقابلاً للترحيل).
+                      النشر هيرفضه من الخادم.
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Advanced JSON Editor in Collapsible Details */}
-          <details className="group border border-slate-800 rounded-xl bg-slate-950 p-3" open={selectedKey !== 'accounting.grn_mapping'}>
+          <details className="group border border-slate-800 rounded-xl bg-slate-950 p-3" open={selectedKey !== 'accounting.grn_mapping' && selectedKey !== 'accounting.custody_mapping'}>
             <summary className="text-xs font-bold text-slate-300 cursor-pointer flex items-center justify-between select-none">
               <span>تحرير JSON متقدم (Advanced JSON)</span>
               <span className="text-[10px] text-slate-500 group-open:rotate-180 transition-transform">▼</span>

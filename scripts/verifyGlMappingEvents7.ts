@@ -255,7 +255,7 @@ async function run() {
     }
     return keys;
   };
-  const before033 = migFiles.filter((f) => !f.startsWith('033_'));
+  const before033 = migFiles.filter((f) => f < '033_');
   const upTo033 = migFiles.filter((f) => f <= '033_~');
   const seededBefore033 = extractSeededKeys(before033);
   const seededAfter033 = extractSeededKeys(upTo033);

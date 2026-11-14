@@ -32,6 +32,12 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     allowedTypes: ['liability'],
     requirePostable: true,
   },
+  custody_receivable_account_id: {
+    field: 'custody_receivable_account_id',
+    labelAr: 'حساب ذمة عهد الموظفين',
+    allowedTypes: ['asset'],
+    requirePostable: true,
+  },
 };
 
 export function usableAccounts(

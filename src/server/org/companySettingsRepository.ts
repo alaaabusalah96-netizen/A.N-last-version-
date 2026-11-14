@@ -17,6 +17,7 @@ export class CompanySettingsRepository {
           locale,
           inventory_account_id as "inventoryAccountId",
           purchases_clearing_account_id as "purchasesClearingAccountId",
+          custody_receivable_account_id as "custodyReceivableAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -40,6 +41,7 @@ export class CompanySettingsRepository {
           locale, 
           inventory_account_id,
           purchases_clearing_account_id,
+          custody_receivable_account_id,
           updated_at, 
           updated_by
         )
@@ -53,6 +55,7 @@ export class CompanySettingsRepository {
           COALESCE($7, 'ar-EG'), 
           $9,
           $10,
+          $13,
           NOW(), 
           $8
         )
@@ -65,6 +68,7 @@ export class CompanySettingsRepository {
           locale = COALESCE(EXCLUDED.locale, company_settings.locale),
           inventory_account_id = CASE WHEN $11 THEN EXCLUDED.inventory_account_id ELSE company_settings.inventory_account_id END,
           purchases_clearing_account_id = CASE WHEN $12 THEN EXCLUDED.purchases_clearing_account_id ELSE company_settings.purchases_clearing_account_id END,
+          custody_receivable_account_id = CASE WHEN $14 THEN EXCLUDED.custody_receivable_account_id ELSE company_settings.custody_receivable_account_id END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -77,6 +81,7 @@ export class CompanySettingsRepository {
           locale,
           inventory_account_id as "inventoryAccountId",
           purchases_clearing_account_id as "purchasesClearingAccountId",
+          custody_receivable_account_id as "custodyReceivableAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -93,7 +98,9 @@ export class CompanySettingsRepository {
         input.inventoryAccountId === undefined ? null : input.inventoryAccountId,
         input.purchasesClearingAccountId === undefined ? null : input.purchasesClearingAccountId,
         input.inventoryAccountId !== undefined,
-        input.purchasesClearingAccountId !== undefined
+        input.purchasesClearingAccountId !== undefined,
+        input.custodyReceivableAccountId === undefined ? null : input.custodyReceivableAccountId,
+        input.custodyReceivableAccountId !== undefined,
       ]);
 
       return res.rows[0];

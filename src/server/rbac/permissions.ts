@@ -49,6 +49,14 @@ export const PERMISSIONS = {
   // Dynamic Roles & Permissions management
   ROLES_READ: 'roles.read',
   ROLES_WRITE: 'roles.write',
+
+  // Cash Registers & Employee Custody (الخزينة والعهد)
+  CASH_READ: 'cash:read',
+  CASH_WRITE: 'cash:write',
+  CUSTODY_REQUEST: 'custody:request',
+  CUSTODY_APPROVE: 'custody:approve',
+  CUSTODY_DISBURSE: 'custody:disburse',
+  CUSTODY_SETTLE: 'custody:settle',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;
@@ -56,7 +64,7 @@ export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | st
 export interface PermissionCatalogItem {
   code: PermissionCode;
   labelAr: string;
-  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المنظمة' | 'الإعدادات' | 'الأدوار';
+  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة';
 }
 
 export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
@@ -100,4 +108,12 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   // الأدوار
   { code: PERMISSIONS.ROLES_READ, labelAr: 'عرض الأدوار ومصفوفة الصلاحيات', group: 'الأدوار' },
   { code: PERMISSIONS.ROLES_WRITE, labelAr: 'إنشاء وتعديل الأدوار وتعيين الصلاحيات', group: 'الأدوار' },
+
+  // الخزينة
+  { code: PERMISSIONS.CASH_READ, labelAr: 'عرض الخزائن والصناديق والأرصدة', group: 'الخزينة' },
+  { code: PERMISSIONS.CASH_WRITE, labelAr: 'إنشاء وتعديل الخزائن والصناديق', group: 'الخزينة' },
+  { code: PERMISSIONS.CUSTODY_REQUEST, labelAr: 'طلب عهدة نقدية', group: 'الخزينة' },
+  { code: PERMISSIONS.CUSTODY_APPROVE, labelAr: 'اعتماد ورفض طلبات العهد', group: 'الخزينة' },
+  { code: PERMISSIONS.CUSTODY_DISBURSE, labelAr: 'صرف العهد النقدية وترحيلها', group: 'الخزينة' },
+  { code: PERMISSIONS.CUSTODY_SETTLE, labelAr: 'تسوية وإغلاق العهد النقدية', group: 'الخزينة' },
 ];

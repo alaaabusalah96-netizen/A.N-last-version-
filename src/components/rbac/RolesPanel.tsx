@@ -14,6 +14,10 @@ import {
 import { apiFetch } from '../../lib/apiClient.js';
 import { DynamicRole, PermissionMatrix } from './PermissionMatrix.js';
 
+// مجموعة «الخزينة» (cash:read, cash:write, custody:request, custody:approve, custody:disburse, custody:settle)
+// تُحمّل ديناميكيًا عبر PermissionMatrix من GET /api/rbac/permissions (المبني على PERMISSION_CATALOG)
+// وتُحفظ مباشرة عبر PUT /api/companies/:id/roles/:roleId/permissions
+
 interface Company {
   id: string;
   code: string;

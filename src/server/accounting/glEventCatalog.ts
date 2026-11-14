@@ -32,6 +32,16 @@ export const GL_EVENT_CATALOG: readonly GlEventDefinition[] = [
       { field: 'purchases_clearing_account_id', labelAr: 'حساب المشتريات المعلّقة', allowedTypes: ['liability'], requirePostable: true },
     ],
   },
+  {
+    eventKey: 'accounting.custody_mapping',
+    eventCode: 'custody_disbursement',
+    labelAr: 'عهد الموظفين (صرف وتسوية)',
+    status: 'wired',
+    wiringPoint: 'src/server/cash/custodyService.ts#disburseCustody',
+    fields: [
+      { field: 'custody_receivable_account_id', labelAr: 'حساب ذمة عهد الموظفين', allowedTypes: ['asset'], requirePostable: true },
+    ],
+  },
   // العمليات التالية **معلنة بلا مسار ترحيل** في 616ebf9. لا تُفعّل إلا بحزمة
   // أعمال تنفّذ cycle الترحيل فعليًا. status='not_implemented' معناها:
   // لا شاشة، لا إعداد، لا تعريف إعداد مزروع.

@@ -8,6 +8,7 @@ export interface CompanySettings {
   locale?: string | null;
   inventoryAccountId?: string | null;
   purchasesClearingAccountId?: string | null;
+  custodyReceivableAccountId?: string | null;
   updatedAt: string;
   updatedBy?: string | null;
 }
@@ -21,4 +22,5 @@ export interface UpsertCompanySettingsInput {
   locale?: string | null;
   inventoryAccountId?: string | null;
   purchasesClearingAccountId?: string | null;
+  custodyReceivableAccountId?: string | null;
 }

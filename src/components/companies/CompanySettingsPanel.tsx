@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, Save, RefreshCw, AlertCircle, CheckCircle, Globe, DollarSign, Clock, Calendar } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { usableAccounts } from '../../lib/accountRules.js';
 
 interface Company {
   id: string;
@@ -17,6 +18,7 @@ interface CompanySettings {
   locale: string | null;
   inventoryAccountId: string | null;
   purchasesClearingAccountId: string | null;
+  custodyReceivableAccountId: string | null;
 }
 
 interface CompanySettingsPanelProps {
@@ -288,6 +290,25 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
                 >
                   <option value="">— غير محدد —</option>
                   {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Custody Receivable Account */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                  حساب ذمة عهد الموظفين
+                </label>
+                <select
+                  value={settings.custodyReceivableAccountId || ''}
+                  onChange={(e) => updateField('custodyReceivableAccountId', e.target.value || null)}
+                  disabled={isReadOnly}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">— غير محدد —</option>
+                  {usableAccounts(accounts, 'custody_receivable_account_id').map((a) => (
                     <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
                   ))}
                 </select>
