@@ -50,6 +50,18 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     allowedTypes: ['expense'],
     requirePostable: true,
   },
+  voucher_receipt_contra_account: {
+    field: 'voucher_receipt_contra_account',
+    labelAr: 'الحساب الطرف لسند القبض',
+    allowedTypes: ['asset', 'revenue', 'liability', 'equity'],
+    requirePostable: true,
+  },
+  voucher_payment_contra_account: {
+    field: 'voucher_payment_contra_account',
+    labelAr: 'الحساب الطرف لسند الصرف',
+    allowedTypes: ['expense', 'liability', 'asset'],
+    requirePostable: true,
+  },
 };
 
 export function usableAccounts(

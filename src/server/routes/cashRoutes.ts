@@ -3,7 +3,9 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultCashRegisterService } from '../cash/cashRegisterService.js';
 import { defaultCustodyService } from '../cash/custodyService.js';
+import { defaultVoucherService } from '../cash/voucherService.js';
 import { CustodyStatus } from '../cash/cashTypes.js';
+import { VoucherStatus } from '../cash/voucherTypes.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -378,4 +380,227 @@ cashRoutes.get(
     res.json({ status: 'ok', summary });
   })
 );
+
+// Register Movements Report (حركة الصندوق)
+cashRoutes.get(
+  '/reports/register-movements',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const registerId = typeof req.query.registerId === 'string' ? req.query.registerId : '';
+    const from = typeof req.query.from === 'string' && req.query.from ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' && req.query.to ? req.query.to : undefined;
+    const report = await defaultVoucherService.getRegisterMovementsReport(companyId, {
+      registerId,
+      from,
+      to,
+    });
+    res.json({ status: 'ok', report });
+  })
+);
+
+// Employee Custody Movements Report (تفصيل حركات عهدة الموظف)
+cashRoutes.get(
+  '/reports/custody-by-employee',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const employeeUserId = typeof req.query.employeeUserId === 'string' ? req.query.employeeUserId : '';
+    const movements = await defaultVoucherService.getEmployeeCustodyMovements(companyId, employeeUserId);
+    res.json({ status: 'ok', movements });
+  })
+);
+
+// ============================================================================
+// Receipt & Payment Vouchers (سندات القبض والصرف)
+// ============================================================================
+
+cashRoutes.get(
+  '/receipt-vouchers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const status = typeof req.query.status === 'string' && req.query.status ? (req.query.status as VoucherStatus) : undefined;
+    const registerId = typeof req.query.registerId === 'string' && req.query.registerId ? req.query.registerId : undefined;
+    const from = typeof req.query.from === 'string' && req.query.from ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' && req.query.to ? req.query.to : undefined;
+    const vouchers = await defaultVoucherService.listVouchers('receipt', companyId, {
+      status,
+      registerId,
+      from,
+      to,
+    });
+    res.json({ status: 'ok', vouchers });
+  })
+);
+
+cashRoutes.post(
+  '/receipt-vouchers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const voucher = await defaultVoucherService.createReceiptVoucher(companyId, req.body || {}, user.id);
+    res.status(201).json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.get(
+  '/receipt-vouchers/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف سند القبض غير صالح');
+    }
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const voucher = await defaultVoucherService.getVoucher('receipt', companyId, id);
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/receipt-vouchers/:id/post',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف سند القبض غير صالح');
+    }
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const voucher = await defaultVoucherService.postReceiptVoucher(
+      companyId,
+      id,
+      user.id,
+      user.role === 'platform_admin'
+    );
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/receipt-vouchers/:id/cancel',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف سند القبض غير صالح');
+    }
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const voucher = await defaultVoucherService.cancelVoucher(
+      'receipt',
+      companyId,
+      id,
+      user.id,
+      req.body?.reason ?? null
+    );
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.get(
+  '/payment-vouchers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const status = typeof req.query.status === 'string' && req.query.status ? (req.query.status as VoucherStatus) : undefined;
+    const registerId = typeof req.query.registerId === 'string' && req.query.registerId ? req.query.registerId : undefined;
+    const from = typeof req.query.from === 'string' && req.query.from ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' && req.query.to ? req.query.to : undefined;
+    const vouchers = await defaultVoucherService.listVouchers('payment', companyId, {
+      status,
+      registerId,
+      from,
+      to,
+    });
+    res.json({ status: 'ok', vouchers });
+  })
+);
+
+cashRoutes.post(
+  '/payment-vouchers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const voucher = await defaultVoucherService.createPaymentVoucher(companyId, req.body || {}, user.id);
+    res.status(201).json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.get(
+  '/payment-vouchers/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف سند الصرف غير صالح');
+    }
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const voucher = await defaultVoucherService.getVoucher('payment', companyId, id);
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/payment-vouchers/:id/post',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف سند الصرف غير صالح');
+    }
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const voucher = await defaultVoucherService.postPaymentVoucher(
+      companyId,
+      id,
+      user.id,
+      user.role === 'platform_admin'
+    );
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/payment-vouchers/:id/cancel',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف سند الصرف غير صالح');
+    }
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const voucher = await defaultVoucherService.cancelVoucher(
+      'payment',
+      companyId,
+      id,
+      user.id,
+      req.body?.reason ?? null
+    );
+    res.json({ status: 'ok', voucher });
+  })
+);
+
 

@@ -42,6 +42,17 @@ export const GL_EVENT_CATALOG: readonly GlEventDefinition[] = [
       { field: 'custody_receivable_account_id', labelAr: 'حساب ذمة عهد الموظفين', allowedTypes: ['asset'], requirePostable: true },
     ],
   },
+  {
+    // ملاحظة معمارية: fields فارغة عمدًا لأن سندات القبض والصرف تأخذ حساب الصندوق
+    // من cash_registers.gl_account_id والحساب الطرف من voucher.contra_account_id مباشرةً،
+    // ولا تستدعي GlMappingService.resolve لهذا الحدث؛ وجوده بحالة wired لتوثيق مسار الترحيل وتتبّعه فقط.
+    eventKey: 'accounting.cash_voucher_mapping',
+    eventCode: 'cash_voucher',
+    labelAr: 'سندات القبض والصرف',
+    status: 'wired',
+    wiringPoint: 'src/server/cash/voucherService.ts#postReceiptVoucher',
+    fields: [],
+  },
   // العمليات التالية **معلنة بلا مسار ترحيل** في 616ebf9. لا تُفعّل إلا بحزمة
   // أعمال تنفّذ cycle الترحيل فعليًا. status='not_implemented' معناها:
   // لا شاشة، لا إعداد، لا تعريف إعداد مزروع.

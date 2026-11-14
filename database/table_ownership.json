@@ -173,5 +173,15 @@
     "table": "custody_movements",
     "scope": "tenant",
     "reason": "Per-company cash custody register movements"
+  },
+  {
+    "table": "cash_receipt_vouchers",
+    "scope": "tenant",
+    "reason": "Per-company cash receipt vouchers posted directly to cash registers and GL"
+  },
+  {
+    "table": "cash_payment_vouchers",
+    "scope": "tenant",
+    "reason": "Per-company general cash payment vouchers posted directly from cash registers and GL"
   }
 ]

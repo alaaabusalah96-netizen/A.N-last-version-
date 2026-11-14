@@ -206,6 +206,27 @@ async function installSessionShim(page: any) {
     if (pathname === '/api/cash/reports/open-custodies') {
       return json({ status: 'ok', summary: [] });
     }
+    if (pathname === '/api/cash/reports/register-movements') {
+      return json({
+        status: 'ok',
+        report: {
+          registerId: 'reg-1',
+          registerCode: 'CASH-01',
+          registerNameAr: 'الخزينة الرئيسية',
+          openingBalance: 0,
+          totalIn: 0,
+          totalOut: 0,
+          closingBalance: 0,
+          rows: [],
+        },
+      });
+    }
+    if (pathname === '/api/cash/reports/custody-by-employee') {
+      return json({ status: 'ok', movements: [] });
+    }
+    if (pathname.startsWith('/api/cash/receipt-vouchers') || pathname.startsWith('/api/cash/payment-vouchers')) {
+      return json({ status: 'ok', vouchers: [] });
+    }
     if (pathname === '/api/users') {
       return json({
         status: 'ok',

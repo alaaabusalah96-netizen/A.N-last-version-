@@ -271,11 +271,28 @@ export class CashRegisterRepository {
     const run = async (executor: DbExecutor) => {
       const sql = `
         SELECT
-          COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0)::numeric as "totalIn",
-          COALESCE(SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END), 0)::numeric as "totalOut",
-          COALESCE(SUM(CASE direction WHEN 'in' THEN amount WHEN 'out' THEN -amount ELSE 0 END), 0)::numeric as "netMovement"
-        FROM custody_movements
-        WHERE company_id = $1 AND register_id = $2;
+          COALESCE(SUM(in_amt), 0)::numeric as "totalIn",
+          COALESCE(SUM(out_amt), 0)::numeric as "totalOut",
+          COALESCE(SUM(in_amt - out_amt), 0)::numeric as "netMovement"
+        FROM (
+          SELECT
+            CASE WHEN direction = 'in' THEN amount ELSE 0 END as in_amt,
+            CASE WHEN direction = 'out' THEN amount ELSE 0 END as out_amt
+          FROM custody_movements
+          WHERE company_id = $1 AND register_id = $2
+          UNION ALL
+          SELECT
+            amount as in_amt,
+            0::numeric as out_amt
+          FROM cash_receipt_vouchers
+          WHERE company_id = $1 AND register_id = $2 AND status = 'posted'
+          UNION ALL
+          SELECT
+            0::numeric as in_amt,
+            amount as out_amt
+          FROM cash_payment_vouchers
+          WHERE company_id = $1 AND register_id = $2 AND status = 'posted'
+        ) unified_cash_flow;
       `;
       const res = await executor.query<{ totalIn: string | number; totalOut: string | number; netMovement: string | number }>(sql, [companyId, registerId]);
       const row = res.rows[0];

@@ -138,6 +138,17 @@ async function installSessionShim(page: any, getProfile: () => ShimProfile) {
       isActive: true,
     },
     {
+      id: 'acc-rev-1',
+      companyId: sampleCompany.id,
+      code: '4101',
+      name: 'إيرادات مبيعات نقدية',
+      nameAr: 'إيرادات مبيعات نقدية',
+      type: 'revenue',
+      accountType: 'revenue',
+      isPostable: true,
+      isActive: true,
+    },
+    {
       id: 'acc-nonpost-1',
       companyId: sampleCompany.id,
       code: '1000',
@@ -373,6 +384,93 @@ async function installSessionShim(page: any, getProfile: () => ShimProfile) {
     ],
   };
 
+  const receiptVouchers: any[] = [
+    {
+      id: 'rcv-draft-1',
+      companyId: sampleCompany.id,
+      kind: 'receipt',
+      voucherNo: null,
+      registerId: 'reg-1',
+      registerCode: 'CASH-01',
+      registerNameAr: 'الخزينة الرئيسية',
+      voucherDate: '2026-02-11',
+      amount: 1200,
+      contraAccountId: 'acc-rev-1',
+      contraAccountCode: '4101',
+      contraAccountNameAr: 'إيرادات مبيعات نقدية',
+      status: 'draft',
+      memo: 'مسودة سند قبض نقدي',
+      reference: 'CRV-REF-1',
+      journalEntryId: null,
+      journalEntryNo: null,
+      createdAt: '2026-02-11T09:00:00.000Z',
+    },
+    {
+      id: 'rcv-posted-1',
+      companyId: sampleCompany.id,
+      kind: 'receipt',
+      voucherNo: 'CRV-0001',
+      registerId: 'reg-1',
+      registerCode: 'CASH-01',
+      registerNameAr: 'الخزينة الرئيسية',
+      voucherDate: '2026-02-10',
+      amount: 850,
+      contraAccountId: 'acc-rev-1',
+      contraAccountCode: '4101',
+      contraAccountNameAr: 'إيرادات مبيعات نقدية',
+      status: 'posted',
+      memo: 'تحصيل مبيعات نقدية',
+      reference: 'INV-881',
+      journalEntryId: 'je-rcv-1',
+      journalEntryNo: 'JE-2026-0044',
+      createdAt: '2026-02-10T10:00:00.000Z',
+    },
+  ];
+
+  const paymentVouchers: any[] = [
+    {
+      id: 'pay-over-1',
+      companyId: sampleCompany.id,
+      kind: 'payment',
+      voucherNo: null,
+      registerId: 'reg-1',
+      registerCode: 'CASH-01',
+      registerNameAr: 'الخزينة الرئيسية',
+      voucherDate: '2026-02-12',
+      amount: 99000,
+      contraAccountId: 'acc-exp-1',
+      contraAccountCode: '5101',
+      contraAccountNameAr: 'مصروفات ضيافة ونقل',
+      status: 'draft',
+      memo: 'سند صرف يتجاوز رصيد الصندوق',
+      reference: 'PAY-ERR-1',
+      journalEntryId: null,
+      journalEntryNo: null,
+      createdAt: '2026-02-12T08:00:00.000Z',
+    },
+    {
+      id: 'pay-posted-1',
+      companyId: sampleCompany.id,
+      kind: 'payment',
+      voucherNo: 'CPV-0001',
+      registerId: 'reg-1',
+      registerCode: 'CASH-01',
+      registerNameAr: 'الخزينة الرئيسية',
+      voucherDate: '2026-02-09',
+      amount: 350,
+      contraAccountId: 'acc-exp-1',
+      contraAccountCode: '5101',
+      contraAccountNameAr: 'مصروفات ضيافة ونقل',
+      status: 'posted',
+      memo: 'سداد فاتورة ضيافة',
+      reference: 'BILL-19',
+      journalEntryId: 'je-pay-1',
+      journalEntryNo: 'JE-2026-0042',
+      createdAt: '2026-02-09T14:00:00.000Z',
+    },
+  ];
+
+  let voucherSeq = 2;
   let jeSeq = 50;
 
   await page.route('**/api/**', async (route: any) => {
@@ -697,6 +795,190 @@ async function installSessionShim(page: any, getProfile: () => ShimProfile) {
       return json({ status: 'ok', summary: Array.from(map.values()) });
     }
 
+    if (pathname === '/api/cash/reports/register-movements' && method === 'GET') {
+      const regId = url.searchParams.get('registerId') || 'reg-1';
+      const reg = registers.find((r) => r.id === regId) || registers[0];
+      const bal = registerBalances[reg.id] || { openingBalance: 10000, totalIn: 850, totalOut: 850, currentBalance: 10000 };
+      const rows = [
+        {
+          id: 'rep-mov-1',
+          sourceType: 'receipt_voucher',
+          movementLabelAr: 'سند قبض',
+          movementDate: '2026-02-10',
+          inAmount: 850,
+          outAmount: 0,
+          reference: 'INV-881',
+          actorUsername: 'company_admin_verify',
+          journalEntryId: 'je-rcv-1',
+          journalEntryNo: 'JE-2026-0044',
+          memo: 'تحصيل مبيعات نقدية',
+        },
+        {
+          id: 'rep-mov-2',
+          sourceType: 'payment_voucher',
+          movementLabelAr: 'سند صرف',
+          movementDate: '2026-02-09',
+          inAmount: 0,
+          outAmount: 350,
+          reference: 'BILL-19',
+          actorUsername: 'company_admin_verify',
+          journalEntryId: 'je-pay-1',
+          journalEntryNo: 'JE-2026-0042',
+          memo: 'سداد فاتورة ضيافة',
+        },
+        {
+          id: 'rep-mov-3',
+          sourceType: 'custody_disburse',
+          movementLabelAr: 'صرف عهدة',
+          movementDate: '2026-02-03',
+          inAmount: 0,
+          outAmount: 500,
+          reference: 'CUS-0003',
+          actorUsername: 'usr-admin-1',
+          journalEntryId: 'je-disb-3',
+          journalEntryNo: 'JE-2026-0041',
+          memo: 'صرف عهدة مأمورية',
+        },
+      ];
+      return json({
+        status: 'ok',
+        report: {
+          registerId: reg.id,
+          registerCode: reg.code,
+          registerNameAr: reg.nameAr,
+          openingBalance: bal.openingBalance,
+          totalIn: 850,
+          totalOut: 850,
+          closingBalance: bal.currentBalance,
+          rows,
+        },
+      });
+    }
+
+    if (pathname === '/api/cash/reports/custody-by-employee' && method === 'GET') {
+      const empId = url.searchParams.get('employeeUserId') || 'usr-emp-1';
+      const empMovs: any[] = [];
+      for (const c of custodies) {
+        if (c.employeeUserId !== empId) continue;
+        for (const m of movementsByCustodyId[c.id] || []) {
+          empMovs.push({
+            id: m.id,
+            custodyId: c.id,
+            custodyNo: c.custodyNo,
+            custodyStatus: c.status,
+            registerCode: c.registerCode || 'CASH-01',
+            registerNameAr: c.registerNameAr || 'الخزينة الرئيسية',
+            movementType: m.movementType,
+            movementLabelAr:
+              m.movementType === 'disburse'
+                ? 'صرف عهدة'
+                : m.movementType === 'settle_expense'
+                ? 'تسوية مصروف عهدة'
+                : 'مرتجع نقدي من عهدة',
+            direction: m.direction,
+            amount: m.amount,
+            expenseAccountCode: m.expenseAccountCode || null,
+            expenseAccountNameAr: m.expenseAccountNameAr || null,
+            journalEntryNo: m.journalEntryNo || 'JE-2026-0041',
+            memo: m.memo || null,
+            createdAt: m.createdAt,
+          });
+        }
+      }
+      return json({ status: 'ok', movements: empMovs });
+    }
+
+    // Receipt & Payment Vouchers
+    if ((pathname === '/api/cash/receipt-vouchers' || pathname === '/api/cash/payment-vouchers') && method === 'GET') {
+      const isReceipt = pathname.includes('receipt-vouchers');
+      return json({ status: 'ok', vouchers: isReceipt ? receiptVouchers : paymentVouchers });
+    }
+
+    if ((pathname === '/api/cash/receipt-vouchers' || pathname === '/api/cash/payment-vouchers') && method === 'POST') {
+      if (!hasPerm('cash:write')) {
+        return json({ status: 'error', message: 'صلاحية غير كافية: يتطلب (cash:write)' }, 403);
+      }
+      const isReceipt = pathname.includes('receipt-vouchers');
+      const b = parseBody();
+      const reg = registers.find((r) => r.id === b.registerId);
+      const acc = accounts.find((a) => a.id === b.contraAccountId);
+      const list = isReceipt ? receiptVouchers : paymentVouchers;
+      const created = {
+        id: `${isReceipt ? 'rcv' : 'pay'}-new-${voucherSeq++}`,
+        companyId: sampleCompany.id,
+        kind: isReceipt ? 'receipt' : 'payment',
+        voucherNo: null,
+        registerId: b.registerId,
+        registerCode: reg?.code || 'CASH-01',
+        registerNameAr: reg?.nameAr || 'الخزينة الرئيسية',
+        voucherDate: b.voucherDate || '2026-02-12',
+        amount: Number(b.amount || 0),
+        contraAccountId: b.contraAccountId,
+        contraAccountCode: acc?.code || '4101',
+        contraAccountNameAr: acc?.nameAr || 'حساب طرف',
+        status: 'draft',
+        memo: b.memo || null,
+        reference: b.reference || null,
+        journalEntryId: null,
+        journalEntryNo: null,
+        createdAt: new Date().toISOString(),
+      };
+      list.unshift(created);
+      return json({ status: 'ok', voucher: created }, 201);
+    }
+
+    const vchActMatch = pathname.match(/^\/api\/cash\/(receipt|payment)-vouchers\/([^/]+)\/(post|cancel)$/);
+    if (vchActMatch && method === 'POST') {
+      if (!hasPerm('cash:write')) {
+        return json({ status: 'error', message: 'صلاحية غير كافية: يتطلب (cash:write)' }, 403);
+      }
+      const [, kindSlug, id, act] = vchActMatch;
+      const isReceipt = kindSlug === 'receipt';
+      const list = isReceipt ? receiptVouchers : paymentVouchers;
+      const target = list.find((v) => v.id === id);
+      if (!target) return json({ status: 'error', message: 'السند غير موجود' }, 404);
+      if (act === 'cancel') {
+        if (target.status === 'posted') {
+          return json(
+            {
+              status: 'error',
+              message: 'لا يمكن إلغاء سند مرحّل لوجود قيد محاسبي مرتبط به — يرجى استخدام العكس المحاسبي المعتمد (JournalService.reverseEntry)',
+            },
+            400
+          );
+        }
+        target.status = 'cancelled';
+        return json({ status: 'ok', voucher: target });
+      }
+      // post action
+      if (!isReceipt) {
+        const bal = registerBalances[target.registerId]?.currentBalance ?? 0;
+        if (bal < Number(target.amount)) {
+          return json(
+            {
+              status: 'error',
+              message: `رصيد الصندوق (${target.registerNameAr}) غير كافٍ للصرف: الرصيد المتاح ${bal.toFixed(2)}، والمطلوب ${Number(target.amount).toFixed(2)}`,
+            },
+            400
+          );
+        }
+      }
+      target.status = 'posted';
+      target.voucherNo = target.voucherNo || `${isReceipt ? 'CRV' : 'CPV'}-${String(voucherSeq++).padStart(4, '0')}`;
+      target.journalEntryId = `je-vch-${jeSeq}`;
+      target.journalEntryNo = `JE-2026-00${jeSeq++}`;
+      if (registerBalances[target.registerId]) {
+        if (isReceipt) {
+          registerBalances[target.registerId].totalIn += Number(target.amount);
+          registerBalances[target.registerId].currentBalance += Number(target.amount);
+        } else {
+          registerBalances[target.registerId].totalOut += Number(target.amount);
+          registerBalances[target.registerId].currentBalance -= Number(target.amount);
+        }
+      }
+      return json({ status: 'ok', voucher: target });
+    }
+
     // Config Platform definitions & structured form endpoints (U18)
     if (pathname === '/api/config/definitions') {
       return json({
@@ -893,6 +1175,7 @@ async function main() {
 
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
+  let expectingIntentionalHttpError = false;
   let browserPassed = 0;
 
   let currentProfile: ShimProfile = {
@@ -908,7 +1191,11 @@ async function main() {
     page.on('console', (msg: any) => {
       if (msg.type() === 'error') {
         const text = msg.text();
-        if (!text.includes('WebSocket') && !text.includes('hmr')) {
+        if (
+          !text.includes('WebSocket') &&
+          !text.includes('hmr') &&
+          !(expectingIntentionalHttpError && text.includes('Failed to load resource'))
+        ) {
           consoleErrors.push(text);
         }
       }
@@ -1206,7 +1493,162 @@ async function main() {
     assert((await cus1Row.getAttribute('data-custody-status')) === 'settled', 'M4: CUS-0001 transitioned open -> settled');
     assert(pageErrors.length === 0, 'M1..M5: Zero uncaught page errors during interactive lifecycle');
 
-    console.log(`\n[PASS] verifyCashCustodyUi1 COMPLETE: Static ${staticCount}/7 | Browser ${browserPassed}/14 (U8..U21) | M1..M5 verified`);
+    // =========================================================================
+    // WP-7b: Vouchers & Register Movements & Employee Custody Detail (T1..T10)
+    // =========================================================================
+    console.log('\n=== WP-7b Browser Verification T1..T10 ===');
+    let tPassed = 0;
+
+    // Reset console/page error buffers for T1..T10 strict tracking
+    consoleErrors.length = 0;
+    pageErrors.length = 0;
+
+    // T1: Tabs «سندات» & «حركة صندوق» visible inside tablist after the 3 base tabs and clickable
+    const tabLabels = await page.locator('[role="tablist"] [role="tab"]').allTextContents();
+    const trimmedLabels = tabLabels.map((s: string) => s.trim());
+    const idxOpenBal = trimmedLabels.indexOf('أرصدة العهد المفتوحة');
+    const idxVouchers = trimmedLabels.indexOf('سندات');
+    const idxMovements = trimmedLabels.indexOf('حركة صندوق');
+    assert(
+      idxOpenBal === 2 && idxVouchers === 3 && idxMovements === 4,
+      `T1: Tabs "سندات" & "حركة صندوق" visible after 3 base tabs (${trimmedLabels.join(' | ')})`
+    );
+    tPassed++; // T1
+
+    // T2: Clicking «سندات» renders «سندات قبض»/«سندات صرف» toggle & switching changes heading/table rows
+    await page.locator('[role="tab"]', { hasText: /^سندات$/ }).click();
+    await page.waitForTimeout(250);
+    const receiptToggle = page.locator('button:has-text("سندات قبض")');
+    const paymentToggle = page.locator('button:has-text("سندات صرف")');
+    assert((await receiptToggle.isVisible()) && (await paymentToggle.isVisible()), 'T2: Receipt/Payment toggle buttons visible');
+    const headingBefore = (await page.locator('[data-testid="vouchers-heading"]').textContent())?.trim() || '';
+    assert(headingBefore.includes('القبض'), `T2: Initial heading shows receipt vouchers ("${headingBefore}")`);
+    assert(await page.locator('[data-testid="vouchers-table"] tbody tr:has-text("CRV-0001")').isVisible(), 'T2: Receipt voucher row CRV-0001 visible');
+
+    await paymentToggle.click();
+    await page.waitForTimeout(200);
+    const headingAfter = (await page.locator('[data-testid="vouchers-heading"]').textContent())?.trim() || '';
+    assert(headingAfter.includes('الصرف'), `T2: Switched heading shows payment vouchers ("${headingAfter}")`);
+    assert(await page.locator('[data-testid="vouchers-table"] tbody tr:has-text("CPV-0001")').isVisible(), 'T2: Payment voucher row CPV-0001 visible');
+    await receiptToggle.click();
+    await page.waitForTimeout(200);
+    tPassed++; // T2
+
+    // T3: Vouchers table shows 7 data columns + «رقم القيد» and non-empty cells
+    const vchHeaders = await page.locator('[data-testid="vouchers-table"] thead th').allTextContents();
+    const expectedVchCols = ['رقم السند', 'التاريخ', 'النوع', 'الصندوق', 'الطرف', 'المبلغ', 'الحالة', 'رقم القيد'];
+    const allVchColsPresent = expectedVchCols.every((col) => vchHeaders.some((h: string) => h.includes(col)));
+    const firstPostedCells = await page.locator('[data-testid="vouchers-table"] tbody tr[data-voucher-status="posted"] td').allTextContents();
+    const nonEmptyCells = firstPostedCells.slice(0, 8).every((c: string) => c.trim().length > 0);
+    assert(allVchColsPresent && nonEmptyCells, `T3: Vouchers table headers & non-empty cells verified (${vchHeaders.join(' | ')})`);
+    tPassed++; // T3
+
+    // T4: «سند جديد» opens modal with all 7 inputs & non-empty contraAccountId options from shim
+    await page.locator('button:has-text("سند جديد")').click();
+    await page.waitForTimeout(200);
+    const vModal = page.locator('[data-testid="create-voucher-modal"]');
+    await vModal.waitFor({ state: 'visible', timeout: 5000 });
+    const has7Inputs =
+      (await vModal.locator('select[name="voucherKind"]').isVisible()) &&
+      (await vModal.locator('input[name="voucherDate"]').isVisible()) &&
+      (await vModal.locator('select[name="voucherRegisterId"]').isVisible()) &&
+      (await vModal.locator('input[name="voucherAmount"]').isVisible()) &&
+      (await vModal.locator('select[name="contraAccountId"]').isVisible()) &&
+      (await vModal.locator('input[name="voucherReference"]').isVisible()) &&
+      (await vModal.locator('input[name="voucherMemo"]').isVisible());
+    const contraOpts = await vModal.locator('select[name="contraAccountId"] option').allTextContents();
+    assert(
+      has7Inputs && contraOpts.some((t: string) => t.includes('4101')),
+      `T4: New voucher modal renders all 7 fields & contraAccountId options (${contraOpts.join(' | ')})`
+    );
+    await vModal.locator('button:has-text("إلغاء")').click();
+    await page.waitForTimeout(150);
+    tPassed++; // T4
+
+    // T5: draft row displays «ترحيل» & «إلغاء»; posted row displays neither
+    const draftVoucherRow = page.locator('[data-testid="vouchers-table"] tbody tr[data-voucher-status="draft"]').first();
+    const postedVoucherRow = page.locator('[data-testid="vouchers-table"] tbody tr[data-voucher-status="posted"]').first();
+    assert(
+      (await draftVoucherRow.locator('button:has-text("ترحيل")').isVisible()) &&
+        (await draftVoucherRow.locator('button:has-text("إلغاء")').isVisible()) &&
+        (await postedVoucherRow.locator('button:has-text("ترحيل")').count()) === 0 &&
+        (await postedVoucherRow.locator('button:has-text("إلغاء")').count()) === 0,
+      'T5: Draft voucher row shows ترحيل & إلغاء while posted row hides both'
+    );
+    tPassed++; // T5
+
+    // T6: posted row displays «العكس المحاسبي» hint & journal entry link/number
+    const postedRowText = (await postedVoucherRow.textContent()) || '';
+    const jeLinkVisible = await postedVoucherRow.locator('a:has-text("JE-")').isVisible();
+    assert(
+      postedRowText.includes('العكس المحاسبي') && jeLinkVisible,
+      `T6: Posted voucher row displays العكس المحاسبي hint and JE link ("${postedRowText}")`
+    );
+    tPassed++; // T6
+
+    // T7: «حركة صندوق» shows register selector, from/to dates, and 7-column table with non-empty values
+    await page.locator('[role="tab"]', { hasText: /^حركة صندوق$/ }).click();
+    await page.waitForTimeout(300);
+    const movFilterVisible =
+      (await page.locator('select[name="movementRegisterId"]').isVisible()) &&
+      (await page.locator('input[name="movementFrom"]').isVisible()) &&
+      (await page.locator('input[name="movementTo"]').isVisible());
+    const movHeaders = await page.locator('[data-testid="register-movements-table"] thead th').allTextContents();
+    const expectedMovCols = ['التاريخ', 'النوع', 'الوارد', 'الصادر', 'المرجع', 'المستخدم', 'رقم القيد'];
+    const allMovColsPresent = expectedMovCols.every((c) => movHeaders.some((h: string) => h.includes(c)));
+    const firstMovRowCells = await page.locator('[data-testid="register-movements-table"] tbody tr').first().locator('td').allTextContents();
+    const movRowNonEmpty = firstMovRowCells.length === 7 && firstMovRowCells.every((c: string) => c.trim().length > 0);
+    assert(
+      movFilterVisible && allMovColsPresent && movRowNonEmpty,
+      `T7: Register movements filter bar & 7 columns verified (${firstMovRowCells.join(' | ')})`
+    );
+    tPassed++; // T7
+
+    // T8: «تفصيل الموظف» button on «أرصدة العهد المفتوحة» opens modal with employee custody movements table
+    await page.locator('[role="tab"]', { hasText: /^أرصدة العهد المفتوحة$/ }).click();
+    await page.waitForTimeout(250);
+    const empDetailBtn = page.locator('button:has-text("تفصيل الموظف")').first();
+    await empDetailBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await empDetailBtn.click();
+    await page.waitForTimeout(300);
+    const empModal = page.locator('[data-testid="employee-custody-modal"]');
+    await empModal.waitFor({ state: 'visible', timeout: 5000 });
+    const empTableRows = await empModal.locator('[data-testid="employee-custody-table"] tbody tr').count();
+    const empModalText = (await empModal.textContent()) || '';
+    assert(
+      empTableRows > 0 && empModalText.includes('CUS-'),
+      `T8: Employee detail modal displays custody movements table (${empTableRows} rows)`
+    );
+    await empModal.locator('button:has-text("إغلاق")').click();
+    await page.waitForTimeout(150);
+    tPassed++; // T8
+
+    // T9: Posting draft payment voucher exceeding register balance returns Arabic 400 -> rendered verbatim inside vouchers alert
+    await page.locator('[role="tab"]', { hasText: /^سندات$/ }).click();
+    await page.waitForTimeout(200);
+    await page.locator('button:has-text("سندات صرف")').click();
+    await page.waitForTimeout(200);
+    expectingIntentionalHttpError = true;
+    await page.locator('[data-testid="vouchers-table"] tbody tr[data-voucher-status="draft"] button:has-text("ترحيل")').first().click();
+    await page.waitForTimeout(300);
+    expectingIntentionalHttpError = false;
+    const voucherErrText = (await page.locator('[data-testid="vouchers-inline-error"]').textContent()) || '';
+    assert(
+      voucherErrText.includes('رصيد الصندوق') && voucherErrText.includes('غير كافٍ'),
+      `T9: Server Arabic error rendered verbatim inside vouchers inline alert ("${voucherErrText}")`
+    );
+    tPassed++; // T9
+
+    // T10: Zero console.error & zero pageerror across T1..T9
+    assert(
+      consoleErrors.length === 0 && pageErrors.length === 0,
+      `T10: Zero console.error (${consoleErrors.join('; ')}) and zero pageerror (${pageErrors.join('; ')}) across T1..T9`
+    );
+    tPassed++; // T10
+
+    console.log(
+      `\n[PASS] verifyCashCustodyUi1 COMPLETE: Static ${staticCount}/7 | Browser ${browserPassed}/14 (U8..U21) | M1..M5 verified | Vouchers & Reports T1..T10: ${tPassed}/10`
+    );
   } finally {
     await browser.close();
   }

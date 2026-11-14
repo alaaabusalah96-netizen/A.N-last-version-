@@ -13,6 +13,8 @@ import {
   Edit3,
   Power,
   Eye,
+  FileText,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountOption, usableAccounts } from '../../lib/accountRules.js';
@@ -112,12 +114,79 @@ interface OpenCustodyEmployeeSummary {
   totalAmount: number;
 }
 
+type VoucherKind = 'receipt' | 'payment';
+type VoucherStatus = 'draft' | 'posted' | 'cancelled';
+
+interface CashVoucherItem {
+  id: string;
+  companyId: string;
+  kind: VoucherKind;
+  voucherNo: string | null;
+  registerId: string;
+  registerCode?: string | null;
+  registerNameAr?: string | null;
+  voucherDate: string;
+  amount: number;
+  contraAccountId: string;
+  contraAccountCode?: string | null;
+  contraAccountNameAr?: string | null;
+  status: VoucherStatus;
+  memo: string | null;
+  reference: string | null;
+  journalEntryId: string | null;
+  journalEntryNo?: string | null;
+  createdAt: string;
+}
+
+interface RegisterMovementReportRow {
+  id: string;
+  sourceType: string;
+  movementLabelAr: string;
+  movementDate: string;
+  inAmount: number;
+  outAmount: number;
+  reference: string;
+  actorUsername: string;
+  journalEntryId: string | null;
+  journalEntryNo: string;
+  memo: string | null;
+}
+
+interface RegisterMovementReportData {
+  registerId: string;
+  registerCode: string;
+  registerNameAr: string;
+  openingBalance: number;
+  totalIn: number;
+  totalOut: number;
+  closingBalance: number;
+  rows: RegisterMovementReportRow[];
+}
+
+interface EmployeeCustodyMovementItem {
+  id: string;
+  custodyId: string;
+  custodyNo: string;
+  custodyStatus: string;
+  registerCode: string;
+  registerNameAr: string;
+  movementType: string;
+  movementLabelAr: string;
+  direction: string;
+  amount: number;
+  expenseAccountCode: string | null;
+  expenseAccountNameAr: string | null;
+  journalEntryNo: string;
+  memo: string | null;
+  createdAt: string;
+}
+
 export interface CashCustodyWorkspaceProps {
   userRole: string;
   permissions: string[];
 }
 
-type CashTabKey = 'registers' | 'custodies' | 'open_balances';
+type CashTabKey = 'registers' | 'custodies' | 'open_balances' | 'vouchers' | 'register_movements';
 
 const TABS: Array<{
   key: CashTabKey;
@@ -127,7 +196,21 @@ const TABS: Array<{
   { key: 'registers', label: 'الصناديق', icon: Landmark },
   { key: 'custodies', label: 'العهد', icon: Receipt },
   { key: 'open_balances', label: 'أرصدة العهد المفتوحة', icon: Users },
+  { key: 'vouchers', label: 'سندات', icon: FileText },
+  { key: 'register_movements', label: 'حركة صندوق', icon: ArrowLeftRight },
 ];
+
+const VOUCHER_STATUS_LABELS: Record<VoucherStatus, string> = {
+  draft: 'مسودة',
+  posted: 'مرحّل',
+  cancelled: 'ملغى',
+};
+
+const VOUCHER_STATUS_STYLES: Record<VoucherStatus, string> = {
+  draft: 'text-amber-300',
+  posted: 'text-emerald-300',
+  cancelled: 'text-slate-400',
+};
 
 const CUSTODY_STATUS_LABELS: Record<CustodyStatus, string> = {
   pending: 'قيد الانتظار',
@@ -231,6 +314,34 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
   const [detailMovements, setDetailMovements] = useState<CustodyMovement[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // Vouchers state (سندات قبض / سندات صرف)
+  const [voucherKindToggle, setVoucherKindToggle] = useState<VoucherKind>('receipt');
+  const [receiptVouchers, setReceiptVouchers] = useState<CashVoucherItem[]>([]);
+  const [paymentVouchers, setPaymentVouchers] = useState<CashVoucherItem[]>([]);
+  const [voucherInlineError, setVoucherInlineError] = useState<string | null>(null);
+
+  const [showCreateVoucherModal, setShowCreateVoucherModal] = useState(false);
+  const [vchKind, setVchKind] = useState<VoucherKind>('receipt');
+  const [vchDate, setVchDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [vchRegisterId, setVchRegisterId] = useState('');
+  const [vchAmount, setVchAmount] = useState('');
+  const [vchContraAccountId, setVchContraAccountId] = useState('');
+  const [vchReference, setVchReference] = useState('');
+  const [vchMemo, setVchMemo] = useState('');
+  const [vchModalError, setVchModalError] = useState<string | null>(null);
+
+  // Register Movements Report state (حركة صندوق)
+  const [movRegisterId, setMovRegisterId] = useState('');
+  const [movFrom, setMovFrom] = useState('');
+  const [movTo, setMovTo] = useState('');
+  const [movReport, setMovReport] = useState<RegisterMovementReportData | null>(null);
+  const [loadingMovReport, setLoadingMovReport] = useState(false);
+
+  // Employee Custody Detail Modal (تفصيل الموظف)
+  const [empDetailTarget, setEmpDetailTarget] = useState<OpenCustodyEmployeeSummary | null>(null);
+  const [empDetailRows, setEmpDetailRows] = useState<EmployeeCustodyMovementItem[]>([]);
+  const [loadingEmpDetail, setLoadingEmpDetail] = useState(false);
+
   // WP-6: fail-open للعرض فقط عند غياب القائمة؛ الحكم النهائي للخادم
   const can = useCallback(
     (perm: string): boolean => {
@@ -283,13 +394,15 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
         apiFetch(`/api/cash/custodies?${custodyParams.toString()}`),
         apiFetch(`/api/cash/reports/open-custodies?companyId=${encodeURIComponent(selectedCompanyId)}`),
         apiFetch(`/api/accounting/accounts?companyId=${encodeURIComponent(selectedCompanyId)}`),
+        apiFetch(`/api/cash/receipt-vouchers?companyId=${encodeURIComponent(selectedCompanyId)}`),
+        apiFetch(`/api/cash/payment-vouchers?companyId=${encodeURIComponent(selectedCompanyId)}`),
       ];
 
       if (can('custody:request')) {
         reqs.push(apiFetch(`/api/cash/custodies/employees?companyId=${encodeURIComponent(selectedCompanyId)}`));
       }
 
-      const [regRes, cusRes, openRes, accRes, empRes] = await Promise.all(reqs);
+      const [regRes, cusRes, openRes, accRes, rcvRes, payRes, empRes] = await Promise.all(reqs);
 
       if (!regRes.ok) {
         const errBody = await regRes.json().catch(() => ({}));
@@ -299,6 +412,9 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
       const regBody = await regRes.json();
       const loadedRegisters: CashRegister[] = regBody.registers || [];
       setRegisters(loadedRegisters);
+      if (loadedRegisters.length > 0 && !movRegisterId) {
+        setMovRegisterId(loadedRegisters[0].id);
+      }
 
       // Fetch balances directly from server API per register (never calculated client-side)
       const balancePairs = await Promise.all(
@@ -341,6 +457,16 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
         setAccounts(accBody.accounts || []);
       }
 
+      if (rcvRes.ok) {
+        const rcvBody = await rcvRes.json();
+        setReceiptVouchers(rcvBody.vouchers || []);
+      }
+
+      if (payRes.ok) {
+        const payBody = await payRes.json();
+        setPaymentVouchers(payBody.vouchers || []);
+      }
+
       if (empRes && empRes.ok) {
         const empBody = await empRes.json();
         setEmployees(empBody.employees || []);
@@ -350,7 +476,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
     } finally {
       setLoading(false);
     }
-  }, [selectedCompanyId, filterStatus, filterEmployeeId, filterRegisterId, filterFrom, filterTo, can]);
+  }, [selectedCompanyId, filterStatus, filterEmployeeId, filterRegisterId, filterFrom, filterTo, can, movRegisterId]);
 
   useEffect(() => {
     loadData();
@@ -628,6 +754,146 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
 
   const registerGlOptions = usableAccounts(accounts, 'cash_register_gl_account');
   const expenseAccountOptions = usableAccounts(accounts, 'custody_expense_account');
+  const selectedVoucherRegister = registers.find((r) => r.id === vchRegisterId);
+  const voucherContraOptions = usableAccounts(
+    accounts,
+    vchKind === 'receipt' ? 'voucher_receipt_contra_account' : 'voucher_payment_contra_account'
+  ).filter((a) => !selectedVoucherRegister || a.id !== selectedVoucherRegister.glAccountId);
+
+  const loadRegisterMovements = useCallback(async () => {
+    if (!selectedCompanyId || !movRegisterId) {
+      setMovReport(null);
+      return;
+    }
+    setLoadingMovReport(true);
+    try {
+      const qs = new URLSearchParams({
+        companyId: selectedCompanyId,
+        registerId: movRegisterId,
+      });
+      if (movFrom) qs.set('from', movFrom);
+      if (movTo) qs.set('to', movTo);
+      const res = await apiFetch(`/api/cash/reports/register-movements?${qs.toString()}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.message || errBody.error || 'تعذر تحميل تقرير حركة الصندوق');
+      }
+      const data = await res.json();
+      setMovReport(data.report || null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'تعذر تحميل تقرير حركة الصندوق');
+    } finally {
+      setLoadingMovReport(false);
+    }
+  }, [selectedCompanyId, movRegisterId, movFrom, movTo]);
+
+  useEffect(() => {
+    if (activeTab === 'register_movements') {
+      loadRegisterMovements();
+    }
+  }, [activeTab, loadRegisterMovements]);
+
+  const openNewVoucherModal = () => {
+    setVchKind(voucherKindToggle);
+    setVchDate(new Date().toISOString().slice(0, 10));
+    setVchRegisterId(registers.find((r) => r.isActive)?.id || '');
+    setVchAmount('');
+    setVchContraAccountId('');
+    setVchReference('');
+    setVchMemo('');
+    setVchModalError(null);
+    setShowCreateVoucherModal(true);
+  };
+
+  const handleCreateVoucher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!can('cash:write')) return;
+    setActionLoading(true);
+    setVchModalError(null);
+    setVoucherInlineError(null);
+    setError(null);
+    setSuccess(null);
+    try {
+      const endpoint = vchKind === 'receipt' ? '/api/cash/receipt-vouchers' : '/api/cash/payment-vouchers';
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({
+          companyId: selectedCompanyId,
+          registerId: vchRegisterId,
+          voucherDate: vchDate || undefined,
+          amount: Number(vchAmount),
+          contraAccountId: vchContraAccountId,
+          reference: vchReference.trim() || undefined,
+          memo: vchMemo.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'تعذر حفظ مسودة السند');
+
+      setShowCreateVoucherModal(false);
+      setVoucherKindToggle(vchKind);
+      setSuccess(`تم حفظ مسودة ${vchKind === 'receipt' ? 'سند القبض' : 'سند الصرف'} بنجاح`);
+      await loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء حفظ السند';
+      setVchModalError(msg);
+      setError(msg);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleVoucherAction = async (voucher: CashVoucherItem, action: 'post' | 'cancel') => {
+    if (!can('cash:write')) return;
+    setActionLoading(true);
+    setVoucherInlineError(null);
+    setError(null);
+    setSuccess(null);
+    try {
+      const base = voucher.kind === 'receipt' ? '/api/cash/receipt-vouchers' : '/api/cash/payment-vouchers';
+      const res = await apiFetch(`${base}/${voucher.id}/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ companyId: selectedCompanyId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'تعذر تنفيذ العملية على السند');
+
+      const vNo = data.voucher?.voucherNo || voucher.voucherNo || '';
+      setSuccess(
+        action === 'post'
+          ? `تم ترحيل السند (${vNo}) وإنشاء القيد المحاسبي (${data.voucher?.journalEntryNo || ''}) بنجاح`
+          : `تم إلغاء مسودة السند بنجاح`
+      );
+      await loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء تنفيذ العملية على السند';
+      setVoucherInlineError(msg);
+      setError(msg);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openEmployeeDetailModal = async (summaryRow: OpenCustodyEmployeeSummary) => {
+    setEmpDetailTarget(summaryRow);
+    setEmpDetailRows([]);
+    setLoadingEmpDetail(true);
+    try {
+      const res = await apiFetch(
+        `/api/cash/reports/custody-by-employee?companyId=${encodeURIComponent(selectedCompanyId)}&employeeUserId=${encodeURIComponent(summaryRow.employeeUserId)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setEmpDetailRows(data.movements || []);
+      }
+    } catch {
+      // keep modal open cleanly
+    } finally {
+      setLoadingEmpDetail(false);
+    }
+  };
+
+  const displayedVouchers = voucherKindToggle === 'receipt' ? receiptVouchers : paymentVouchers;
 
   return (
     <div className="flex flex-col gap-6" dir="rtl">
@@ -1042,18 +1308,19 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                   <th className="py-3.5 px-4">الموظف</th>
                   <th className="py-3.5 px-4">عدد العهد</th>
                   <th className="py-3.5 px-4">إجمالي المبلغ</th>
+                  <th className="py-3.5 px-4 text-center">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {loading && openSummary.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-12 text-center text-slate-400">
+                    <td colSpan={4} className="py-12 text-center text-slate-400">
                       جاري تحميل أرصدة العهد المفتوحة...
                     </td>
                   </tr>
                 ) : openSummary.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-12 text-center text-slate-500">
+                    <td colSpan={4} className="py-12 text-center text-slate-500">
                       لا توجد عهد مفتوحة على الموظفين حالياً
                     </td>
                   </tr>
@@ -1067,11 +1334,318 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                       <td className="py-3.5 px-4 font-mono tabular-nums text-emerald-300 font-bold">
                         {Number(row.totalAmount).toFixed(2)}
                       </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => openEmployeeDetailModal(row)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg text-[11px] font-bold transition cursor-pointer whitespace-nowrap shrink-0"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>تفصيل الموظف</span>
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Receipt & Payment Vouchers (سندات) */}
+      {activeTab === 'vouchers' && (
+        <div data-testid="vouchers-section" className="flex flex-col gap-4">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2" role="group" aria-label="نوع السندات">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoucherKindToggle('receipt');
+                  setVoucherInlineError(null);
+                }}
+                aria-pressed={voucherKindToggle === 'receipt'}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
+                  voucherKindToggle === 'receipt'
+                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                سندات قبض
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVoucherKindToggle('payment');
+                  setVoucherInlineError(null);
+                }}
+                aria-pressed={voucherKindToggle === 'payment'}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
+                  voucherKindToggle === 'payment'
+                    ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20'
+                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                سندات صرف
+              </button>
+              <span data-testid="vouchers-heading" className="text-xs font-bold text-slate-300 mr-2">
+                {voucherKindToggle === 'receipt' ? 'سجل سندات القبض النقدية' : 'سجل سندات الصرف النقدية'}
+              </span>
+            </div>
+
+            {can('cash:write') && (
+              <button
+                type="button"
+                onClick={openNewVoucherModal}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>سند جديد</span>
+              </button>
+            )}
+          </div>
+
+          {voucherInlineError && (
+            <div
+              role="alert"
+              data-testid="vouchers-inline-error"
+              className="p-3.5 bg-red-950/50 border border-red-700/70 rounded-xl text-red-200 text-xs flex items-center gap-2"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{voucherInlineError}</span>
+            </div>
+          )}
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="overflow-x-auto">
+              <table data-testid="vouchers-table" className="w-full text-right text-xs">
+                <thead>
+                  <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                    <th className="py-3.5 px-4">رقم السند</th>
+                    <th className="py-3.5 px-4">التاريخ</th>
+                    <th className="py-3.5 px-4">النوع</th>
+                    <th className="py-3.5 px-4">الصندوق</th>
+                    <th className="py-3.5 px-4">الطرف</th>
+                    <th className="py-3.5 px-4">المبلغ</th>
+                    <th className="py-3.5 px-4">الحالة</th>
+                    <th className="py-3.5 px-4">رقم القيد</th>
+                    <th className="py-3.5 px-4 text-center">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                  {loading && displayedVouchers.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-400">
+                        جاري تحميل السندات...
+                      </td>
+                    </tr>
+                  ) : displayedVouchers.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-500">
+                        لا توجد {voucherKindToggle === 'receipt' ? 'سندات قبض' : 'سندات صرف'} مسجلة بعد
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedVouchers.map((v) => {
+                      const regDisplay = v.registerCode
+                        ? `${v.registerCode} · ${v.registerNameAr || ''}`
+                        : v.registerNameAr || v.registerId;
+                      const contraDisplay = v.contraAccountCode
+                        ? `${v.contraAccountCode} - ${v.contraAccountNameAr || ''}`
+                        : v.contraAccountId;
+                      return (
+                        <tr key={v.id} data-voucher-status={v.status} className="hover:bg-slate-800/30 transition">
+                          <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-indigo-300">
+                            {v.voucherNo || `مسودة-${v.id.slice(0, 6)}`}
+                          </td>
+                          <td className="py-3.5 px-4 font-mono tabular-nums text-slate-300">{v.voucherDate}</td>
+                          <td className="py-3.5 px-4 font-medium text-white">
+                            {v.kind === 'receipt' ? 'قبض' : 'صرف'}
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-300">{regDisplay}</td>
+                          <td className="py-3.5 px-4 text-slate-300">{contraDisplay}</td>
+                          <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-emerald-300">
+                            {Number(v.amount).toFixed(2)}
+                          </td>
+                          <td className={`py-3.5 px-4 font-semibold ${VOUCHER_STATUS_STYLES[v.status]}`}>
+                            {VOUCHER_STATUS_LABELS[v.status] || v.status}
+                          </td>
+                          <td className="py-3.5 px-4 font-mono tabular-nums">
+                            {v.journalEntryNo ? (
+                              <a
+                                href={`#journal-entry-${v.journalEntryId || v.journalEntryNo}`}
+                                onClick={(e) => e.preventDefault()}
+                                className="text-sky-300 hover:underline font-semibold"
+                              >
+                                {v.journalEntryNo}
+                              </a>
+                            ) : (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            {v.status === 'draft' && can('cash:write') ? (
+                              <div className="inline-flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={actionLoading}
+                                  onClick={() => handleVoucherAction(v, 'post')}
+                                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                                >
+                                  ترحيل
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={actionLoading}
+                                  onClick={() => handleVoucherAction(v, 'cancel')}
+                                  className="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                                >
+                                  إلغاء
+                                </button>
+                              </div>
+                            ) : v.status === 'posted' ? (
+                              <span className="text-[11px] text-slate-400">
+                                للتصحيح استخدم العكس المحاسبي
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 5: Register Movements Report (حركة صندوق) */}
+      {activeTab === 'register_movements' && (
+        <div data-testid="register-movements-section" className="flex flex-col gap-4">
+          <div
+            data-testid="register-movements-filter-bar"
+            className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3"
+          >
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">الصندوق</label>
+              <select
+                aria-label="اختر الصندوق لحركة الصندوق"
+                name="movementRegisterId"
+                value={movRegisterId}
+                onChange={(e) => setMovRegisterId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">-- اختر الصندوق --</option>
+                {registers.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.nameAr} ({r.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">من تاريخ</label>
+              <input
+                aria-label="من تاريخ لحركة الصندوق"
+                name="movementFrom"
+                type="date"
+                value={movFrom}
+                onChange={(e) => setMovFrom(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">إلى تاريخ</label>
+              <input
+                aria-label="إلى تاريخ لحركة الصندوق"
+                name="movementTo"
+                type="date"
+                value={movTo}
+                onChange={(e) => setMovTo(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+
+          {movReport && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl p-4 text-xs">
+              <div>
+                <div className="text-slate-400">الرصيد الافتتاحي</div>
+                <div className="font-mono tabular-nums font-bold text-white mt-0.5">
+                  {Number(movReport.openingBalance).toFixed(2)}
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-400">إجمالي الوارد (الفترة)</div>
+                <div className="font-mono tabular-nums font-bold text-emerald-300 mt-0.5">
+                  {Number(movReport.totalIn).toFixed(2)}
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-400">إجمالي الصادر (الفترة)</div>
+                <div className="font-mono tabular-nums font-bold text-amber-300 mt-0.5">
+                  {Number(movReport.totalOut).toFixed(2)}
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-400">الرصيد الحالي</div>
+                <div className="font-mono tabular-nums font-bold text-indigo-300 mt-0.5">
+                  {Number(movReport.closingBalance).toFixed(2)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="overflow-x-auto">
+              <table data-testid="register-movements-table" className="w-full text-right text-xs">
+                <thead>
+                  <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                    <th className="py-3.5 px-4">التاريخ</th>
+                    <th className="py-3.5 px-4">النوع</th>
+                    <th className="py-3.5 px-4">الوارد</th>
+                    <th className="py-3.5 px-4">الصادر</th>
+                    <th className="py-3.5 px-4">المرجع</th>
+                    <th className="py-3.5 px-4">المستخدم</th>
+                    <th className="py-3.5 px-4">رقم القيد</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                  {loadingMovReport ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                        جاري تحميل حركة الصندوق...
+                      </td>
+                    </tr>
+                  ) : !movReport || movReport.rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-500">
+                        لا توجد حركات مسجلة في الصندوق خلال الفترة المحددة
+                      </td>
+                    </tr>
+                  ) : (
+                    movReport.rows.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-800/30 transition">
+                        <td className="py-3.5 px-4 font-mono tabular-nums text-slate-300">{r.movementDate}</td>
+                        <td className="py-3.5 px-4 font-medium text-white">{r.movementLabelAr}</td>
+                        <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-emerald-300">
+                          {Number(r.inAmount).toFixed(2)}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-amber-300">
+                          {Number(r.outAmount).toFixed(2)}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-slate-300">{r.reference || '—'}</td>
+                        <td className="py-3.5 px-4 text-slate-200">{r.actorUsername || 'system'}</td>
+                        <td className="py-3.5 px-4 font-mono tabular-nums text-indigo-300">{r.journalEntryNo || '—'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -1665,6 +2239,240 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
               <button
                 type="button"
                 onClick={() => setDetailCustody(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Voucher Modal (سند جديد) */}
+      {showCreateVoucherModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div
+            data-testid="create-voucher-modal"
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-bold text-white text-sm">إنشاء سند جديد</h4>
+              <button
+                type="button"
+                onClick={() => setShowCreateVoucherModal(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {vchModalError && (
+              <div role="alert" className="p-3 bg-red-950/50 border border-red-700/70 rounded-xl text-red-200 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                <span>{vchModalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateVoucher} className="flex flex-col gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">نوع السند *</label>
+                  <select
+                    name="voucherKind"
+                    value={vchKind}
+                    onChange={(e) => {
+                      setVchKind(e.target.value as VoucherKind);
+                      setVchContraAccountId('');
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="receipt">سند قبض</option>
+                    <option value="payment">سند صرف</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">التاريخ *</label>
+                  <input
+                    type="date"
+                    name="voucherDate"
+                    required
+                    value={vchDate}
+                    onChange={(e) => setVchDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">الصندوق *</label>
+                <select
+                  name="voucherRegisterId"
+                  required
+                  value={vchRegisterId}
+                  onChange={(e) => setVchRegisterId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">-- اختر الصندوق --</option>
+                  {registers
+                    .filter((r) => r.isActive)
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.nameAr} ({r.code})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">المبلغ *</label>
+                <input
+                  type="number"
+                  name="voucherAmount"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={vchAmount}
+                  onChange={(e) => setVchAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono tabular-nums focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">الحساب الطرف *</label>
+                <select
+                  name="contraAccountId"
+                  required
+                  value={vchContraAccountId}
+                  onChange={(e) => setVchContraAccountId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">-- اختر الحساب الطرف --</option>
+                  {voucherContraOptions.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} - {a.nameAr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">المرجع</label>
+                <input
+                  type="text"
+                  name="voucherReference"
+                  value={vchReference}
+                  onChange={(e) => setVchReference(e.target.value)}
+                  placeholder="رقم إيصال / فاتورة / مرجع"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">ملاحظات</label>
+                <input
+                  type="text"
+                  name="voucherMemo"
+                  value={vchMemo}
+                  onChange={(e) => setVchMemo(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateVoucherModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
+                >
+                  {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Employee Custody Detail Modal (تفصيل الموظف) */}
+      {empDetailTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div
+            data-testid="employee-custody-modal"
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="font-bold text-white text-sm">
+                  تفصيل حركات عهد الموظف ({empDetailTarget.employeeUsername || empDetailTarget.employeeUserId})
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  العهد المفتوحة: {empDetailTarget.openCount} · الإجمالي:{' '}
+                  {Number(empDetailTarget.totalAmount).toFixed(2)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmpDetailTarget(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="border border-slate-800 rounded-xl overflow-hidden">
+              <table data-testid="employee-custody-table" className="w-full text-right text-xs">
+                <thead>
+                  <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                    <th className="py-2.5 px-3">العهدة</th>
+                    <th className="py-2.5 px-3">الحركة</th>
+                    <th className="py-2.5 px-3">المبلغ</th>
+                    <th className="py-2.5 px-3">التاريخ</th>
+                    <th className="py-2.5 px-3">القيد</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                  {loadingEmpDetail ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        جاري تحميل حركات عهد الموظف...
+                      </td>
+                    </tr>
+                  ) : empDetailRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-500">
+                        لا توجد حركات مسجلة لهذا الموظف حالياً
+                      </td>
+                    </tr>
+                  ) : (
+                    empDetailRows.map((m) => (
+                      <tr key={m.id}>
+                        <td className="py-2.5 px-3 font-mono tabular-nums font-bold text-indigo-300">{m.custodyNo}</td>
+                        <td className="py-2.5 px-3 text-white">{m.movementLabelAr}</td>
+                        <td className="py-2.5 px-3 font-mono tabular-nums font-bold text-emerald-300">
+                          {Number(m.amount).toFixed(2)}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-slate-300">
+                          {m.createdAt.slice(0, 10)}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-sky-300">{m.journalEntryNo || '—'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setEmpDetailTarget(null)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
               >
                 إغلاق
