@@ -111,3 +111,70 @@ export interface CreatePoInput {
   lines: CreatePoLineInput[];
 }
 
+export type SupplierInvoiceStatus = 'draft' | 'posted' | 'cancelled';
+
+export interface SupplierInvoiceLine {
+  id: string;
+  invoiceId: string;
+  companyId: string;
+  grnLineId: string;
+  itemId: string;
+  itemCode?: string;
+  itemNameAr?: string;
+  itemUom?: string;
+  qty: number;
+  unitCost: number;
+  lineNo: number;
+}
+
+export interface SupplierInvoice {
+  id: string;
+  companyId: string;
+  supplierId: string;
+  supplierCode?: string;
+  supplierNameAr?: string;
+  status: SupplierInvoiceStatus;
+  invoiceNo?: string | null;
+  supplierInvoiceNo: string;
+  invoiceDate: string;
+  dueDate?: string | null;
+  memo?: string | null;
+  journalEntryId?: string | null;
+  journalEntryNo?: string | null;
+  postedAt?: string | null;
+  postedBy?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines?: SupplierInvoiceLine[];
+}
+
+export interface CreateSupplierInvoiceLineInput {
+  grnLineId: string;
+  qty: number;
+  unitCost: number;
+}
+
+export interface CreateSupplierInvoiceInput {
+  supplierId: string;
+  supplierInvoiceNo: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  memo?: string;
+  lines: CreateSupplierInvoiceLineInput[];
+}
+
+export interface OutstandingGrnLineRow {
+  grnLineId: string;
+  grnId: string;
+  grnNo: string | null;
+  supplierId: string;
+  itemId: string;
+  itemCode: string;
+  itemNameAr: string;
+  itemUom: string;
+  grnQty: number;
+  unitCost: number;
+  invoicedQty: number;
+  remainingQty: number;
+}

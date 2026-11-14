@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultSupplierService } from '../purchasing/supplierService.js';
 import { defaultGrnService } from '../purchasing/grnService.js';
 import { defaultPurchaseOrderService } from '../purchasing/purchaseOrderService.js';
+import { defaultInvoiceService } from '../purchasing/invoiceService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -264,5 +265,112 @@ purchasingRoutes.post(
 
     const purchaseOrder = await defaultPurchaseOrderService.cancelPurchaseOrder(companyId, poId, user.id);
     return res.status(200).json({ status: 'ok', purchaseOrder });
+  })
+);
+
+// 4. Supplier Invoices (AP) API
+purchasingRoutes.get(
+  '/supplier-invoices',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+
+    const invoices = await defaultInvoiceService.listInvoices(companyId);
+    return res.status(200).json({ status: 'ok', invoices });
+  })
+);
+
+purchasingRoutes.get(
+  '/supplier-invoices/outstanding',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const supplierId = (req.query.supplierId as string) || '';
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(supplierId)) {
+      throw new ValidationError('Invalid supplier ID format');
+    }
+
+    const outstandingLines = await defaultInvoiceService.getOutstandingLines(companyId, supplierId);
+    return res.status(200).json({ status: 'ok', outstandingLines });
+  })
+);
+
+purchasingRoutes.get(
+  '/supplier-invoices/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const invoiceId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(invoiceId)) {
+      throw new ValidationError('Invalid invoice ID format');
+    }
+
+    const invoice = await defaultInvoiceService.getInvoice(companyId, invoiceId);
+    return res.status(200).json({ status: 'ok', invoice });
+  })
+);
+
+purchasingRoutes.post(
+  '/supplier-invoices',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+
+    const { supplierId, supplierInvoiceNo, invoiceDate, dueDate, memo, lines } = req.body || {};
+    const invoice = await defaultInvoiceService.createInvoice(
+      companyId,
+      { supplierId, supplierInvoiceNo, invoiceDate, dueDate, memo, lines },
+      user.id
+    );
+
+    return res.status(201).json({ status: 'ok', invoice });
+  })
+);
+
+purchasingRoutes.post(
+  '/supplier-invoices/:id/post',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const invoiceId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_POST, companyId);
+    if (!isUuid(invoiceId)) {
+      throw new ValidationError('Invalid invoice ID format');
+    }
+
+    const invoice = await defaultInvoiceService.postInvoice(companyId, invoiceId, user.id);
+    return res.status(200).json({ status: 'ok', invoice });
+  })
+);
+
+purchasingRoutes.delete(
+  '/supplier-invoices/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const invoiceId = req.params.id;
+
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+    if (!isUuid(invoiceId)) {
+      throw new ValidationError('Invalid invoice ID format');
+    }
+
+    await defaultInvoiceService.deleteInvoice(companyId, invoiceId, user.id);
+    return res.status(200).json({ status: 'ok', deleted: true });
   })
 );

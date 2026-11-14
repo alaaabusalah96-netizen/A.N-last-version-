@@ -19,6 +19,7 @@ interface CompanySettings {
   inventoryAccountId: string | null;
   purchasesClearingAccountId: string | null;
   custodyReceivableAccountId: string | null;
+  accountsPayableAccountId: string | null;
 }
 
 interface CompanySettingsPanelProps {
@@ -309,6 +310,24 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
                 >
                   <option value="">— غير محدد —</option>
                   {usableAccounts(accounts, 'custody_receivable_account_id').map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Accounts Payable Account */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                  <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                  حساب الدائنين (الموردون)
+                </label>
+                <select
+                  value={settings.accountsPayableAccountId || ''}
+                  onChange={(e) => updateField('accountsPayableAccountId', e.target.value || null)}
+                  disabled={isReadOnly}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">— غير محدد —</option>
+                  {usableAccounts(accounts, 'accounts_payable_account_id').map((a) => (
                     <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
                   ))}
                 </select>

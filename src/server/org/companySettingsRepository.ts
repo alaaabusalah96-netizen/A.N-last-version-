@@ -18,6 +18,7 @@ export class CompanySettingsRepository {
           inventory_account_id as "inventoryAccountId",
           purchases_clearing_account_id as "purchasesClearingAccountId",
           custody_receivable_account_id as "custodyReceivableAccountId",
+          accounts_payable_account_id as "accountsPayableAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -44,6 +45,7 @@ export class CompanySettingsRepository {
           inventory_account_id,
           purchases_clearing_account_id,
           custody_receivable_account_id,
+          accounts_payable_account_id,
           updated_at, 
           updated_by
         )
@@ -58,6 +60,7 @@ export class CompanySettingsRepository {
           $9,
           $10,
           $13,
+          $15,
           NOW(), 
           $8
         )
@@ -71,6 +74,7 @@ export class CompanySettingsRepository {
           inventory_account_id = CASE WHEN $11 THEN EXCLUDED.inventory_account_id ELSE company_settings.inventory_account_id END,
           purchases_clearing_account_id = CASE WHEN $12 THEN EXCLUDED.purchases_clearing_account_id ELSE company_settings.purchases_clearing_account_id END,
           custody_receivable_account_id = CASE WHEN $14 THEN EXCLUDED.custody_receivable_account_id ELSE company_settings.custody_receivable_account_id END,
+          accounts_payable_account_id = CASE WHEN $16 THEN EXCLUDED.accounts_payable_account_id ELSE company_settings.accounts_payable_account_id END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -84,6 +88,7 @@ export class CompanySettingsRepository {
           inventory_account_id as "inventoryAccountId",
           purchases_clearing_account_id as "purchasesClearingAccountId",
           custody_receivable_account_id as "custodyReceivableAccountId",
+          accounts_payable_account_id as "accountsPayableAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -103,6 +108,8 @@ export class CompanySettingsRepository {
         input.purchasesClearingAccountId !== undefined,
         input.custodyReceivableAccountId === undefined ? null : input.custodyReceivableAccountId,
         input.custodyReceivableAccountId !== undefined,
+        input.accountsPayableAccountId === undefined ? null : input.accountsPayableAccountId,
+        input.accountsPayableAccountId !== undefined,
       ]);
 
       return res.rows[0];

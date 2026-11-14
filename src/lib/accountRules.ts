@@ -38,6 +38,12 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     allowedTypes: ['asset'],
     requirePostable: true,
   },
+  accounts_payable_account_id: {
+    field: 'accounts_payable_account_id',
+    labelAr: 'حساب الدائنين (الموردون)',
+    allowedTypes: ['liability'],
+    requirePostable: true,
+  },
   cash_register_gl_account: {
     field: 'cash_register_gl_account',
     labelAr: 'حساب النقدية',

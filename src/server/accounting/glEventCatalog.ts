@@ -53,10 +53,20 @@ export const GL_EVENT_CATALOG: readonly GlEventDefinition[] = [
     wiringPoint: 'src/server/cash/voucherService.ts#postReceiptVoucher',
     fields: [],
   },
+  {
+    eventKey: 'accounting.purchase_invoice_mapping',
+    eventCode: 'purchase_invoice',
+    labelAr: 'فواتير الموردين (AP)',
+    status: 'wired',
+    wiringPoint: 'src/server/purchasing/invoiceService.ts#postInvoice',
+    fields: [
+      { field: 'purchases_clearing_account_id', labelAr: 'حساب المشتريات المعلّقة', allowedTypes: ['liability'], requirePostable: true },
+      { field: 'accounts_payable_account_id', labelAr: 'حساب الدائنين (الموردون)', allowedTypes: ['liability'], requirePostable: true },
+    ],
+  },
   // العمليات التالية **معلنة بلا مسار ترحيل** في 616ebf9. لا تُفعّل إلا بحزمة
   // أعمال تنفّذ cycle الترحيل فعليًا. status='not_implemented' معناها:
   // لا شاشة، لا إعداد، لا تعريف إعداد مزروع.
-  { eventKey: 'accounting.purchase_invoice_mapping', eventCode: 'purchase_invoice', labelAr: 'فواتير المشتريات', status: 'not_implemented', fields: [] },
   { eventKey: 'accounting.purchase_return_mapping', eventCode: 'purchase_return', labelAr: 'مرتجعات المشتريات', status: 'not_implemented', fields: [] },
   { eventKey: 'accounting.stock_issue_mapping', eventCode: 'stock_issue', labelAr: 'صرف المخزون', status: 'not_implemented', fields: [] },
   { eventKey: 'accounting.stock_transfer_mapping', eventCode: 'stock_transfer', labelAr: 'التحويل بين المستودعات', status: 'not_implemented', fields: [] },

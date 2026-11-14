@@ -86,6 +86,56 @@ interface PurchasingWorkspaceProps {
   userRole: string;
 }
 
+export type SupplierInvoiceStatus = 'draft' | 'posted' | 'cancelled';
+export interface SupplierInvoiceLine {
+  id: string;
+  invoiceId: string;
+  companyId: string;
+  grnLineId: string;
+  itemId: string;
+  itemCode?: string;
+  itemNameAr?: string;
+  itemUom?: string;
+  qty: number;
+  unitCost: number;
+  lineNo: number;
+}
+export interface SupplierInvoice {
+  id: string;
+  companyId: string;
+  supplierId: string;
+  supplierCode?: string;
+  supplierNameAr?: string;
+  status: SupplierInvoiceStatus;
+  invoiceNo?: string | null;
+  supplierInvoiceNo: string;
+  invoiceDate: string;
+  dueDate?: string | null;
+  memo?: string | null;
+  journalEntryId?: string | null;
+  journalEntryNo?: string | null;
+  postedAt?: string | null;
+  postedBy?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines?: SupplierInvoiceLine[];
+}
+export interface OutstandingGrnLineRow {
+  grnLineId: string;
+  grnId: string;
+  grnNo: string | null;
+  supplierId: string;
+  itemId: string;
+  itemCode: string;
+  itemNameAr: string;
+  itemUom: string;
+  grnQty: number;
+  unitCost: number;
+  invoicedQty: number;
+  remainingQty: number;
+}
+
 const PO_STATUS_LABELS: Record<PoStatus, string> = {
   draft: 'مسودة',
   approved: 'معتمد',
@@ -103,7 +153,7 @@ const PO_STATUS_STYLES: Record<PoStatus, string> = {
 export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'suppliers' | 'po' | 'grn'>('suppliers');
+  const [activeTab, setActiveTab] = useState<'suppliers' | 'po' | 'grn' | 'invoices'>('suppliers');
 
   const [userPermissions, setUserPermissions] = useState<string[]>([]);
   const [authMeLoaded, setAuthMeLoaded] = useState(false);
@@ -123,6 +173,133 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showPoModal, setShowPoModal] = useState(false);
   const [showGrnModal, setShowGrnModal] = useState(false);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
+  const [invSupplierId, setInvSupplierId] = useState('');
+  const [invSupplierInvoiceNo, setInvSupplierInvoiceNo] = useState('');
+  const [invDate, setInvDate] = useState('');
+  const [invDueDate, setInvDueDate] = useState('');
+  const [invMemo, setInvMemo] = useState('');
+  const [outstandingLines, setOutstandingLines] = useState<OutstandingGrnLineRow[]>([]);
+  const [selectedOutstandingLines, setSelectedOutstandingLines] = useState<{
+    grnLineId: string;
+    qty: number;
+    unitCost: number;
+    maxQty: number;
+    itemId: string;
+    itemCode: string;
+    itemNameAr: string;
+    itemUom: string;
+    grnNo: string;
+  }[]>([]);
+
+  const fetchOutstandingLines = async (supplierId: string) => {
+    if (!supplierId || !selectedCompanyId) {
+      setOutstandingLines([]);
+      setSelectedOutstandingLines([]);
+      return;
+    }
+    try {
+      const res = await apiFetch(
+        `/api/purchasing/supplier-invoices/outstanding?companyId=${selectedCompanyId}&supplierId=${supplierId}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const rows: OutstandingGrnLineRow[] = data.outstandingLines || [];
+        setOutstandingLines(rows);
+        setSelectedOutstandingLines(
+          rows.map((l: OutstandingGrnLineRow) => ({
+            grnLineId: l.grnLineId,
+            qty: l.remainingQty,
+            unitCost: l.unitCost,
+            maxQty: l.remainingQty,
+            itemId: l.itemId,
+            itemCode: l.itemCode,
+            itemNameAr: l.itemNameAr,
+            itemUom: l.itemUom,
+            grnNo: l.grnNo || '',
+          }))
+        );
+      }
+    } catch (err: any) {
+      setError(err.message || 'فشل تحميل البنود المتبقية');
+    }
+  };
+
+  const handleCreateInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCompanyId) return;
+    const validLines = selectedOutstandingLines.filter((l) => l.qty > 0);
+    if (validLines.length === 0) {
+      setError('يرجى تحديد بند واحد على الأقل بكمية صالحة للفوترة');
+      return;
+    }
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch('/api/purchasing/supplier-invoices', {
+        method: 'POST',
+        body: JSON.stringify({
+          companyId: selectedCompanyId,
+          supplierId: invSupplierId,
+          supplierInvoiceNo: invSupplierInvoiceNo,
+          invoiceDate: invDate || undefined,
+          dueDate: invDueDate || undefined,
+          memo: invMemo || undefined,
+          lines: validLines.map((l) => ({
+            grnLineId: l.grnLineId,
+            qty: l.qty,
+            unitCost: l.unitCost,
+          })),
+        }),
+      });
+      setSuccess('تم إنشاء فاتورة المورد كمسودة بنجاح');
+      setShowInvoiceModal(false);
+      setInvSupplierInvoiceNo('');
+      setInvMemo('');
+      setSelectedOutstandingLines([]);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'فشل إنشاء فاتورة المورد');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handlePostInvoice = async (id: string) => {
+    if (!confirm('هل أنت متأكد من ترحيل هذه الفاتورة وتوليد القيد المحاسبي؟')) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/purchasing/supplier-invoices/${id}/post`, {
+        method: 'POST',
+        body: JSON.stringify({ companyId: selectedCompanyId }),
+      });
+      setSuccess('تم ترحيل فاتورة المورد بنجاح وتوليد قيد الدائنين');
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'فشل ترحيل الفاتورة');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteInvoice = async (id: string) => {
+    if (!confirm('هل أنت متأكد من حذف هذه المسودة؟')) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/purchasing/supplier-invoices/${id}?companyId=${selectedCompanyId}`, {
+        method: 'DELETE',
+      });
+      setSuccess('تم حذف مسودة الفاتورة بنجاح');
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'فشل حذف مسودة الفاتورة');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Supplier Form state
   const [suppCode, setSuppCode] = useState('');
@@ -149,6 +326,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const canReadPo = isPlatformAdmin || userPermissions.includes('purchasing:read');
   const canWritePo = isPlatformAdmin || userPermissions.includes('purchasing:write');
   const canPostPo = isPlatformAdmin || userPermissions.includes('purchasing:post');
+  const canPostInvoice = isPlatformAdmin || userRole === 'company_admin' || userPermissions.includes('purchasing:post');
   const canWrite = isPlatformAdmin || userRole === 'company_admin' || userPermissions.includes('purchasing:write');
 
   useEffect(() => {
@@ -195,6 +373,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
       const requests: Promise<Response>[] = [
         apiFetch(`/api/purchasing/suppliers?companyId=${selectedCompanyId}`),
         apiFetch(`/api/purchasing/grn?companyId=${selectedCompanyId}`),
+        apiFetch(`/api/purchasing/supplier-invoices?companyId=${selectedCompanyId}`),
         apiFetch(`/api/inventory/warehouses?companyId=${selectedCompanyId}`),
         apiFetch(`/api/inventory/items?companyId=${selectedCompanyId}`),
       ];
@@ -203,10 +382,17 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
         requests.push(apiFetch(`/api/purchasing/purchase-orders?companyId=${selectedCompanyId}`));
       }
 
-      const [suppRes, grnRes, whRes, itemRes, poRes] = await Promise.all(requests);
+      const results = await Promise.all(requests);
+      const suppRes = results[0];
+      const grnRes = results[1];
+      const invRes = results[2];
+      const whRes = results[3];
+      const itemRes = results[4];
+      const poRes = results[5];
 
       if (suppRes.ok) setSuppliers((await suppRes.json()).suppliers || []);
       if (grnRes.ok) setGrns((await grnRes.json()).grns || []);
+      if (invRes.ok) setInvoices((await invRes.json()).invoices || []);
       if (whRes.ok) setWarehouses((await whRes.json()).warehouses || []);
       if (itemRes.ok) setItems((await itemRes.json()).items || []);
       if (poRes && poRes.ok) {
@@ -500,6 +686,20 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
               <span>سند استلام جديد</span>
             </button>
           )}
+          {canWrite && (
+            <button
+              onClick={() => {
+                setShowInvoiceModal(true);
+                setInvSupplierId('');
+                setOutstandingLines([]);
+                setSelectedOutstandingLines([]);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-violet-600/20 transition cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              <span>فاتورة مورد جديدة</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -555,6 +755,17 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
         >
           <FileCheck className="w-4 h-4" />
           <span>سندات استلام البضائع GRN ({grns.length})</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('invoices')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'invoices'
+              ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <ShoppingBag className="w-4 h-4" />
+          <span>فواتير الموردين ({invoices.length})</span>
         </button>
       </div>
 
@@ -747,6 +958,78 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                             className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow cursor-pointer disabled:opacity-50"
                           >
                             رحّل للمخزون
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Supplier Invoices (AP) */}
+      {activeTab === 'invoices' && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead>
+                <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                  <th className="py-3.5 px-4">رقم النظام</th>
+                  <th className="py-3.5 px-4">رقم فاتورة المورد</th>
+                  <th className="py-3.5 px-4">المورد</th>
+                  <th className="py-3.5 px-4 text-center">التاريخ</th>
+                  <th className="py-3.5 px-4 text-center">الحالة</th>
+                  <th className="py-3.5 px-4 text-center">قيد اليومية</th>
+                  <th className="py-3.5 px-4 text-left">الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                {invoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                      لا توجد فواتير موردين مسجلة حتى الآن.
+                    </td>
+                  </tr>
+                ) : (
+                  invoices.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-slate-800/30 transition">
+                      <td className="py-3.5 px-4 font-mono font-bold text-white">{inv.invoiceNo || inv.id.slice(0, 8)}</td>
+                      <td className="py-3.5 px-4 font-mono font-bold text-violet-400">{inv.supplierInvoiceNo}</td>
+                      <td className="py-3.5 px-4 font-semibold">{inv.supplierNameAr || inv.supplierId.slice(0, 8)}</td>
+                      <td className="py-3.5 px-4 text-center font-mono">{inv.invoiceDate?.slice(0, 10)}</td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                          inv.status === 'posted'
+                            ? 'bg-emerald-950/60 border border-emerald-800/80 text-emerald-300'
+                            : 'bg-amber-950/60 border border-amber-800/80 text-amber-300'
+                        }`}>
+                          {inv.status === 'posted' ? 'مرحّلة' : 'مسودة'}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-mono text-indigo-300">
+                        {inv.journalEntryNo || inv.journalEntryId?.slice(0, 8) || '—'}
+                      </td>
+                      <td className="py-3.5 px-4 text-left flex items-center justify-end gap-2">
+                        {inv.status === 'draft' && canPostInvoice && (
+                          <button
+                            onClick={() => handlePostInvoice(inv.id)}
+                            disabled={actionLoading}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>ترحيل</span>
+                          </button>
+                        )}
+                        {inv.status === 'draft' && canWrite && (
+                          <button
+                            onClick={() => handleDeleteInvoice(inv.id)}
+                            disabled={actionLoading}
+                            className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                          >
+                            حذف
                           </button>
                         )}
                       </td>
@@ -1117,6 +1400,158 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                   type="submit"
                   disabled={actionLoading}
                   className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                >
+                  {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Invoice Modal */}
+      {showInvoiceModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl p-6 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-bold text-white text-sm">إنشاء فاتورة مورد جديدة (AP Invoice)</h4>
+              <button onClick={() => setShowInvoiceModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateInvoice} className="flex flex-col gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">المورد *</label>
+                  <select
+                    required
+                    value={invSupplierId}
+                    onChange={(e) => {
+                      setInvSupplierId(e.target.value);
+                      fetchOutstandingLines(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="">-- اختر المورد --</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nameAr} ({s.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">رقم فاتورة المورد *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="مثل: INV-2026-001"
+                    value={invSupplierInvoiceNo}
+                    onChange={(e) => setInvSupplierInvoiceNo(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">تاريخ الفاتورة</label>
+                  <input
+                    type="date"
+                    value={invDate}
+                    onChange={(e) => setInvDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">تاريخ الاستحقاق (Due Date)</label>
+                  <input
+                    type="date"
+                    value={invDueDate}
+                    onChange={(e) => setInvDueDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">ملاحظات / بيان</label>
+                  <input
+                    type="text"
+                    placeholder="ملاحظات اختيارية"
+                    value={invMemo}
+                    onChange={(e) => setInvMemo(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Outstanding GRN lines */}
+              <div className="border border-slate-800 rounded-xl p-3 bg-slate-950/60 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300">بنود استلام البضائع غير المفوترة (المتبقية)</span>
+                  <span className="text-[11px] text-slate-400">حدد الكميات المراد فوترتها</span>
+                </div>
+                {outstandingLines.length === 0 ? (
+                  <div className="py-6 text-center text-slate-500 text-xs">
+                    {invSupplierId ? 'لا توجد بنود استلام مرحّلة ومتبقية لهذا المورد' : 'يرجى اختيار المورد أولاً لعرض البنود المتبقية'}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedOutstandingLines.map((line, idx) => (
+                      <div key={line.grnLineId} className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs">
+                        <div className="flex-1">
+                          <div className="font-bold text-white">{line.itemNameAr} ({line.itemCode})</div>
+                          <div className="text-[11px] text-slate-400">سند استلام: {line.grnNo || 'GRN'} | متبقي: {line.maxQty} {line.itemUom}</div>
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-[10px] text-slate-400 mb-0.5">الكمية</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            max={line.maxQty}
+                            value={line.qty}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              const updated = [...selectedOutstandingLines];
+                              updated[idx].qty = Math.min(Math.max(0, val), line.maxQty);
+                              setSelectedOutstandingLines(updated);
+                            }}
+                            className="w-full px-2 py-1 bg-slate-950 border border-slate-800 rounded text-xs text-white font-mono tabular-nums focus:outline-none"
+                          />
+                        </div>
+                        <div className="w-28">
+                          <label className="block text-[10px] text-slate-400 mb-0.5">سعر الوحدة</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            value={line.unitCost}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              const updated = [...selectedOutstandingLines];
+                              updated[idx].unitCost = val;
+                              setSelectedOutstandingLines(updated);
+                            }}
+                            className="w-full px-2 py-1 bg-slate-950 border border-slate-800 rounded text-xs text-white font-mono tabular-nums focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInvoiceModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading || selectedOutstandingLines.filter(l => l.qty > 0).length === 0}
+                  className="px-5 py-2 bg-violet-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-violet-600/20 disabled:opacity-50"
                 >
                   {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة'}
                 </button>
