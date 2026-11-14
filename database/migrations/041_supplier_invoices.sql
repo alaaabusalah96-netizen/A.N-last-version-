@@ -134,14 +134,14 @@ REVOKE ALL ON purch_supplier_invoices FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON purch_supplier_invoice_lines FROM PUBLIC, anon, authenticated;
 
 -- 11. Seed Config Definition for accounting.purchase_invoice_mapping
-INSERT INTO config_definitions (domain, key, title, description, schema_json, default_value_json, is_active)
+INSERT INTO config_definitions (key, domain, label_ar, schema, default_value, description, is_system)
 VALUES (
-  'accounting',
   'accounting.purchase_invoice_mapping',
+  'accounting',
   'ربط فواتير المشتريات المحاسبي',
-  'تحديد حساب المشتريات المعلقة وحساب الدائنين (الموردين) لفواتير المشتريات',
-  '{"type": "object", "properties": {"purchases_clearing_account_id": {"type": "string"}, "accounts_payable_account_id": {"type": "string"}}}',
-  '{}',
+  '{"type":"object","additionalProperties":false,"properties":{"purchases_clearing_account_id":{"type":"string"},"accounts_payable_account_id":{"type":"string"}},"required":["purchases_clearing_account_id","accounts_payable_account_id"]}'::jsonb,
+  '{"purchases_clearing_account_id":"","accounts_payable_account_id":""}'::jsonb,
+  'Mapping of the Supplier Purchase Invoice posting event to GL accounts (clearing / AP).',
   true
 )
-ON CONFLICT (domain, key) DO NOTHING;
+ON CONFLICT (key) DO NOTHING;
