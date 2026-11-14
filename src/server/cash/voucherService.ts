@@ -404,23 +404,27 @@ export class VoucherService {
       }
 
       const rows = await this.voucherRepo.listRegisterMovementRows(companyId, filters, tx);
-      const balance = await this.cashRegisterService.getBalance(companyId, filters.registerId, tx);
+      const totals = await this.voucherRepo.listRegisterPeriodTotals(
+        companyId,
+        filters.registerId,
+        filters.from,
+        filters.to,
+        tx
+      );
 
-      let totalInCents = 0;
-      let totalOutCents = 0;
-      for (const r of rows) {
-        totalInCents += Math.round(r.inAmount * 100);
-        totalOutCents += Math.round(r.outAmount * 100);
-      }
+      const openingBalance = toMoney(register.openingBalance + totals.openingNetBefore);
+      const totalIn = toMoney(totals.totalIn);
+      const totalOut = toMoney(totals.totalOut);
+      const closingBalance = toMoney(openingBalance + totalIn - totalOut);
 
       return {
         registerId: register.id,
         registerCode: register.code,
         registerNameAr: register.nameAr,
-        openingBalance: balance.openingBalance,
-        totalIn: toMoney(totalInCents / 100),
-        totalOut: toMoney(totalOutCents / 100),
-        closingBalance: balance.currentBalance,
+        openingBalance,
+        totalIn,
+        totalOut,
+        closingBalance,
         rows,
       };
     });

@@ -424,6 +424,7 @@ export class VoucherRepository {
         ) m
         WHERE ${outerWhere.join(' AND ')}
         ORDER BY m.movement_date DESC, m.created_at DESC
+        -- Display page only — aggregates use listRegisterPeriodTotals
         LIMIT 500;
       `;
       const res = await executor.query(sql, params);
@@ -444,6 +445,83 @@ export class VoucherRepository {
         registerNameAr: r.registerNameAr,
         createdAt: toIsoTimestamp(r.createdAt) || new Date().toISOString(),
       }));
+    };
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
+
+  async listRegisterPeriodTotals(
+    companyId: string,
+    registerId: string,
+    from?: string,
+    to?: string,
+    customExecutor?: DbExecutor
+  ): Promise<{ openingNetBefore: number; totalIn: number; totalOut: number }> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        SELECT
+          COALESCE(SUM(
+            CASE
+              WHEN $3::date IS NOT NULL AND m.movement_date < $3::date
+              THEN m.in_amount - m.out_amount
+              ELSE 0
+            END
+          ), 0)::text as "openingNetBefore",
+          COALESCE(SUM(
+            CASE
+              WHEN ($3::date IS NULL OR m.movement_date >= $3::date)
+               AND ($4::date IS NULL OR m.movement_date <= $4::date)
+              THEN m.in_amount
+              ELSE 0
+            END
+          ), 0)::text as "totalIn",
+          COALESCE(SUM(
+            CASE
+              WHEN ($3::date IS NULL OR m.movement_date >= $3::date)
+               AND ($4::date IS NULL OR m.movement_date <= $4::date)
+              THEN m.out_amount
+              ELSE 0
+            END
+          ), 0)::text as "totalOut"
+        FROM (
+          SELECT
+            (cm.created_at AT TIME ZONE 'UTC')::date as movement_date,
+            CASE WHEN cm.direction = 'in' THEN cm.amount ELSE 0 END as in_amount,
+            CASE WHEN cm.direction = 'out' THEN cm.amount ELSE 0 END as out_amount
+          FROM custody_movements cm
+          WHERE cm.company_id = $1 AND cm.register_id = $2 AND cm.direction IN ('in', 'out')
+
+          UNION ALL
+
+          SELECT
+            rv.voucher_date as movement_date,
+            rv.amount as in_amount,
+            0::numeric as out_amount
+          FROM cash_receipt_vouchers rv
+          WHERE rv.company_id = $1 AND rv.register_id = $2 AND rv.status = 'posted'
+
+          UNION ALL
+
+          SELECT
+            pv.voucher_date as movement_date,
+            0::numeric as in_amount,
+            pv.amount as out_amount
+          FROM cash_payment_vouchers pv
+          WHERE pv.company_id = $1 AND pv.register_id = $2 AND pv.status = 'posted'
+        ) m;
+      `;
+      const res = await executor.query<{ openingNetBefore: string; totalIn: string; totalOut: string }>(sql, [
+        companyId,
+        registerId,
+        from || null,
+        to || null,
+      ]);
+      const row = res.rows[0];
+      return {
+        openingNetBefore: toMoney(row?.openingNetBefore ?? 0),
+        totalIn: toMoney(row?.totalIn ?? 0),
+        totalOut: toMoney(row?.totalOut ?? 0),
+      };
     };
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);
