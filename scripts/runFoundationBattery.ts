@@ -138,6 +138,7 @@ const scripts = [
   'scripts/verifyPurchGrnPoLink1.ts',
   'scripts/verifyPurchPoCi1.ts',
   'scripts/verifyCashCustodyCore1.ts',
+  'scripts/verifyCashCustodyLifecycle1.ts',
 ];
 
 export interface BatteryItemReport {

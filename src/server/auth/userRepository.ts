@@ -53,8 +53,8 @@ export class UserRepository {
     return res.rows[0] || null;
   }
 
-  async findById(id: string): Promise<User | null> {
-    const executor = await this.getExecutor();
+  async findById(id: string, customExecutor?: DbExecutor): Promise<User | null> {
+    const executor = await this.getExecutor(customExecutor);
 
     const sql = `
       SELECT id, username, password_hash as "passwordHash", role, created_at as "createdAt", is_active as "isActive"

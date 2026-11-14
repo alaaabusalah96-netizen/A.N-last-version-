@@ -4,8 +4,8 @@ import { CompanySettings, UpsertCompanySettingsInput } from './companySettingsTy
 
 export class CompanySettingsRepository {
 
-  async getByCompanyId(companyId: string): Promise<CompanySettings | null> {
-    return await withTenantTransaction(companyId, async (executor) => {
+  async getByCompanyId(companyId: string, customExecutor?: DbExecutor): Promise<CompanySettings | null> {
+    const run = async (executor: DbExecutor) => {
       const sql = `
         SELECT 
           company_id as "companyId",
@@ -25,7 +25,9 @@ export class CompanySettingsRepository {
       `;
       const res = await executor.query<CompanySettings>(sql, [companyId]);
       return res.rows[0] || null;
-    });
+    };
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, async (executor) => await run(executor));
   }
 
   async upsert(companyId: string, input: UpsertCompanySettingsInput, actorId: string, customExecutor?: DbExecutor): Promise<CompanySettings> {
