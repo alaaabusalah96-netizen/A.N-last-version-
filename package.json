@@ -131,6 +131,7 @@
     "test:cash-period-report-1": "tsx scripts/verifyCashPeriodReport1.ts",
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
+    "migration": "tsx scripts/migrate.ts",
     "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"
   },
   "dependencies": {
