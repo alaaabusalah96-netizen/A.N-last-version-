@@ -13,6 +13,7 @@ import { defaultSupplierService } from '../src/server/purchasing/supplierService
 import { defaultWarehouseService } from '../src/server/inventory/warehouseService.js';
 import { defaultItemService } from '../src/server/inventory/itemService.js';
 import { defaultAccountService } from '../src/server/accounting/accountService.js';
+import { defaultPeriodService } from '../src/server/accounting/periodService.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
 
@@ -132,6 +133,26 @@ async function run() {
       },
       userId
     );
+
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const lastDay = new Date(Date.UTC(y, now.getUTCMonth() + 1, 0)).getUTCDate();
+    const startOfMonth = `${y}-${m}-01`;
+    const endOfMonth = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+
+    await defaultPeriodService.createPeriod(
+      companyAId,
+      { code: `${y}-${m}-CI-${unique}`, startDate: startOfMonth, endDate: endOfMonth },
+      userId
+    );
+    if (m !== '03') {
+      await defaultPeriodService.createPeriod(
+        companyAId,
+        { code: `2026-03-CI-${unique}`, startDate: '2026-03-01', endDate: '2026-03-31' },
+        userId
+      );
+    }
 
     // Setup Supplier, Warehouse, Item for Company A
     const supplier = await defaultSupplierService.createSupplier(
@@ -352,16 +373,20 @@ async function run() {
         await client.query('DELETE FROM purch_supplier_invoice_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_supplier_invoices WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
-        await client.query('DELETE FROM purch_grn_headers WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_po_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_purchase_orders WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_movements WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_balances WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounts WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM inv_items WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM inv_warehouses WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
-        await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM audit_logs WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM companies WHERE id = ANY($1::uuid[])', [companyIds]);
         if (userIds.length > 0) {

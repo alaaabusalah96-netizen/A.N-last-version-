@@ -160,6 +160,16 @@
     "reason": "Per-company purchase orders item lines"
   },
   {
+    "table": "purch_supplier_invoices",
+    "scope": "tenant",
+    "reason": "Per-company supplier purchase invoices (AP)"
+  },
+  {
+    "table": "purch_supplier_invoice_lines",
+    "scope": "tenant",
+    "reason": "Per-company supplier purchase invoice lines"
+  },
+  {
     "table": "cash_registers",
     "scope": "tenant",
     "reason": "Per-company cash registers and treasury master"

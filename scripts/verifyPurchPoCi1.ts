@@ -13,6 +13,7 @@ import { defaultItemService } from '../src/server/inventory/itemService.js';
 import { defaultPurchaseOrderService } from '../src/server/purchasing/purchaseOrderService.js';
 import { defaultGrnService } from '../src/server/purchasing/grnService.js';
 import { defaultAccountService } from '../src/server/accounting/accountService.js';
+import { defaultPeriodService } from '../src/server/accounting/periodService.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
 
@@ -135,6 +136,24 @@ async function run() {
 
     await wirePurchasingGl(compA.id, userA.id, `A${unique}`);
     await wirePurchasingGl(compB.id, userB.id, `B${unique}`);
+
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const lastDay = new Date(Date.UTC(y, now.getUTCMonth() + 1, 0)).getUTCDate();
+    const startOfMonth = `${y}-${m}-01`;
+    const endOfMonth = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+
+    await defaultPeriodService.createPeriod(
+      compA.id,
+      { code: `${y}-${m}-CI-${unique}`, startDate: startOfMonth, endDate: endOfMonth },
+      userA.id
+    );
+    await defaultPeriodService.createPeriod(
+      compB.id,
+      { code: `${y}-${m}-CI-${unique}`, startDate: startOfMonth, endDate: endOfMonth },
+      userB.id
+    );
 
     const supplierA = await defaultSupplierService.createSupplier(
       compA.id,
