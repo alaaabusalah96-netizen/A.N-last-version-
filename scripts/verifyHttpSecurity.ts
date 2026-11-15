@@ -1,4 +1,4 @@
-import { check, blocked, summary, CookieJarFetch } from './lib/testkit.js';
+import { check, blocked, summary, CookieJarFetch, resetLoopbackRateLimits } from './lib/testkit.js';
 import { createApp } from '../src/server/app.js';
 import { defaultUserRepository } from '../src/server/auth/userRepository.js';
 import { hashPassword } from '../src/server/auth/passwordHash.js';
@@ -142,7 +142,12 @@ async function runTests() {
     server = s;
   });
 
+  let testUsername = '';
+  let attackerUsername = '';
+
   try {
+    await resetLoopbackRateLimits(executor);
+
     const jar = new CookieJarFetch();
 
     // R4.4: Health & Readiness Endpoints Check
@@ -156,7 +161,8 @@ async function runTests() {
 
     // Create test user for HTTP auth tests
     const suffix = Date.now();
-    const testUsername = `sec_user_${suffix}@erp.local`;
+    testUsername = `sec_user_${suffix}@erp.local`;
+    attackerUsername = `attacker_${suffix}@erp.local`;
     const testPassword = 'SecureUserPass123!';
     const passwordHash = await hashPassword(testPassword);
 
@@ -241,7 +247,7 @@ async function runTests() {
     );
 
     // 5) Rate limiting: 10 failed login attempts => 11th 429
-    const attackerUsername = `attacker_${suffix}@erp.local`;
+    await resetLoopbackRateLimits(executor, [`user:${attackerUsername}`]);
     for (let i = 0; i < 10; i++) {
       const freshCsrf = await (await jar.fetch(`${baseUrl}/api/auth/csrf`)).json();
       await jar.fetch(`${baseUrl}/api/auth/login`, {
@@ -300,6 +306,10 @@ async function runTests() {
     await executor.query('DELETE FROM login_rate_events WHERE rate_key IN ($1, $2, $3)', [ipRateKey, userRateKey1, userRateKey2]);
 
   } finally {
+    await resetLoopbackRateLimits(executor, [
+      ...(testUsername ? [`user:${testUsername}`] : []),
+      ...(attackerUsername ? [`user:${attackerUsername}`] : []),
+    ]).catch(() => {});
     if (server) server.close();
   }
 

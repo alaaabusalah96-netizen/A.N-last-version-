@@ -1,5 +1,7 @@
+import { Server } from 'http';
 import pg from 'pg';
-import { check, blocked, summary, CookieJarFetch, loginAs } from './lib/testkit.js';
+import { check, blocked, summary, CookieJarFetch, loginAs, resetLoopbackRateLimits } from './lib/testkit.js';
+import { createApp } from '../src/server/app.js';
 import { buildPgConfig } from '../src/server/db/connection.js';
 import { getDefaultExecutor, closeAllExecutors } from '../src/server/db/index.js';
 import { CompanyRepository } from '../src/server/org/companyRepository.js';
@@ -43,7 +45,7 @@ async function isHttpAppReachable(baseUrl: string): Promise<boolean> {
 }
 
 async function run() {
-  const baseUrl = (process.env.VERIFY_APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  let baseUrl = (process.env.VERIFY_APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
   const dbUrl = process.env.DATABASE_URL;
 
   if (!dbUrl || dbUrl.trim() === '') {
@@ -65,20 +67,29 @@ async function run() {
     return;
   }
 
-  const reachable = await isHttpAppReachable(baseUrl);
-  if (!reachable) {
-    blocked(`Running app server not reachable at ${baseUrl}/api/health. HTTP E2E checks H1..H8 are BLOCKED.`);
-    const { exitCode } = summary();
-    process.exit(exitCode);
-    return;
-  }
-
   const executor = await getDefaultExecutor();
   if (!executor) {
     blocked('Unable to connect to database executor. HTTP E2E checks H1..H8 are BLOCKED.');
     const { exitCode } = summary();
     process.exit(exitCode);
     return;
+  }
+
+  let localServer: Server | undefined;
+  const prevCorsOrigins = process.env.CORS_ORIGINS;
+  const reachable = await isHttpAppReachable(baseUrl);
+  if (!reachable) {
+    console.log(`[verifyCashHttp1] External app server not reachable at ${baseUrl}; starting ephemeral in-process HTTP server...`);
+    const app = createApp();
+    await new Promise<void>((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => {
+        const addr = s.address() as any;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        process.env.CORS_ORIGINS = [prevCorsOrigins, baseUrl].filter(Boolean).join(',');
+        resolve();
+      });
+      localServer = s;
+    });
   }
 
   const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
@@ -179,6 +190,11 @@ async function run() {
     const jarUnauth = new CookieJarFetch();
     const resH1 = await jarUnauth.fetch(`${baseUrl}/api/cash/registers?companyId=${compA.id}`);
     await check(`H1: GET /api/cash/registers without session returns 401 (got ${resH1.status})`, resH1.status === 401);
+
+    await resetLoopbackRateLimits(executor, [
+      `user:${empUser.username.toLowerCase()}`,
+      `user:${adminUser.username.toLowerCase()}`,
+    ]);
 
     // Login as company_user (empUser) & company_admin (adminUser)
     const jarEmp = new CookieJarFetch();
@@ -394,6 +410,14 @@ async function run() {
       } finally {
         await client.end();
       }
+    }
+    if (localServer) {
+      localServer.close();
+    }
+    if (prevCorsOrigins === undefined) {
+      delete process.env.CORS_ORIGINS;
+    } else {
+      process.env.CORS_ORIGINS = prevCorsOrigins;
     }
     await closeAllExecutors();
   }

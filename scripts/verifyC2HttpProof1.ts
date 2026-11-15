@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Server } from 'http';
-import { check, summary, CookieJarFetch, loginAs } from './lib/testkit.js';
+import { check, summary, CookieJarFetch, loginAs, resetLoopbackRateLimits } from './lib/testkit.js';
 import { createApp } from '../src/server/app.js';
 import { defaultUserRepository } from '../src/server/auth/userRepository.js';
 import { defaultCompanyRepository } from '../src/server/org/companyRepository.js';
@@ -154,6 +154,12 @@ async function runProof() {
         });
         createdUserIds.push(companyUser.id);
         await defaultMembershipRepository.addMember(companyUser.id, comp.id, 'company_user', true);
+
+        await resetLoopbackRateLimits(executor, [
+          `user:${platformAdmin.username.toLowerCase()}`,
+          `user:${companyAdmin.username.toLowerCase()}`,
+          `user:${companyUser.username.toLowerCase()}`,
+        ]);
 
         // Logins
         const jarUnauth = new CookieJarFetch();

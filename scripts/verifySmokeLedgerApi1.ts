@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { Server } from 'http';
 import pg from 'pg';
-import { check, blocked, summary, CookieJarFetch, loginAs } from './lib/testkit.js';
+import { check, blocked, summary, CookieJarFetch, loginAs, resetLoopbackRateLimits } from './lib/testkit.js';
 import { createApp } from '../src/server/app.js';
 import { defaultUserRepository } from '../src/server/auth/userRepository.js';
 import { hashPassword } from '../src/server/auth/passwordHash.js';
@@ -108,6 +108,8 @@ async function runSmoke() {
       role: 'platform_admin',
     });
     createdUserIds.push(adminUser.id);
+
+    await resetLoopbackRateLimits(executor, [`user:${adminUsername.toLowerCase()}`]);
 
     // Step 1: Login via /api/auth/csrf + /api/auth/login
     const jar = new CookieJarFetch();

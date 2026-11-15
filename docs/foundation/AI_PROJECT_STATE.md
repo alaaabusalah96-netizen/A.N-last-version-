@@ -478,6 +478,19 @@
 - **AN-BOOT-FIRST-RUN-1**: `IMPLEMENTED`
   - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
   - Summary: Delivered complete first-run operational path merging `AN-BOOTSTRAP-ADMIN-1`, `AN-OPS-FIRST-RUN-1`, and `AN-SMOKE-LEDGER-API-1`. Added explicit one-time CLI `scripts/bootstrapPlatformAdmin.ts` (`npm run bootstrap:admin`) creating the initial `platform_admin` via Argon2id only when `count(platform_admin) === 0` (refusing silent promotion of non-admin users, rejecting passwords < 12 chars, and logging zero secrets), while preserving non-creating server startup reconciliation in `AuthService.bootstrapPlatformAdminFromEnv()`. Added `docs/ops/FIRST_RUN.md` and clarified `.env.example` documenting exact sequence (`secrets` -> `migrate` -> `db:provision-app-role` -> `bootstrap:admin` -> `login` -> company creation) and dev ports (`3000`/`3001`). Added `scripts/verifyBootstrapAdmin1.ts` (`npm run test:bootstrap-admin-1`) and `scripts/verifySmokeLedgerApi1.ts` (`npm run test:smoke-ledger-api-1`) for loopback PostgreSQL HTTP verification.
+- **AN-FOUNDATION-HARDEN-1**: `IMPLEMENTED` + `UNIT_TESTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Merged `AN-CASH-FK-HARDEN-1`, `AN-TEST-INV-ATOMIC-CLEAN-1`, `AN-TEST-ENV-HARDEN-1`, and `AN-FOUNDATION-CI-GREEN-1`:
+    1. Cash Custody Composite FK Hardening: Added forward migration `database/migrations/043_cash_custody_fk_harden.sql` (leaving `038_cash_custody_core.sql` untouched, zero `EXCEPTION WHEN OTHERS` blocks) that cleans cross-company/dangling `company_settings.custody_receivable_account_id` references to `NULL`, dynamically drops single-column `company_settings -> accounts(id)` FK via `pg_constraint`, and enforces `company_settings_custody_account_company_fk` `FOREIGN KEY (custody_receivable_account_id, company_id) REFERENCES accounts(id, company_id) ON DELETE SET NULL (custody_receivable_account_id)`. Verified via `scripts/verifyCashFkHardening1.ts` (`npm run test:cash-fk-hardening-1`, registered in `scripts/runFoundationBattery.ts`).
+    2. Clean-DB Inventory Atomic Proof: Updated `scripts/verifyInvAtomicBalance1.ts` to seed a deterministic test-owned `audit_logs` record (`action = 'INV_ATOMIC_TEST_SEED'`, `entity_id = compId`) and assert post-cleanup preservation scoped to `(company_id = compId AND entity_id = compId)`, eliminating dependency on leftover history in clean CI databases.
+    3. Test Environment Hardening (No Production Relaxation): Added loopback-only `resetLoopbackRateLimits()` helper in `scripts/lib/testkit.ts`, cleaned up loopback `ip:127.0.0.1` and test user rate events in `scripts/verifyHttpSecurity.ts` (pre-step and `finally`) plus HTTP scripts (`verifyRbacHttp.ts`, `verifyTenantHttp.ts`, `verifyC2HttpProof1.ts`, `verifyAbd1LiveProof.ts`, `verifyCashHttp1.ts`, `verifySmokeLedgerApi1.ts`) to prevent cross-test HTTP `429` poisoning without altering `RateLimitStore`. Added ephemeral in-process `createApp().listen(0, '127.0.0.1')` server fallback to `scripts/verifyCashHttp1.ts` when external `VERIFY_APP_URL` is unreachable.
+  - Exact Local Verification Commands & Outcomes (no local PostgreSQL in container):
+    - `npx tsc --noEmit && npm run build`: EXIT 0 (`dist/index.html`, `dist/server.cjs`)
+    - `npm run test:unit`: EXIT 0 (14 test files / 112 tests passed)
+    - `npm run test:cash-fk-hardening-1`: EXIT 2 (S1–S4 PASS, 0 FAIL, T1–T3 BLOCKED: `DATABASE_URL` unset)
+    - `npm run test:inv-atomic-balance-1`: EXIT 3 (Host/Identity/S1–S6 PASS, 0 FAIL, T1–T9.8 SKIPPED: `DATABASE_URL` unset)
+    - `npm run test:foundation`: EXIT 2 (`121` total: `81 PASS | 0 FAIL | 39 BLOCKED | 1 SKIPPED`)
+    - `npm run migrate` & live DB proofs: PENDING against disposable CI Postgres / operator migration execution (`CI_STATUS=PENDING`).
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

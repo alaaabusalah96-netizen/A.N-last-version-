@@ -810,6 +810,13 @@ async function runVerification() {
     comp2Id = comp2Res.rows[0].id;
     registry.registerCompany(comp2Id);
 
+    // Seed a deterministic test-owned audit record for compId so clean/empty DBs
+    // always have test-owned audit history independent of previous runs or subsequent tests.
+    await appClient1.query(
+      "INSERT INTO audit_logs (company_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, $3, $4, $5);",
+      [compId, 'INV_ATOMIC_TEST_SEED', 'companies', compId, JSON.stringify({ suffix, cleanDbSeed: true })]
+    );
+
     await appClient1.query('BEGIN;');
     await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
 
@@ -1301,14 +1308,17 @@ async function runVerification() {
       }
     }
 
-    // Explicit post-teardown assertions proving protected records still exist
+    // Explicit post-teardown assertions proving protected test-owned records still exist
     if (adminClient && (compId || comp2Id)) {
       try {
         const companyCheck = await adminClient.query<{ count: number }>("SELECT count(*)::int as count FROM companies WHERE id = ANY($1);", [[compId, comp2Id]]);
-        const auditCheck = await adminClient.query<{ count: number }>("SELECT count(*)::int as count FROM audit_logs WHERE company_id = $1;", [compId]);
+        const auditCheck = await adminClient.query<{ count: number }>(
+          "SELECT count(*)::int as count FROM audit_logs WHERE company_id = $1 AND entity_id = $2;",
+          [compId, compId]
+        );
 
         assert(companyCheck.rows[0]?.count > 0, `Protected Records Check: Test companies (${companyCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
-        assert(auditCheck.rows[0]?.count > 0, `Protected Records Check: Audit logs (${auditCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
+        assert(auditCheck.rows[0]?.count > 0, `Protected Records Check: Test-owned audit logs (${auditCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
       } catch (checkErr: any) {
         console.error('[CLEANUP CHECK ERROR]', checkErr);
         assert(false, `Protected Records Check FAILED: ${checkErr.message || String(checkErr)}`);

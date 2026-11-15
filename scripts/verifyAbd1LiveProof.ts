@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { check, summary, CookieJarFetch, loginAs } from './lib/testkit.js';
+import { check, summary, CookieJarFetch, loginAs, resetLoopbackRateLimits } from './lib/testkit.js';
 import { createApp } from '../src/server/app.js';
 import { defaultUserRepository } from '../src/server/auth/userRepository.js';
 import { defaultCompanyRepository } from '../src/server/org/companyRepository.js';
@@ -92,6 +92,11 @@ async function runProof() {
         });
 
         await defaultMembershipRepository.addMember(compAUser.id, compA.id, 'company_admin', true);
+
+        await resetLoopbackRateLimits(executor, [
+          `user:${compAUser.username.toLowerCase()}`,
+          `user:${platformAdminUser.username.toLowerCase()}`,
+        ]);
 
         const jarA = new CookieJarFetch();
         await loginAs(jarA, baseUrl, compAUser.username, commonPass);

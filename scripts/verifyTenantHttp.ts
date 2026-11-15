@@ -1,4 +1,4 @@
-import { check, blocked, summary, CookieJarFetch, loginAs } from './lib/testkit.js';
+import { check, blocked, summary, CookieJarFetch, loginAs, resetLoopbackRateLimits } from './lib/testkit.js';
 import { createApp } from '../src/server/app.js';
 import { defaultUserRepository } from '../src/server/auth/userRepository.js';
 import { defaultCompanyRepository } from '../src/server/org/companyRepository.js';
@@ -66,6 +66,11 @@ async function runTests() {
 
     await defaultMembershipRepository.addMember(userA.id, compA.id, 'company_admin', true);
     await defaultMembershipRepository.addMember(userInactive.id, compA.id, 'company_user', false);
+
+    await resetLoopbackRateLimits(executor, [
+      `user:${userA.username.toLowerCase()}`,
+      `user:${userInactive.username.toLowerCase()}`,
+    ]);
 
     // 3. User A logs in
     const jarA = new CookieJarFetch();

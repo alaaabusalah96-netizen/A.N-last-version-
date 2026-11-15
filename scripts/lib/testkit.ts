@@ -180,3 +180,39 @@ export async function loginAs(
 
   return { csrfToken: postLoginToken, user: loginData.user, jar };
 }
+
+/**
+ * Test-only helper: clears loopback IP and optional test rate-limit keys in login_rate_events
+ * strictly when DATABASE_URL targets a loopback PostgreSQL host.
+ * Production rate limiting remains completely untouched.
+ */
+export async function resetLoopbackRateLimits(
+  executor: { query: (sql: string, params?: any[]) => Promise<any> },
+  extraKeys: string[] = []
+): Promise<void> {
+  const dbUrl = process.env.DATABASE_URL || '';
+  if (!dbUrl.trim()) return;
+  try {
+    const parsed = new URL(dbUrl);
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  const keys = Array.from(
+    new Set([
+      'ip:127.0.0.1',
+      'ip:::ffff:127.0.0.1',
+      'ip:::1',
+      'ip:localhost',
+      'ip:unknown',
+      ...extraKeys.filter(Boolean),
+    ])
+  );
+
+  await executor.query('DELETE FROM login_rate_events WHERE rate_key = ANY($1::text[])', [keys]);
+}
+

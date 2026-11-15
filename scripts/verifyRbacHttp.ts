@@ -1,4 +1,4 @@
-import { check, blocked, summary, CookieJarFetch, loginAs } from './lib/testkit.js';
+import { check, blocked, summary, CookieJarFetch, loginAs, resetLoopbackRateLimits } from './lib/testkit.js';
 import { createApp } from '../src/server/app.js';
 import { defaultUserRepository } from '../src/server/auth/userRepository.js';
 import { defaultCompanyRepository } from '../src/server/org/companyRepository.js';
@@ -70,6 +70,12 @@ async function runTests() {
     // Add memberships
     await defaultMembershipRepository.addMember(compAUser.id, compA.id, 'company_user', true);
     await defaultMembershipRepository.addMember(compAdminUser.id, compA.id, 'company_admin', true);
+
+    await resetLoopbackRateLimits(executor, [
+      `user:${compAUser.username.toLowerCase()}`,
+      `user:${compAdminUser.username.toLowerCase()}`,
+      `user:${platformAdminUser.username.toLowerCase()}`,
+    ]);
 
     // Test A: Login as compAUser using loginAs and check GET /api/companies
     const jarA = new CookieJarFetch();
