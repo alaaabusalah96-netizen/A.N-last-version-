@@ -5,6 +5,10 @@ import { defaultSupplierService } from '../purchasing/supplierService.js';
 import { defaultGrnService } from '../purchasing/grnService.js';
 import { defaultPurchaseOrderService } from '../purchasing/purchaseOrderService.js';
 import { defaultInvoiceService } from '../purchasing/invoiceService.js';
+import { defaultThreeWayMatchService } from '../purchasing/threeWayMatchService.js';
+import { defaultPurchReturnService } from '../purchasing/purchReturnService.js';
+import { defaultApOpenItemsService } from '../purchasing/apOpenItemsService.js';
+import { defaultSupplierPaymentService } from '../purchasing/supplierPaymentService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -371,6 +375,218 @@ purchasingRoutes.delete(
     }
 
     await defaultInvoiceService.deleteInvoice(companyId, invoiceId, user.id);
+    return res.status(200).json({ status: 'ok', deleted: true });
+  })
+);
+
+// 5. 3-Way Matching API
+purchasingRoutes.get(
+  '/three-way-match/policy',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    const policy = defaultThreeWayMatchService.getPolicy();
+    return res.status(200).json({ status: 'ok', policy });
+  })
+);
+
+purchasingRoutes.get(
+  '/supplier-invoices/:id/three-way-match',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const invoiceId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(invoiceId)) {
+      throw new ValidationError('Invalid invoice ID format');
+    }
+    const report = await defaultThreeWayMatchService.evaluateInvoice(companyId, invoiceId);
+    return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// 6. Purchase Returns API
+purchasingRoutes.get(
+  '/returns',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    const returns = await defaultPurchReturnService.listReturns(companyId);
+    return res.status(200).json({ status: 'ok', returns });
+  })
+);
+
+purchasingRoutes.get(
+  '/returns/returnable',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const supplierId = (req.query.supplierId as string) || undefined;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    const returnableLines = await defaultPurchReturnService.listReturnableLines(companyId, supplierId);
+    return res.status(200).json({ status: 'ok', returnableLines });
+  })
+);
+
+purchasingRoutes.get(
+  '/returns/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const returnId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(returnId)) {
+      throw new ValidationError('Invalid return ID format');
+    }
+    const purchaseReturn = await defaultPurchReturnService.getReturn(companyId, returnId);
+    return res.status(200).json({ status: 'ok', purchaseReturn });
+  })
+);
+
+purchasingRoutes.post(
+  '/returns',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+    const { supplierId, warehouseId, grnId, invoiceId, returnDate, reason, memo, lines } = req.body || {};
+    const purchaseReturn = await defaultPurchReturnService.createReturn(
+      companyId,
+      { supplierId, warehouseId, grnId, invoiceId, returnDate, reason, memo, lines },
+      user.id
+    );
+    return res.status(201).json({ status: 'ok', purchaseReturn });
+  })
+);
+
+purchasingRoutes.post(
+  '/returns/:id/post',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const returnId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_POST, companyId);
+    if (!isUuid(returnId)) {
+      throw new ValidationError('Invalid return ID format');
+    }
+    const purchaseReturn = await defaultPurchReturnService.postReturn(companyId, returnId, user.id);
+    return res.status(200).json({ status: 'ok', purchaseReturn });
+  })
+);
+
+purchasingRoutes.delete(
+  '/returns/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const returnId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+    if (!isUuid(returnId)) {
+      throw new ValidationError('Invalid return ID format');
+    }
+    await defaultPurchReturnService.deleteReturn(companyId, returnId, user.id);
+    return res.status(200).json({ status: 'ok', deleted: true });
+  })
+);
+
+// 7. AP Open Items API
+purchasingRoutes.get(
+  '/ap/open-items',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const supplierId = (req.query.supplierId as string) || undefined;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    const openItems = await defaultApOpenItemsService.listOpenItems(companyId, supplierId);
+    return res.status(200).json({ status: 'ok', openItems });
+  })
+);
+
+// 8. Supplier Cash Payments API
+purchasingRoutes.get(
+  '/supplier-payments',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    const payments = await defaultSupplierPaymentService.listPayments(companyId);
+    return res.status(200).json({ status: 'ok', payments });
+  })
+);
+
+purchasingRoutes.get(
+  '/supplier-payments/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const paymentId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(paymentId)) {
+      throw new ValidationError('Invalid payment ID format');
+    }
+    const payment = await defaultSupplierPaymentService.getPayment(companyId, paymentId);
+    return res.status(200).json({ status: 'ok', payment });
+  })
+);
+
+purchasingRoutes.post(
+  '/supplier-payments',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+    const { supplierId, invoiceId, registerId, paymentDate, amount, reference, memo } = req.body || {};
+    const payment = await defaultSupplierPaymentService.createPayment(
+      companyId,
+      { supplierId, invoiceId, registerId, paymentDate, amount, reference, memo },
+      user.id
+    );
+    return res.status(201).json({ status: 'ok', payment });
+  })
+);
+
+purchasingRoutes.post(
+  '/supplier-payments/:id/post',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const paymentId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_POST, companyId);
+    if (!isUuid(paymentId)) {
+      throw new ValidationError('Invalid payment ID format');
+    }
+    const payment = await defaultSupplierPaymentService.postPayment(companyId, paymentId, user.id);
+    return res.status(200).json({ status: 'ok', payment });
+  })
+);
+
+purchasingRoutes.delete(
+  '/supplier-payments/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const paymentId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
+    if (!isUuid(paymentId)) {
+      throw new ValidationError('Invalid payment ID format');
+    }
+    await defaultSupplierPaymentService.cancelPayment(companyId, paymentId, user.id);
     return res.status(200).json({ status: 'ok', deleted: true });
   })
 );

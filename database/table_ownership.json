@@ -193,5 +193,20 @@
     "table": "cash_payment_vouchers",
     "scope": "tenant",
     "reason": "Per-company general cash payment vouchers posted directly from cash registers and GL"
+  },
+  {
+    "table": "purch_returns",
+    "scope": "tenant",
+    "reason": "Per-company purchase returns header"
+  },
+  {
+    "table": "purch_return_lines",
+    "scope": "tenant",
+    "reason": "Per-company purchase returns item lines"
+  },
+  {
+    "table": "purch_supplier_payments",
+    "scope": "tenant",
+    "reason": "Per-company supplier cash payments against posted invoices"
   }
 ]

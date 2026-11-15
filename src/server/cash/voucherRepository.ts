@@ -421,6 +421,30 @@ export class VoucherRepository {
           LEFT JOIN platform_users u ON u.id = COALESCE(pv.posted_by, pv.created_by)
           LEFT JOIN journal_entries je ON je.id = pv.journal_entry_id AND je.company_id = pv.company_id
           WHERE pv.company_id = $1 AND pv.register_id = $2 AND pv.status = 'posted'
+
+          UNION ALL
+
+          SELECT
+            sp.id,
+            'supplier_payment' as source_type,
+            'سداد مورد نقداً' as movement_label_ar,
+            sp.payment_date as movement_date,
+            0::numeric as in_amount,
+            sp.amount as out_amount,
+            COALESCE(sp.reference, sp.payment_no, sp.id::text) as reference,
+            COALESCE(u.username, 'system') as actor_username,
+            sp.journal_entry_id,
+            COALESCE(je.entry_no, '—') as journal_entry_no,
+            sp.memo,
+            sp.register_id,
+            cr.code as register_code,
+            cr.name_ar as register_name_ar,
+            COALESCE(sp.posted_at, sp.created_at) as created_at
+          FROM purch_supplier_payments sp
+          INNER JOIN cash_registers cr ON cr.id = sp.register_id AND cr.company_id = sp.company_id
+          LEFT JOIN platform_users u ON u.id = COALESCE(sp.posted_by, sp.created_by)
+          LEFT JOIN journal_entries je ON je.id = sp.journal_entry_id AND je.company_id = sp.company_id
+          WHERE sp.company_id = $1 AND sp.register_id = $2 AND sp.status = 'posted'
         ) m
         WHERE ${outerWhere.join(' AND ')}
         ORDER BY m.movement_date DESC, m.created_at DESC
@@ -508,6 +532,15 @@ export class VoucherRepository {
             pv.amount as out_amount
           FROM cash_payment_vouchers pv
           WHERE pv.company_id = $1 AND pv.register_id = $2 AND pv.status = 'posted'
+
+          UNION ALL
+
+          SELECT
+            sp.payment_date as movement_date,
+            0::numeric as in_amount,
+            sp.amount as out_amount
+          FROM purch_supplier_payments sp
+          WHERE sp.company_id = $1 AND sp.register_id = $2 AND sp.status = 'posted'
         ) m;
       `;
       const res = await executor.query<{ openingNetBefore: string; totalIn: string; totalOut: string }>(sql, [
