@@ -137,7 +137,8 @@
     "db:provision-app-role": "tsx scripts/provisionAppRole.ts",
     "migrate": "tsx scripts/migrate.ts",
     "migration": "tsx scripts/migrate.ts",
-    "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts"
+    "test:unit": "vitest run src/server/**/__tests__/*.test.ts src/server/tests/*.test.ts src/lib/**/__tests__/*.test.ts",
+    "test:e2e-smoke": "playwright test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
