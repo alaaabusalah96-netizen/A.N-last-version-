@@ -7,7 +7,7 @@ import {
   OutstandingGrnLineRow,
   SupplierInvoiceStatus,
 } from './purchasingTypes.js';
-import { toMoney } from '../lib/numeric.js';
+import { toDecimal } from '../lib/numeric.js';
 
 function toIsoDate(val: unknown): string {
   if (!val) return '';
@@ -55,10 +55,18 @@ function mapInvoiceLine(row: any): SupplierInvoiceLine {
     itemCode: row.itemCode ?? undefined,
     itemNameAr: row.itemNameAr ?? undefined,
     itemUom: row.itemUom ?? undefined,
-    qty: toMoney(row.qty),
-    unitCost: toMoney(row.unitCost),
+    qty: toDecimal(row.qty, 4),
+    unitCost: toDecimal(row.unitCost, 4),
     lineNo: Number(row.lineNo || 1),
   };
+}
+
+export interface LockedGrnLineSummary {
+  grnLineId: string;
+  grnQty: string;
+  grnStatus: string;
+  grnSupplierId: string;
+  postedQty: string;
 }
 
 export class InvoiceRepository {
@@ -214,6 +222,75 @@ export class InvoiceRepository {
     return mapInvoiceHeader(res.rows[0]);
   }
 
+  /**
+   * Acquires deterministic FOR UPDATE row locks on target purch_grn_lines for this company,
+   * then computes cumulative posted invoice quantities for those GRN lines.
+   */
+  async lockGrnLinesAndGetPostedTotals(
+    companyId: string,
+    grnLineIds: string[],
+    tx: DbExecutor
+  ): Promise<Map<string, LockedGrnLineSummary>> {
+    const result = new Map<string, LockedGrnLineSummary>();
+    const uniqueSortedIds = Array.from(new Set(grnLineIds)).sort();
+    if (uniqueSortedIds.length === 0) {
+      return result;
+    }
+
+    const lockSql = `
+      SELECT
+        gl.id as "grnLineId",
+        gl.qty::text as "grnQty",
+        g.status as "grnStatus",
+        g.supplier_id as "grnSupplierId"
+      FROM purch_grn_lines gl
+      INNER JOIN purch_grn g ON g.id = gl.grn_id AND g.company_id = gl.company_id
+      WHERE gl.company_id = $1 AND gl.id = ANY($2::uuid[])
+      ORDER BY gl.id ASC
+      FOR UPDATE OF gl;
+    `;
+    const lockedRes = await tx.query<{
+      grnLineId: string;
+      grnQty: string;
+      grnStatus: string;
+      grnSupplierId: string;
+    }>(lockSql, [companyId, uniqueSortedIds]);
+
+    const postedSql = `
+      SELECT
+        sil.grn_line_id as "grnLineId",
+        COALESCE(SUM(sil.qty), 0)::text as "postedQty"
+      FROM purch_supplier_invoice_lines sil
+      INNER JOIN purch_supplier_invoices si
+        ON si.id = sil.invoice_id AND si.company_id = sil.company_id
+      WHERE sil.company_id = $1
+        AND si.status = 'posted'
+        AND sil.grn_line_id = ANY($2::uuid[])
+      GROUP BY sil.grn_line_id;
+    `;
+    const postedRes = await tx.query<{ grnLineId: string; postedQty: string }>(postedSql, [
+      companyId,
+      uniqueSortedIds,
+    ]);
+
+    const postedByLine = new Map<string, string>();
+    for (const row of postedRes.rows) {
+      postedByLine.set(row.grnLineId, row.postedQty || '0');
+    }
+
+    for (const row of lockedRes.rows) {
+      result.set(row.grnLineId, {
+        grnLineId: row.grnLineId,
+        grnQty: row.grnQty,
+        grnStatus: row.grnStatus,
+        grnSupplierId: row.grnSupplierId,
+        postedQty: postedByLine.get(row.grnLineId) || '0',
+      });
+    }
+
+    return result;
+  }
+
   async listOutstandingLines(
     companyId: string,
     supplierId: string,
@@ -258,10 +335,10 @@ export class InvoiceRepository {
         itemCode: r.itemCode,
         itemNameAr: r.itemNameAr,
         itemUom: r.itemUom,
-        grnQty: toMoney(r.grnQty),
-        unitCost: toMoney(r.unitCost),
-        invoicedQty: toMoney(r.invoicedQty),
-        remainingQty: toMoney(r.remainingQty),
+        grnQty: toDecimal(r.grnQty, 4),
+        unitCost: toDecimal(r.unitCost, 4),
+        invoicedQty: toDecimal(r.invoicedQty, 4),
+        remainingQty: toDecimal(r.remainingQty, 4),
       }));
     };
 
@@ -351,10 +428,10 @@ export class InvoiceRepository {
         const lineRes = await executor.query(lineSql, [
           invoiceId,
           companyId,
-          l.grnLineId,
+          l.grnLineId.trim(),
           itemId,
-          toMoney(l.qty),
-          toMoney(l.unitCost),
+          toDecimal(l.qty, 4),
+          toDecimal(l.unitCost, 4),
           i + 1,
         ]);
         lines.push(mapInvoiceLine(lineRes.rows[0]));

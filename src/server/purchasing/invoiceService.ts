@@ -11,7 +11,7 @@ import { GlMappingService } from '../accounting/glMappingService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { SupplierInvoice, CreateSupplierInvoiceInput, OutstandingGrnLineRow } from './purchasingTypes.js';
-import { toDecimal, toMoney } from '../lib/numeric.js';
+import { fromMinorUnits, toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
 import { DbExecutor } from '../db/types.js';
 
@@ -106,10 +106,19 @@ export class InvoiceService {
         outstandingMap.set(ol.grnLineId, ol);
       }
 
+      const seenGrnLineIds = new Set<string>();
       for (const line of input.lines) {
         if (!line.grnLineId || typeof line.grnLineId !== 'string') {
           throw new ValidationError('كافة بنود الفاتورة تتطلب ربطاً ببند سند استلام (grnLineId)');
         }
+        const normalizedGrnLineId = line.grnLineId.trim();
+        if (seenGrnLineIds.has(normalizedGrnLineId)) {
+          throw new ValidationError(
+            'لا يمكن تكرار نفس بند سند الاستلام (grnLineId) داخل نفس الفاتورة؛ يرجى إدخال الكمية في سطر واحد'
+          );
+        }
+        seenGrnLineIds.add(normalizedGrnLineId);
+
         if (typeof line.qty !== 'number' || !Number.isFinite(line.qty) || line.qty <= 0) {
           throw new ValidationError('كمية البند يجب أن تكون أكبر من الصفر');
         }
@@ -117,12 +126,12 @@ export class InvoiceService {
           throw new ValidationError('تكلفة الوحدة يجب أن تكون رقمًا صالحًا غير سالبة');
         }
 
-        const outLine = outstandingMap.get(line.grnLineId);
+        const outLine = outstandingMap.get(normalizedGrnLineId);
         if (!outLine) {
           throw new ValidationError('بند استلام البضائع المحدد غير موجود، غير مرحل، أو تم ترفيع فاتورته كاملاً');
         }
 
-        if (toDecimal(line.qty) > toDecimal(outLine.remainingQty)) {
+        if (toMinorUnits(line.qty, 4) > toMinorUnits(outLine.remainingQty, 4)) {
           throw new ValidationError(
             `كمية البند المطلوبة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة (${outLine.remainingQty}) للبند`
           );
@@ -255,25 +264,47 @@ export class InvoiceService {
         throw new ValidationError('فاتورة المورد لا تحتوي على بنود لترحيلها');
       }
 
-      // Re-check remaining quantities for concurrency protection
-      const outstandingLines = await this.invoiceRepo.listOutstandingLines(companyId, invoice.supplierId, tx);
-      const outstandingMap = new Map<string, OutstandingGrnLineRow>();
-      for (const ol of outstandingLines) {
-        outstandingMap.set(ol.grnLineId, ol);
+      // Reject duplicate grnLineId within the invoice lines (defense-in-depth for pre-existing drafts)
+      const invoiceGrnLineIds: string[] = [];
+      const seenPostGrnLineIds = new Set<string>();
+      for (const line of invoice.lines) {
+        if (seenPostGrnLineIds.has(line.grnLineId)) {
+          throw new ValidationError(
+            'لا يمكن ترحيل فاتورة تحتوي على بند سند استلام مكرر (grnLineId) داخل نفس الفاتورة'
+          );
+        }
+        seenPostGrnLineIds.add(line.grnLineId);
+        invoiceGrnLineIds.push(line.grnLineId);
       }
+
+      // WP-RACE: Lock target purch_grn_lines rows FOR UPDATE in deterministic order,
+      // then recompute cumulative posted + current invoice quantities inside the transaction.
+      const lockedGrnMap = await this.invoiceRepo.lockGrnLinesAndGetPostedTotals(
+        companyId,
+        invoiceGrnLineIds,
+        tx
+      );
 
       let totalAmount = 0;
       for (const line of invoice.lines) {
-        const outLine = outstandingMap.get(line.grnLineId);
-        if (!outLine) {
-          throw new ValidationError('أحد بنود الفاتورة لم يعد لديه كميات استلام متبقية غير مفوترة');
+        const grnSummary = lockedGrnMap.get(line.grnLineId);
+        if (!grnSummary || grnSummary.grnStatus !== 'posted' || grnSummary.grnSupplierId !== invoice.supplierId) {
+          throw new ValidationError('أحد بنود الفاتورة لم يعد لديه بند استلام صالح أو مرحل لهذا المورد');
         }
-        if (toDecimal(line.qty) > toDecimal(outLine.remainingQty)) {
+
+        const grnUnits = toMinorUnits(grnSummary.grnQty, 4);
+        const alreadyPostedUnits = toMinorUnits(grnSummary.postedQty, 4);
+        const lineUnits = toMinorUnits(line.qty, 4);
+        const remainingUnits = grnUnits - alreadyPostedUnits;
+
+        if (remainingUnits <= 0n || alreadyPostedUnits + lineUnits > grnUnits) {
+          const remainingFormatted = fromMinorUnits(remainingUnits > 0n ? remainingUnits : 0n, 4);
           throw new ValidationError(
-            `كمية البند تتجاوز الكمية المتبقية غير المفوترة (${outLine.remainingQty})`
+            `كمية البند (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة (${remainingFormatted})`
           );
         }
-        totalAmount += toDecimal(line.qty) * toDecimal(line.unitCost);
+
+        totalAmount += toDecimal(line.qty, 4) * toDecimal(line.unitCost, 4);
       }
 
       totalAmount = toMoney(totalAmount);

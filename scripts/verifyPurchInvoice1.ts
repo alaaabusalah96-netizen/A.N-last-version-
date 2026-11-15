@@ -353,6 +353,70 @@ async function run() {
     }
     await check('I10: Tenant isolation prevents cross-company access', isolationError);
 
+    // I11: Reject duplicate grnLineId inside the same invoice create request
+    console.log('[Test I11] Testing duplicate grnLineId in single invoice rejection...');
+    let dupGrnLineError = false;
+    try {
+      await defaultInvoiceService.createInvoice(
+        companyAId,
+        {
+          supplierId: supplier.id,
+          supplierInvoiceNo: `SUP-INV-DUP-LINE`,
+          invoiceDate: '2026-03-01',
+          lines: [
+            { grnLineId, qty: 2, unitCost: 1000 },
+            { grnLineId, qty: 2, unitCost: 1000 },
+          ],
+        },
+        userId
+      );
+    } catch (err: any) {
+      if (err instanceof ValidationError && String(err.message).includes('تكرار')) {
+        dupGrnLineError = true;
+      }
+    }
+    await check('I11: Duplicate grnLineId within the same invoice is rejected with clear ValidationError', dupGrnLineError);
+
+    // I12: Two valid drafts referencing the same remaining qty (remaining=4): first posts (qty=3), second over-posts (qty=3 > 1) and must reject
+    console.log('[Test I12] Testing sequential over-post rejection across two drafts...');
+    const draftRace1 = await defaultInvoiceService.createInvoice(
+      companyAId,
+      {
+        supplierId: supplier.id,
+        supplierInvoiceNo: `SUP-INV-SEQ-1`,
+        invoiceDate: '2026-03-01',
+        lines: [{ grnLineId, qty: 3, unitCost: 1000 }],
+      },
+      userId
+    );
+    const draftRace2 = await defaultInvoiceService.createInvoice(
+      companyAId,
+      {
+        supplierId: supplier.id,
+        supplierInvoiceNo: `SUP-INV-SEQ-2`,
+        invoiceDate: '2026-03-01',
+        lines: [{ grnLineId, qty: 3, unitCost: 1000 }],
+      },
+      userId
+    );
+    const postedSeq1 = await defaultInvoiceService.postInvoice(companyAId, draftRace1.id, userId);
+    let secondOverPostRejected = false;
+    try {
+      await defaultInvoiceService.postInvoice(companyAId, draftRace2.id, userId);
+    } catch (err: any) {
+      if (err instanceof ValidationError) {
+        secondOverPostRejected = true;
+      }
+    }
+    const outstandingAfterSeq = await defaultInvoiceService.getOutstandingLines(companyAId, supplier.id);
+    await check(
+      'I12: Second draft post exceeding remaining quantity is rejected cleanly leaving remaining=1',
+      postedSeq1.status === 'posted' &&
+        secondOverPostRejected &&
+        outstandingAfterSeq.length === 1 &&
+        Number(outstandingAfterSeq[0].remainingQty) === 1
+    );
+
     console.log('[Test Suite] AN-PURCH-INVOICE-1 verification completed successfully.');
   } catch (err) {
     console.error('[verifyPurchInvoice1] Test failed with error:', err);

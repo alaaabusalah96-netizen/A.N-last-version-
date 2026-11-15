@@ -123,6 +123,7 @@
     "test:purch-grn-po-link-1": "tsx scripts/verifyPurchGrnPoLink1.ts",
     "test:purch-po-ci-1": "tsx scripts/verifyPurchPoCi1.ts",
     "test:purch-invoice-1": "tsx scripts/verifyPurchInvoice1.ts",
+    "test:purch-invoice-race-1": "tsx scripts/verifyPurchInvoiceRace1.ts",
     "test:cash-custody-core-1": "tsx scripts/verifyCashCustodyCore1.ts",
     "test:cash-custody-lifecycle-1": "tsx scripts/verifyCashCustodyLifecycle1.ts",
     "test:cash-custody-ui-1": "tsx scripts/verifyCashCustodyUi1.ts",

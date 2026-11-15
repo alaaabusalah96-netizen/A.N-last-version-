@@ -146,6 +146,7 @@ const scripts = [
   'scripts/verifyCashPeriodReport1.ts',
   'scripts/verifyBootstrapAdmin1.ts',
   'scripts/verifySmokeLedgerApi1.ts',
+  'scripts/verifyPurchInvoiceRace1.ts',
 ];
 
 export interface BatteryItemReport {
