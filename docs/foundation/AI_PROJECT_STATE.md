@@ -475,6 +475,9 @@
   - Scope Discipline & Deferred Limitations: Stock idempotency, decimal precision refactoring, and GRN atomicity/integrity remain separate deferred items (not marked as fixed).
   - P05_STARTED: `YES`
   - MODULES_STARTED: `YES`
+- **AN-BOOT-FIRST-RUN-1**: `IMPLEMENTED`
+  - Status: `IMPLEMENTED`, `CI_STATUS=PENDING`
+  - Summary: Delivered complete first-run operational path merging `AN-BOOTSTRAP-ADMIN-1`, `AN-OPS-FIRST-RUN-1`, and `AN-SMOKE-LEDGER-API-1`. Added explicit one-time CLI `scripts/bootstrapPlatformAdmin.ts` (`npm run bootstrap:admin`) creating the initial `platform_admin` via Argon2id only when `count(platform_admin) === 0` (refusing silent promotion of non-admin users, rejecting passwords < 12 chars, and logging zero secrets), while preserving non-creating server startup reconciliation in `AuthService.bootstrapPlatformAdminFromEnv()`. Added `docs/ops/FIRST_RUN.md` and clarified `.env.example` documenting exact sequence (`secrets` -> `migrate` -> `db:provision-app-role` -> `bootstrap:admin` -> `login` -> company creation) and dev ports (`3000`/`3001`). Added `scripts/verifyBootstrapAdmin1.ts` (`npm run test:bootstrap-admin-1`) and `scripts/verifySmokeLedgerApi1.ts` (`npm run test:smoke-ledger-api-1`) for loopback PostgreSQL HTTP verification.
 
 ### Current Operational Posture
 - Auth login: operational (operator-confirmed)

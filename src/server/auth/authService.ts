@@ -1,11 +1,73 @@
 import { hashPassword, verifyPassword } from './passwordHash.js';
 import { defaultUserStore, User, UserStore } from './userStore.js';
+import { defaultUserRepository, UserRepository } from './userRepository.js';
 import { defaultSessionStore, Session, SessionStore } from './sessionStore.js';
 import { InvalidCredentialsError, ValidationError } from '../http/errors.js';
+import { DbExecutor } from '../db/types.js';
 
 export interface LoginResult {
   session: Session;
   user: Omit<User, 'passwordHash'>;
+}
+
+export interface ParsedPlatformAdminEnvCredentials {
+  username: string;
+  password: string;
+}
+
+export interface ExplicitBootstrapResult {
+  status: 'created' | 'already_exists';
+  userId: string;
+  username: string;
+}
+
+type BootstrapRepoPort = Pick<
+  UserRepository,
+  'countPlatformAdmins' | 'findByUsername' | 'createUser' | 'withTransaction'
+>;
+
+export function parsePlatformAdminEnvCredentials(
+  requireConfigured: true
+): ParsedPlatformAdminEnvCredentials;
+export function parsePlatformAdminEnvCredentials(
+  requireConfigured: false
+): ParsedPlatformAdminEnvCredentials | null;
+export function parsePlatformAdminEnvCredentials(
+  requireConfigured: boolean
+): ParsedPlatformAdminEnvCredentials | null {
+  const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
+  const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+
+  const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
+  const hasPassword = Boolean(rawPassword && rawPassword.trim() !== '');
+
+  if ((hasUsername && !hasPassword) || (!hasUsername && hasPassword)) {
+    throw new Error(
+      '[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured together for administrator bootstrap'
+    );
+  }
+
+  if (!hasUsername || !hasPassword) {
+    if (requireConfigured) {
+      throw new Error(
+        '[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD environment variables are required'
+      );
+    }
+    return null;
+  }
+
+  const username = rawUsername!.trim().toLowerCase();
+  const password = rawPassword!;
+
+  if (username.length === 0 || username.length > 150) {
+    throw new Error('[auth] FATAL: PLATFORM_ADMIN_USERNAME must be between 1 and 150 characters');
+  }
+
+  if (password.length < 12) {
+    throw new Error('[auth] FATAL: PLATFORM_ADMIN_PASSWORD must be at least 12 characters long');
+  }
+
+  return { username, password };
 }
 
 // Pre-computed dummy Argon2 hash for constant-time comparison when username is missing
@@ -20,7 +82,8 @@ async function getDummyHash(): Promise<string> {
 export class AuthService {
   constructor(
     private userStore: UserStore = defaultUserStore,
-    private sessionStore: SessionStore = defaultSessionStore
+    private sessionStore: SessionStore = defaultSessionStore,
+    private userRepo: BootstrapRepoPort = defaultUserRepository
   ) {}
 
   async login(username: string, plainPassword: string): Promise<LoginResult> {
@@ -76,56 +139,44 @@ export class AuthService {
   }
 
   /**
-   * Initializes initial platform administrator account securely from environment variables.
-   * Requires password length >= 12 characters.
+   * Synchronizes password for an existing platform_admin on server startup.
+   * Strictly non-creating when no account exists (use explicit CLI `bootstrap:admin`).
    */
   async bootstrapPlatformAdminFromEnv(): Promise<boolean> {
-    const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
-    const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
-
-    const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
-    const hasPassword = Boolean(rawPassword && rawPassword.trim() !== '');
-
-    // Requirement 4: If only one administrator credential is configured, fail clearly
-    if ((hasUsername && !hasPassword) || (!hasUsername && hasPassword)) {
-      throw new Error('[auth] FATAL: Both PLATFORM_ADMIN_USERNAME and PLATFORM_ADMIN_PASSWORD must be configured together for administrator bootstrap');
-    }
-
-    if (!hasUsername || !hasPassword) {
+    const credentials = parsePlatformAdminEnvCredentials(false);
+    if (!credentials) {
       return false; // Neither configured; bootstrap not requested
     }
 
-    const username = rawUsername!.trim().toLowerCase();
-    const password = rawPassword!;
-
-    // Requirement 5: Minimum 12-character administrator password requirement
-    if (password.length < 12) {
-      throw new Error('[auth] FATAL: PLATFORM_ADMIN_PASSWORD must be at least 12 characters long');
-    }
+    const { username, password } = credentials;
 
     try {
       const existing = await this.userStore.findByUsername(username);
-      
+
       if (existing) {
         if (existing.role !== 'platform_admin') {
-          throw new Error(`[auth] FATAL: Bootstrap conflict — user '${username}' already exists with role '${existing.role}', not 'platform_admin'`);
+          throw new Error(
+            `[auth] FATAL: Bootstrap conflict — user '${username}' already exists with role '${existing.role}', not 'platform_admin'`
+          );
         }
 
         if (!existing.isActive) {
-           throw new Error(`[auth] FATAL: Bootstrap failed — platform admin account '${username}' is inactive`);
+          throw new Error(`[auth] FATAL: Bootstrap failed — platform admin account '${username}' is inactive`);
         }
-        
+
         // Self-Healing: If the existing password hash does not match the current environment secret, synchronize it
         const isMatch = await verifyPassword(password, existing.passwordHash || '');
         if (!isMatch) {
           console.log(`[auth] Reconciling password for existing platform admin '${username}'...`);
           const newHash = await hashPassword(password);
           const updated = await this.userStore.updatePasswordHash(username, newHash);
-          
+
           if (!updated) {
-            throw new Error(`[auth] FATAL: Failed to update password hash for platform admin '${username}'. Zero rows affected.`);
+            throw new Error(
+              `[auth] FATAL: Failed to update password hash for platform admin '${username}'. Zero rows affected.`
+            );
           }
-          
+
           console.log(`[auth] SUCCESS: Platform admin '${username}' password reconciled.`);
         } else {
           console.log(`[auth] Platform admin '${username}' is already synchronized.`);
@@ -143,6 +194,76 @@ export class AuthService {
       }
       const sanitizedMsg = err instanceof Error ? err.message : String(err);
       throw new Error(`[auth] FATAL: Bootstrap failure for platform admin '${username}': ${sanitizedMsg}`);
+    }
+  }
+
+  /**
+   * Explicit one-time CLI bootstrap for the first platform_admin user.
+   * Creates a platform_admin ONLY when count(platform_admin) === 0.
+   * Refuses silent promotion of existing non-platform_admin users and never logs secrets.
+   */
+  async createInitialPlatformAdminFromEnv(): Promise<ExplicitBootstrapResult> {
+    const { username, password } = parsePlatformAdminEnvCredentials(true);
+
+    const runCreate = async (tx?: DbExecutor): Promise<ExplicitBootstrapResult> => {
+      if (tx) {
+        await tx.query("SELECT pg_advisory_xact_lock(hashtext('bootstrap_platform_admin'))");
+      }
+
+      const existing = await this.userRepo.findByUsername(username, tx);
+      if (existing) {
+        if (existing.role !== 'platform_admin') {
+          throw new Error(
+            `[auth] FATAL: Bootstrap conflict — user '${username}' already exists with role '${existing.role}'. Silent promotion is forbidden.`
+          );
+        }
+        if (existing.isActive === false) {
+          throw new Error(
+            `[auth] FATAL: Bootstrap failed — platform admin account '${username}' already exists but is inactive`
+          );
+        }
+        return {
+          status: 'already_exists',
+          userId: existing.id,
+          username: existing.username,
+        };
+      }
+
+      const adminCount = await this.userRepo.countPlatformAdmins(tx);
+      if (adminCount > 0) {
+        throw new Error(
+          `[auth] FATAL: Bootstrap rejected — a platform_admin account already exists (count=${adminCount}). Explicit CLI creation is allowed only when zero platform admins exist.`
+        );
+      }
+
+      const passwordHash = await hashPassword(password);
+      const created = await this.userRepo.createUser(
+        {
+          username,
+          passwordHash,
+          role: 'platform_admin',
+        },
+        tx
+      );
+
+      return {
+        status: 'created',
+        userId: created.id,
+        username: created.username,
+      };
+    };
+
+    try {
+      if (typeof this.userRepo.withTransaction === 'function') {
+        return await this.userRepo.withTransaction((tx) => runCreate(tx));
+      }
+      return await runCreate(undefined);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('[auth] FATAL:')) {
+        throw err;
+      }
+      const sanitizedMsg = err instanceof Error ? err.message : String(err);
+      throw new Error(`[auth] FATAL: Explicit platform admin creation failed for '${username}': ${sanitizedMsg}`);
     }
   }
 }

@@ -66,6 +66,19 @@ export class UserRepository {
     return res.rows[0] || null;
   }
 
+  async countPlatformAdmins(customExecutor?: DbExecutor): Promise<number> {
+    const executor = await this.getExecutor(customExecutor);
+
+    const sql = `
+      SELECT count(*)::int as count
+      FROM platform_users
+      WHERE role = 'platform_admin';
+    `;
+
+    const res = await executor.query<{ count: number }>(sql);
+    return Number(res.rows[0]?.count ?? 0);
+  }
+
   async listUsers(): Promise<Omit<User, 'passwordHash'>[]> {
     const executor = await this.getExecutor();
 
