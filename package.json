@@ -128,6 +128,7 @@
     "test:purch-return-1": "tsx scripts/verifyPurchReturn1.ts",
     "test:ap-open-items-1": "tsx scripts/verifyApOpenItems1.ts",
     "test:purch-pay-1": "tsx scripts/verifyPurchPay1.ts",
+    "test:purch-ui-wire-1": "tsx scripts/verifyPurchUiWire1.ts",
     "test:cash-custody-core-1": "tsx scripts/verifyCashCustodyCore1.ts",
     "test:cash-custody-lifecycle-1": "tsx scripts/verifyCashCustodyLifecycle1.ts",
     "test:cash-custody-ui-1": "tsx scripts/verifyCashCustodyUi1.ts",

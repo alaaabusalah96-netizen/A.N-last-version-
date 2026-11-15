@@ -142,6 +142,7 @@ const scripts = [
   'scripts/verifyPurchReturn1.ts',
   'scripts/verifyApOpenItems1.ts',
   'scripts/verifyPurchPay1.ts',
+  'scripts/verifyPurchUiWire1.ts',
   'scripts/verifyCashCustodyCore1.ts',
   'scripts/verifyCashCustodyLifecycle1.ts',
   'scripts/verifyCashCustodyUi1.ts',
