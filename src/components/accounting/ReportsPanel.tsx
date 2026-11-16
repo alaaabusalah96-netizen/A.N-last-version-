@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, RefreshCw, AlertCircle, Calendar, ArrowLeftRight, PieChart, Landmark, Download } from 'lucide-react';
+import { FileText, RefreshCw, AlertCircle, Calendar, ArrowLeftRight, PieChart, Landmark, Download, Wallet, Clock } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import {
   buildGeneralLedgerCsv,
   buildIncomeStatementCsv,
   buildBalanceSheetCsv,
+  buildOpsCashSummaryCsv,
+  buildOpsArApSummaryCsv,
   withBom,
 } from '../../lib/csvExport.js';
 
@@ -19,7 +21,7 @@ interface ReportsPanelProps {
 }
 
 export function ReportsPanel({ companyId }: ReportsPanelProps) {
-  const [reportType, setReportType] = useState<'gl' | 'income' | 'balance'>('gl');
+  const [reportType, setReportType] = useState<'gl' | 'income' | 'balance' | 'ops-cash' | 'ops-aging'>('gl');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +36,8 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
   const [glData, setGlData] = useState<any | null>(null);
   const [incomeData, setIncomeData] = useState<any | null>(null);
   const [balanceData, setBalanceData] = useState<any | null>(null);
+  const [opsCashData, setOpsCashData] = useState<any | null>(null);
+  const [opsAgingData, setOpsAgingData] = useState<any | null>(null);
 
   useEffect(() => {
     async function loadAccounts() {
@@ -104,6 +108,22 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
         }
         const body = await res.json();
         setBalanceData(body.report);
+      } else if (reportType === 'ops-cash') {
+        const res = await apiFetch(`/api/accounting/reports/ops-cash-summary?companyId=${companyId}`);
+        if (!res.ok) {
+          const errBody = await res.json();
+          throw new Error(errBody.message || errBody.error || 'فشل تحميل ملخص النقدية والبنوك');
+        }
+        const body = await res.json();
+        setOpsCashData(body.report);
+      } else if (reportType === 'ops-aging') {
+        const res = await apiFetch(`/api/accounting/reports/ops-ar-ap-aging?companyId=${companyId}`);
+        if (!res.ok) {
+          const errBody = await res.json();
+          throw new Error(errBody.message || errBody.error || 'فشل تحميل ملخص أعمار الذمم');
+        }
+        const body = await res.json();
+        setOpsAgingData(body.report);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في جلب التقرير المالي');
@@ -129,6 +149,12 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
     } else if (reportType === 'balance' && balanceData) {
       filename = 'balance-sheet.csv';
       csv = buildBalanceSheetCsv(balanceData);
+    } else if (reportType === 'ops-cash' && opsCashData) {
+      filename = 'ops-cash-bank-summary.csv';
+      csv = buildOpsCashSummaryCsv(opsCashData);
+    } else if (reportType === 'ops-aging' && opsAgingData) {
+      filename = 'ops-ar-ap-aging.csv';
+      csv = buildOpsArApSummaryCsv(opsAgingData);
     }
 
     if (!csv) return;
@@ -160,7 +186,7 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
           </div>
 
           {/* Report Subtabs */}
-          <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+          <div className="flex flex-wrap items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
             <button
               onClick={() => setReportType('gl')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
@@ -181,12 +207,30 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
             </button>
             <button
               onClick={() => setReportType('balance')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                 reportType === 'balance' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
               <Landmark className="w-3.5 h-3.5" />
-              <span>الميزانية العمومية (Balance Sheet)</span>
+              <span>الميزانية العمومية</span>
+            </button>
+            <button
+              onClick={() => setReportType('ops-cash')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                reportType === 'ops-cash' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Wallet className="w-3.5 h-3.5" />
+              <span>ملخص النقدية والبنوك</span>
+            </button>
+            <button
+              onClick={() => setReportType('ops-aging')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                reportType === 'ops-aging' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>ملخص أعمار الذمم</span>
             </button>
           </div>
         </div>
@@ -263,7 +307,7 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
             </button>
             <button
               onClick={handleExportCsv}
-              disabled={loading || (!glData && !incomeData && !balanceData)}
+              disabled={loading || (!glData && !incomeData && !balanceData && !opsCashData && !opsAgingData)}
               className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-600/20 cursor-pointer"
               title="تصدير CSV مع دعم اللغة العربية UTF-8 BOM"
             >
@@ -481,6 +525,174 @@ export function ReportsPanel({ companyId }: ReportsPanelProps) {
                       الميزانية غير متوازنة
                     </span>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reportType === 'ops-cash' && opsCashData && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">إجمالي الصناديق النقدية</div>
+                  <div className="font-mono tabular-nums font-bold text-emerald-400 text-sm">{opsCashData.totalCashBalance}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">إجمالي الأرصدة البنكية</div>
+                  <div className="font-mono tabular-nums font-bold text-indigo-400 text-sm">{opsCashData.totalBankBalance}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">إجمالي السيولة المتاحة</div>
+                  <div className="font-mono tabular-nums font-bold text-white text-sm">{opsCashData.totalLiquidityPosition}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">عهد الموظفين المفتوحة ({opsCashData.openCustodiesCount})</div>
+                  <div className="font-mono tabular-nums font-bold text-amber-400 text-sm">{opsCashData.totalOpenCustodyAmount}</div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-bold text-slate-200 mb-2">الصناديق والخزائن النقدية</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="py-2 px-3">الرمز</th>
+                        <th className="py-2 px-3">اسم الصندوق</th>
+                        <th className="py-2 px-3">افتتاحي</th>
+                        <th className="py-2 px-3">إجمالي الوارد</th>
+                        <th className="py-2 px-3">إجمالي الصادر</th>
+                        <th className="py-2 px-3">الرصيد الحالي</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-slate-200">
+                      {(opsCashData.registers || []).length === 0 ? (
+                        <tr><td colSpan={6} className="py-4 text-center text-slate-500">لا توجد صناديق نقدية</td></tr>
+                      ) : opsCashData.registers.map((r: any) => (
+                        <tr key={r.id}>
+                          <td className="py-2 px-3 font-mono text-indigo-300">{r.code}</td>
+                          <td className="py-2 px-3">{r.nameAr}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums">{r.openingBalance}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums text-emerald-400">{r.totalIn}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums text-rose-400">{r.totalOut}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums font-bold text-white">{r.currentBalance}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-bold text-slate-200 mb-2">الحسابات البنكية</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="py-2 px-3">الرمز</th>
+                        <th className="py-2 px-3">الحساب / البنك</th>
+                        <th className="py-2 px-3">العملة</th>
+                        <th className="py-2 px-3">الرصيد الدفتري</th>
+                        <th className="py-2 px-3">حركات كشف معلقة</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-slate-200">
+                      {(opsCashData.banks || []).length === 0 ? (
+                        <tr><td colSpan={5} className="py-4 text-center text-slate-500">لا توجد حسابات بنكية</td></tr>
+                      ) : opsCashData.banks.map((b: any) => (
+                        <tr key={b.id}>
+                          <td className="py-2 px-3 font-mono text-indigo-300">{b.code}</td>
+                          <td className="py-2 px-3">{b.nameAr} ({b.bankName})</td>
+                          <td className="py-2 px-3 font-mono">{b.currencyCode}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums font-bold text-white">{b.bookBalance}</td>
+                          <td className="py-2 px-3 font-mono text-amber-400">{b.unmatchedStatementCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reportType === 'ops-aging' && opsAgingData && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">إجمالي الذمم المدينة (العملاء - AR)</div>
+                  <div className="font-mono tabular-nums font-bold text-emerald-400 text-sm">{opsAgingData.ar.totalOpen}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">إجمالي الذمم الدائنة (الموردون - AP)</div>
+                  <div className="font-mono tabular-nums font-bold text-rose-400 text-sm">{opsAgingData.ap.totalOpen}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
+                  <div className="text-slate-400 text-[11px] mb-1">صافي الذمم (AR - AP)</div>
+                  <div className="font-mono tabular-nums font-bold text-indigo-400 text-sm">{opsAgingData.netReceivablesMinusPayables}</div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-bold text-emerald-400 mb-2">أعمار الذمم المدينة (العملاء)</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="py-2 px-3">العميل</th>
+                        <th className="py-2 px-3">الفواتير</th>
+                        <th className="py-2 px-3">0 - 30 يوم</th>
+                        <th className="py-2 px-3">31 - 60 يوم</th>
+                        <th className="py-2 px-3">61+ يوم</th>
+                        <th className="py-2 px-3">الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-slate-200">
+                      {(opsAgingData.ar.customers || []).length === 0 ? (
+                        <tr><td colSpan={6} className="py-4 text-center text-slate-500">لا توجد مستحقات عملاء مفتوحة</td></tr>
+                      ) : opsAgingData.ar.customers.map((c: any) => (
+                        <tr key={c.customerId}>
+                          <td className="py-2 px-3">{c.customerCode} - {c.customerNameAr}</td>
+                          <td className="py-2 px-3 font-mono">{c.invoiceCount}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums">{c.bucket0To30}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums text-amber-400">{c.bucket31To60}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums text-rose-400">{c.bucket61Plus}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums font-bold text-white">{c.totalOpenAmount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-bold text-rose-400 mb-2">أعمار الذمم الدائنة (الموردون)</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="py-2 px-3">المورد</th>
+                        <th className="py-2 px-3">الفواتير</th>
+                        <th className="py-2 px-3">0 - 30 يوم</th>
+                        <th className="py-2 px-3">31 - 60 يوم</th>
+                        <th className="py-2 px-3">61+ يوم</th>
+                        <th className="py-2 px-3">الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50 text-slate-200">
+                      {(opsAgingData.ap.suppliers || []).length === 0 ? (
+                        <tr><td colSpan={6} className="py-4 text-center text-slate-500">لا توجد مستحقات موردين مفتوحة</td></tr>
+                      ) : opsAgingData.ap.suppliers.map((s: any) => (
+                        <tr key={s.supplierId}>
+                          <td className="py-2 px-3">{s.supplierCode} - {s.supplierNameAr}</td>
+                          <td className="py-2 px-3 font-mono">{s.invoiceCount}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums">{s.bucket0To30}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums text-amber-400">{s.bucket31To60}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums text-rose-400">{s.bucket61Plus}</td>
+                          <td className="py-2 px-3 font-mono tabular-nums font-bold text-white">{s.totalOpenAmount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>

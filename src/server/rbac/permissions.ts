@@ -62,6 +62,11 @@ export const PERMISSIONS = {
   SALES_READ: 'sales:read',
   SALES_WRITE: 'sales:write',
   SALES_POST: 'sales:post',
+
+  // Banking & Reconciliation (البنوك والتسوية البنكية)
+  BANKING_READ: 'banking:read',
+  BANKING_WRITE: 'banking:write',
+  BANKING_RECONCILE: 'banking:reconcile',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;
@@ -69,7 +74,7 @@ export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | st
 export interface PermissionCatalogItem {
   code: PermissionCode;
   labelAr: string;
-  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المبيعات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة';
+  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المبيعات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة' | 'البنوك';
 }
 
 export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
@@ -126,5 +131,10 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.SALES_READ, labelAr: 'عرض العملاء وأذون التسليم والفواتير والتحصيلات', group: 'المبيعات' },
   { code: PERMISSIONS.SALES_WRITE, labelAr: 'إنشاء وتعديل العملاء ومسودات التسليم والفواتير والتحصيل', group: 'المبيعات' },
   { code: PERMISSIONS.SALES_POST, labelAr: 'ترحيل أذون تسليم المبيعات وفواتير المبيعات والتحصيلات', group: 'المبيعات' },
+
+  // البنوك
+  { code: PERMISSIONS.BANKING_READ, labelAr: 'عرض الحسابات البنكية وكشوف الحساب والتسويات', group: 'البنوك' },
+  { code: PERMISSIONS.BANKING_WRITE, labelAr: 'إنشاء وتعديل الحسابات البنكية وإدخال كشوف الحساب', group: 'البنوك' },
+  { code: PERMISSIONS.BANKING_RECONCILE, labelAr: 'مطابقة واعتماد التسويات البنكية', group: 'البنوك' },
 ];
 

@@ -238,6 +238,26 @@
     "table": "sales_collections",
     "scope": "tenant",
     "reason": "Per-company customer collections into cash registers"
+  },
+  {
+    "table": "fin_bank_accounts",
+    "scope": "tenant",
+    "reason": "Per-company bank accounts linked to GL accounts"
+  },
+  {
+    "table": "fin_bank_reconciliations",
+    "scope": "tenant",
+    "reason": "Per-company simplified bank reconciliation sessions"
+  },
+  {
+    "table": "fin_bank_statement_lines",
+    "scope": "tenant",
+    "reason": "Per-company imported or manual bank statement lines for reconciliation"
+  },
+  {
+    "table": "fin_fiscal_year_closes",
+    "scope": "tenant",
+    "reason": "Per-company fiscal year close records and retained earnings closing entry references"
   }
 ]
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale, Calendar, Link2 } from 'lucide-react';
+import { Building2, BookOpen, FileText, AlertCircle, RefreshCw, Layers, Scale, Calendar, Link2, Landmark } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountsPanel } from './AccountsPanel.js';
 import { JournalWorkspace } from './JournalWorkspace.js';
@@ -7,6 +7,7 @@ import { TrialBalancePanel } from './TrialBalancePanel.js';
 import { PeriodsPanel } from './PeriodsPanel.js';
 import { ReportsPanel } from './ReportsPanel.js';
 import { GlMappingPanel } from './GlMappingPanel.js';
+import { BankingReconcilePanel } from './BankingReconcilePanel.js';
 
 interface Company {
   id: string;
@@ -25,7 +26,7 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods' | 'reports' | 'mapping'>(() =>
+  const [activeTab, setActiveTab] = useState<'coa' | 'journal' | 'tb' | 'periods' | 'reports' | 'mapping' | 'banking'>(() =>
     typeof window !== 'undefined' && window.location.hash === '#/accounting/mapping' ? 'mapping' : 'coa'
   );
 
@@ -114,7 +115,7 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
 
         {/* Workspace Navigation Tabs */}
         {selectedCompanyId && (
-          <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center gap-2 mt-6 pt-4 border-t border-slate-800/80">
             <button
               onClick={() => setActiveTab('coa')}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
@@ -186,6 +187,18 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
               <Link2 className="w-4 h-4" />
               <span>الربط المحاسبي</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('banking')}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeTab === 'banking'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Landmark className="w-4 h-4" />
+              <span>البنوك والتسوية</span>
+            </button>
           </div>
         )}
       </div>
@@ -223,6 +236,8 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
         <PeriodsPanel companyId={selectedCompanyId} canManage={canWrite} />
       ) : activeTab === 'mapping' ? (
         <GlMappingPanel companyId={selectedCompanyId} userRole={userRole} />
+      ) : activeTab === 'banking' ? (
+        <BankingReconcilePanel companyId={selectedCompanyId} canWrite={canWrite} canReconcile={canWrite} />
       ) : (
         <ReportsPanel companyId={selectedCompanyId} />
       )}

@@ -8,6 +8,8 @@ import { wrap } from '../http/asyncHandler.js';
 import { isUuid } from '../http/validators.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../http/errors.js';
 import { defaultReportsService } from '../accounting/reportsService.js';
+import { defaultYearCloseService } from '../accounting/yearCloseService.js';
+import { defaultOperationalReportsService } from '../accounting/operationalReportsService.js';
 import { GL_EVENT_CATALOG } from '../accounting/glEventCatalog.js';
 
 export const accountingRoutes = Router();
@@ -386,6 +388,94 @@ accountingRoutes.get(
       asOfDate: (req.query.asOfDate as string) || undefined,
     });
     return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// ==========================================
+// Operational Reports Endpoints (AN-REPORTS-OPS-1)
+// ==========================================
+
+// GET /api/accounting/reports/ops-cash-summary?companyId=
+accountingRoutes.get(
+  '/reports/ops-cash-summary',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const report = await defaultOperationalReportsService.getCashAndBankSummary(companyId);
+    return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// GET /api/accounting/reports/ops-ar-ap-aging?companyId=
+accountingRoutes.get(
+  '/reports/ops-ar-ap-aging',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const report = await defaultOperationalReportsService.getArApAgingSummary(companyId);
+    return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// ==========================================
+// Fiscal Year Close Endpoints (AN-YEAR-CLOSE-1)
+// ==========================================
+
+// GET /api/accounting/year-close?companyId=...
+accountingRoutes.get(
+  '/year-close',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const closes = await defaultYearCloseService.listYearCloses(companyId);
+    return res.status(200).json({ status: 'ok', closes });
+  })
+);
+
+// POST /api/accounting/year-close/preview
+accountingRoutes.post(
+  '/year-close/preview',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { companyId, fiscalYearCode, startDate, endDate } = req.body || {};
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId || '');
+    const preview = await defaultYearCloseService.previewYearClose(companyId, {
+      fiscalYearCode,
+      startDate,
+      endDate,
+    });
+    return res.status(200).json({ status: 'ok', preview });
+  })
+);
+
+// POST /api/accounting/year-close/execute
+accountingRoutes.post(
+  '/year-close/execute',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { companyId, fiscalYearCode, startDate, endDate, retainedEarningsAccountId, notes } = req.body || {};
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_POST, companyId || '');
+    const yearClose = await defaultYearCloseService.executeYearClose(
+      companyId,
+      {
+        fiscalYearCode,
+        startDate,
+        endDate,
+        retainedEarningsAccountId,
+        notes,
+      },
+      user.id,
+      user.role === 'platform_admin'
+    );
+    return res.status(201).json({ status: 'ok', yearClose });
   })
 );
 

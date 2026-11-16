@@ -9,7 +9,7 @@ import {
   Unlock,
   X,
   Clock,
-  User,
+  ShieldCheck,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 
@@ -49,6 +49,19 @@ export function PeriodsPanel({ companyId, canManage }: PeriodsPanelProps) {
     action: 'close' | 'reopen';
   } | null>(null);
 
+  // Fiscal Year Close state (AN-YEAR-CLOSE-1)
+  const [yearCloses, setYearCloses] = useState<any[]>([]);
+  const [equityAccounts, setEquityAccounts] = useState<any[]>([]);
+  const [showYearCloseModal, setShowYearCloseModal] = useState(false);
+  const [ycForm, setYcForm] = useState({
+    fiscalYearCode: `FY-${new Date().getFullYear()}`,
+    startDate: `${new Date().getFullYear()}-01-01`,
+    endDate: `${new Date().getFullYear()}-12-31`,
+    retainedEarningsAccountId: '',
+    notes: '',
+  });
+  const [ycPreview, setYcPreview] = useState<any | null>(null);
+
   const loadPeriods = async () => {
     if (!companyId) return;
     setLoading(true);
@@ -61,6 +74,25 @@ export function PeriodsPanel({ companyId, canManage }: PeriodsPanelProps) {
       }
       const data = await res.json();
       setPeriods(data.periods || []);
+
+      const [ycRes, accRes] = await Promise.all([
+        apiFetch(`/api/accounting/year-close?companyId=${companyId}`),
+        apiFetch(`/api/accounting/accounts?companyId=${companyId}`),
+      ]);
+      if (ycRes.ok) {
+        const ycJson = await ycRes.json();
+        setYearCloses(ycJson.closes || []);
+      }
+      if (accRes.ok) {
+        const accJson = await accRes.json();
+        const eq = (accJson.accounts || []).filter(
+          (a: any) => a.accountType === 'equity' && a.isPostable && a.isActive
+        );
+        setEquityAccounts(eq);
+        if (eq.length > 0 && !ycForm.retainedEarningsAccountId) {
+          setYcForm((prev) => ({ ...prev, retainedEarningsAccountId: eq[0].id }));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء جلب الفترات المالية');
     } finally {
@@ -71,6 +103,61 @@ export function PeriodsPanel({ companyId, canManage }: PeriodsPanelProps) {
   useEffect(() => {
     loadPeriods();
   }, [companyId]);
+
+  const handlePreviewYearClose = async () => {
+    setActionLoading(true);
+    setError(null);
+    setYcPreview(null);
+    try {
+      const res = await apiFetch('/api/accounting/year-close/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId,
+          fiscalYearCode: ycForm.fiscalYearCode,
+          startDate: ycForm.startDate,
+          endDate: ycForm.endDate,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || err.error || 'تعذر معاينة إقفال السنة المالية');
+      }
+      const data = await res.json();
+      setYcPreview(data.preview);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'خطأ في معاينة إقفال السنة المالية');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleExecuteYearClose = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canManage) return;
+    setActionLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await apiFetch('/api/accounting/year-close/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId, ...ycForm }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || err.error || 'فشل إقفال السنة المالية');
+      }
+      setSuccess(`تم إقفال السنة المالية (${ycForm.fiscalYearCode}) وترحيل النتيجة إلى الأرباح المبقاة بنجاح`);
+      setShowYearCloseModal(false);
+      setYcPreview(null);
+      await loadPeriods();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'خطأ في تنفيذ إقفال السنة المالية');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleCreatePeriod = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,13 +264,26 @@ export function PeriodsPanel({ companyId, canManage }: PeriodsPanelProps) {
           </button>
 
           {canManage && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>فترة مالية جديدة</span>
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setYcPreview(null);
+                  setShowYearCloseModal(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/20 transition cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>إقفال سنة مالية</span>
+              </button>
+
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>فترة مالية جديدة</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -294,6 +394,60 @@ export function PeriodsPanel({ companyId, canManage }: PeriodsPanelProps) {
                         <span className="text-slate-600 text-xs">عرض فقط</span>
                       )}
                     </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Fiscal Year Close History Table */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h4 className="text-sm font-bold text-white">سجل إقفال السنوات المالية وترحيل الأرباح المبقاة</h4>
+            <p className="text-[11px] text-slate-400">
+              يُنشئ قيد إقفال متوازن لإقفال حسابات الإيرادات والمصروفات وترحيل صافي الدخل لحقوق الملكية مع إغلاق الفترات المفتوحة
+            </p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-xs">
+            <thead>
+              <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                <th className="py-3 px-4">السنة المالية</th>
+                <th className="py-3 px-4">النطاق الزمني</th>
+                <th className="py-3 px-4">إجمالي الإيرادات</th>
+                <th className="py-3 px-4">إجمالي المصروفات</th>
+                <th className="py-3 px-4">صافي النتيجة</th>
+                <th className="py-3 px-4">حساب الترحيل</th>
+                <th className="py-3 px-4">قيد الإقفال</th>
+                <th className="py-3 px-4 text-center">الفترات المغلقة</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 text-slate-200">
+              {yearCloses.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
+                    لم يتم تنفيذ أي إقفال سنة مالية لهذه الشركة بعد
+                  </td>
+                </tr>
+              ) : (
+                yearCloses.map((yc) => (
+                  <tr key={yc.id} className="hover:bg-slate-800/30">
+                    <td className="py-3 px-4 font-mono font-bold text-amber-400">{yc.fiscalYearCode}</td>
+                    <td className="py-3 px-4 font-mono text-slate-300">
+                      {yc.startDate} → {yc.endDate}
+                    </td>
+                    <td className="py-3 px-4 font-mono tabular-nums text-emerald-400">{yc.totalRevenue}</td>
+                    <td className="py-3 px-4 font-mono tabular-nums text-rose-400">{yc.totalExpenses}</td>
+                    <td className="py-3 px-4 font-mono tabular-nums font-bold text-white">{yc.netIncome}</td>
+                    <td className="py-3 px-4 text-slate-300">
+                      {yc.retainedEarningsAccountCode} - {yc.retainedEarningsAccountNameAr}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-indigo-300">{yc.closingEntryNo || '—'}</td>
+                    <td className="py-3 px-4 text-center font-mono">{yc.closedPeriodsCount}</td>
                   </tr>
                 ))
               )}
@@ -435,6 +589,149 @@ export function PeriodsPanel({ companyId, canManage }: PeriodsPanelProps) {
                   : 'نعم، إعادة فتح الفترة'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Fiscal Year Close Modal */}
+      {showYearCloseModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-5 h-5 text-amber-400" />
+                <h4 className="font-bold text-white text-sm">إقفال السنة المالية وترحيل النتيجة</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowYearCloseModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteYearClose} className="p-6 flex flex-col gap-4 overflow-y-auto text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1">رمز السنة المالية *</label>
+                  <input
+                    type="text"
+                    required
+                    value={ycForm.fiscalYearCode}
+                    onChange={(e) => setYcForm({ ...ycForm, fiscalYearCode: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 mb-1">تاريخ البداية *</label>
+                  <input
+                    type="date"
+                    required
+                    value={ycForm.startDate}
+                    onChange={(e) => setYcForm({ ...ycForm, startDate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 mb-1">تاريخ النهاية *</label>
+                  <input
+                    type="date"
+                    required
+                    value={ycForm.endDate}
+                    onChange={(e) => setYcForm({ ...ycForm, endDate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                <div>
+                  <label className="block text-slate-300 mb-1">حساب الأرباح المبقاة (حقوق الملكية) *</label>
+                  <select
+                    required
+                    value={ycForm.retainedEarningsAccountId}
+                    onChange={(e) => setYcForm({ ...ycForm, retainedEarningsAccountId: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                  >
+                    {equityAccounts.length === 0 ? (
+                      <option value="">لا يوجد حساب حقوق ملكية قابل للترحيل</option>
+                    ) : (
+                      equityAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.code} - {a.nameAr}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePreviewYearClose}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold transition cursor-pointer"
+                >
+                  {actionLoading ? 'جاري الفحص...' : 'معاينة النتيجة والفترات'}
+                </button>
+              </div>
+
+              {ycPreview && (
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
+                      <div className="text-slate-400 text-[11px]">إجمالي الإيرادات</div>
+                      <div className="font-mono font-bold text-emerald-400 text-sm">{ycPreview.totalRevenue}</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
+                      <div className="text-slate-400 text-[11px]">إجمالي المصروفات</div>
+                      <div className="font-mono font-bold text-rose-400 text-sm">{ycPreview.totalExpenses}</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
+                      <div className="text-slate-400 text-[11px]">صافي الدخل للترحيل</div>
+                      <div className="font-mono font-bold text-indigo-400 text-sm">{ycPreview.netIncome}</div>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    الفترات المفتوحة التي سيتم إغلاقها تلقائياً:{' '}
+                    <strong className="font-mono text-white">{ycPreview.openPeriodsToCloseCount}</strong>
+                  </div>
+                  {ycPreview.blockingReasons && ycPreview.blockingReasons.length > 0 && (
+                    <div className="p-3 bg-rose-950/40 border border-rose-800/70 rounded-lg text-rose-300 flex flex-col gap-1">
+                      {ycPreview.blockingReasons.map((reason: string, idx: number) => (
+                        <div key={idx}>• {reason}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-300 mb-1">ملاحظات الإقفال</label>
+                <input
+                  type="text"
+                  placeholder="إقفال السنة المالية..."
+                  value={ycForm.notes}
+                  onChange={(e) => setYcForm({ ...ycForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowYearCloseModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading || !ycForm.retainedEarningsAccountId || (ycPreview && !ycPreview.canExecute)}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-bold rounded-xl cursor-pointer"
+                >
+                  {actionLoading ? 'جاري التنفيذ...' : 'تنفيذ إقفال السنة المالية'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

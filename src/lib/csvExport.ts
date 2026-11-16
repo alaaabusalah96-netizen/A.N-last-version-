@@ -93,3 +93,76 @@ export function buildBalanceSheetCsv(data: any): string {
 
   return `${rows.join('\n')}\n`;
 }
+
+export function buildOpsCashSummaryCsv(data: any): string {
+  const rows: string[] = [];
+  rows.push(line(['النوع', 'الرمز', 'الاسم', 'الرصيد الافتتاحي', 'إجمالي الوارد', 'إجمالي الصادر', 'الرصيد الحالي'].map(csvText)));
+
+  for (const r of (data?.registers || [])) {
+    rows.push(line([
+      csvText('خزينة نقدية'),
+      csvText(r.code),
+      csvText(r.nameAr),
+      csvNumber(r.openingBalance),
+      csvNumber(r.totalIn),
+      csvNumber(r.totalOut),
+      csvNumber(r.currentBalance),
+    ]));
+  }
+  for (const b of (data?.banks || [])) {
+    rows.push(line([
+      csvText(`حساب بنكي (${b.bankName || ''})`),
+      csvText(b.code),
+      csvText(b.nameAr),
+      csvNumber(b.openingBalance),
+      '',
+      '',
+      csvNumber(b.bookBalance),
+    ]));
+  }
+
+  rows.push(line(['', '', csvText('إجمالي الصناديق النقدية'), '', '', '', csvNumber(data?.totalCashBalance)]));
+  rows.push(line(['', '', csvText('إجمالي البنوك (حسب الدفتر)'), '', '', '', csvNumber(data?.totalBankBalance)]));
+  rows.push(line(['', '', csvText('إجمالي السيولة المتاحة'), '', '', '', csvNumber(data?.totalLiquidityPosition)]));
+  rows.push(line(['', '', csvText(`العهد المفتوحة (${data?.openCustodiesCount || 0})`), '', '', '', csvNumber(data?.totalOpenCustodyAmount)]));
+
+  return `${rows.join('\n')}\n`;
+}
+
+export function buildOpsArApSummaryCsv(data: any): string {
+  const rows: string[] = [];
+  rows.push(line(['التصنيف', 'الرمز', 'الطرف (عميل/مورد)', 'عدد الفواتير', '0-30 يوم', '31-60 يوم', '61+ يوم', 'الإجمالي المفتوح'].map(csvText)));
+
+  for (const c of (data?.ar?.customers || [])) {
+    rows.push(line([
+      csvText('ذمم مدينة (عملاء)'),
+      csvText(c.customerCode),
+      csvText(c.customerNameAr),
+      csvNumber(c.invoiceCount),
+      csvNumber(c.bucket0To30),
+      csvNumber(c.bucket31To60),
+      csvNumber(c.bucket61Plus),
+      csvNumber(c.totalOpenAmount),
+    ]));
+  }
+
+  for (const s of (data?.ap?.suppliers || [])) {
+    rows.push(line([
+      csvText('ذمم دائنة (موردون)'),
+      csvText(s.supplierCode),
+      csvText(s.supplierNameAr),
+      csvNumber(s.invoiceCount),
+      csvNumber(s.bucket0To30),
+      csvNumber(s.bucket31To60),
+      csvNumber(s.bucket61Plus),
+      csvNumber(s.totalOpenAmount),
+    ]));
+  }
+
+  rows.push(line(['', '', csvText('إجمالي الذمم المدينة (AR)'), csvNumber(data?.ar?.openInvoiceCount), csvNumber(data?.ar?.bucket0To30), csvNumber(data?.ar?.bucket31To60), csvNumber(data?.ar?.bucket61Plus), csvNumber(data?.ar?.totalOpen)]));
+  rows.push(line(['', '', csvText('إجمالي الذمم الدائنة (AP)'), csvNumber(data?.ap?.openInvoiceCount), csvNumber(data?.ap?.bucket0To30), csvNumber(data?.ap?.bucket31To60), csvNumber(data?.ap?.bucket61Plus), csvNumber(data?.ap?.totalOpen)]));
+  rows.push(line(['', '', csvText('صافي الذمم (AR - AP)'), '', '', '', '', csvNumber(data?.netReceivablesMinusPayables)]));
+
+  return `${rows.join('\n')}\n`;
+}
+
