@@ -125,6 +125,7 @@
     "test:purch-invoice-1": "tsx scripts/verifyPurchInvoice1.ts",
     "test:purch-invoice-race-1": "tsx scripts/verifyPurchInvoiceRace1.ts",
     "test:purch-3way-1": "tsx scripts/verifyPurch3Way1.ts",
+    "test:purch-3way-post-gate-1": "tsx scripts/verifyPurch3WayPostGate1.ts",
     "test:purch-return-1": "tsx scripts/verifyPurchReturn1.ts",
     "test:ap-open-items-1": "tsx scripts/verifyApOpenItems1.ts",
     "test:purch-pay-1": "tsx scripts/verifyPurchPay1.ts",

@@ -164,6 +164,7 @@ const scripts = [
   'scripts/verifyCompositeFkSetNull1.ts',
   'scripts/verifySalesCogsVat1.ts',
   'scripts/verifyStockMovementSign1.ts',
+  'scripts/verifyPurch3WayPostGate1.ts',
 ];
 
 export interface BatteryItemReport {

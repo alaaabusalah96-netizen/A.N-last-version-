@@ -14,6 +14,7 @@ import { SupplierInvoice, CreateSupplierInvoiceInput, OutstandingGrnLineRow } fr
 import { fromMinorUnits, toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
 import { DbExecutor } from '../db/types.js';
+import { defaultThreeWayMatchService, ThreeWayMatchService } from './threeWayMatchService.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,7 +29,8 @@ export class InvoiceService {
     private journalService: Pick<JournalService, 'createDraftEntry' | 'postEntry'> = defaultJournalService,
     private auditService: AuditService = defaultAuditService,
     private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
-    private accountRepo: AccountRepository = defaultAccountRepository
+    private accountRepo: AccountRepository = defaultAccountRepository,
+    private threeWayMatchService: Pick<ThreeWayMatchService, 'evaluateInvoice'> = defaultThreeWayMatchService
   ) {
     this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
   }
@@ -310,6 +312,17 @@ export class InvoiceService {
       totalAmount = toMoney(totalAmount);
       if (!(totalAmount > 0)) {
         throw new ValidationError('لا يمكن ترحيل فاتورة بقيمة إجمالية صفر أو سالبة');
+      }
+
+      const matchReport = await this.threeWayMatchService.evaluateInvoice(
+        companyId,
+        invoiceId,
+        tx
+      );
+      if (matchReport.overallStatus === 'variance_exceeded') {
+        throw new ValidationError(
+          'لا يمكن ترحيل فاتورة المورد: نتيجة المطابقة الثلاثية تتجاوز السياسة المعتمدة (كمية/سعر). راجع تقرير المطابقة.'
+        );
       }
 
       const gl = await this.resolveGlMapping(companyId);
