@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Plus, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Building2, Plus, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient.js';
+import { EmptyState, ErrorBanner, LoadingState } from './ui/index.js';
 
 export interface CompanyItem {
   id: string;
@@ -122,22 +123,25 @@ export function CompaniesPanel({ userRole }: CompaniesPanelProps) {
 
       {/* Errors */}
       {error && (
-        <div className="mt-4 p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-red-400" />
-          <span>{error}</span>
-        </div>
+        <ErrorBanner message={error} onRetry={fetchCompanies} className="mt-4" />
       )}
 
       {/* Companies List */}
       <div className="mt-5">
         {loading && companies.length === 0 ? (
-          <div className="text-center py-8 text-slate-500 text-xs font-mono">
-            جاري استرجاع الشركات المصرح بها...
-          </div>
+          <LoadingState label="جاري استرجاع الشركات المصرح بها..." rows={2} />
         ) : companies.length === 0 ? (
-          <div className="text-center py-8 border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
-            لا توجد شركات مسجلة حتى الآن.
-          </div>
+          <EmptyState
+            title="لا توجد شركات مسجلة حتى الآن."
+            description={
+              isPlatformAdmin
+                ? 'أنشئ الشركة الأولى لبدء إعداد الدليل المحاسبي والعمليات.'
+                : 'لم يتم تعيين شركات لهذا الحساب بعد.'
+            }
+            icon={<Building2 className="w-5 h-5" />}
+            actionLabel={isPlatformAdmin ? 'إضافة شركة جديدة' : undefined}
+            onAction={isPlatformAdmin ? () => setShowCreateModal(true) : undefined}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {companies.map((comp) => (

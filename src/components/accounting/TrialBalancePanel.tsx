@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Scale, RefreshCw, AlertCircle, CheckCircle2, Calendar, Building2 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { DataTableShell, ErrorBanner } from '../ui/index.js';
 
 interface TrialBalanceAccountRow {
   accountId: string;
@@ -153,12 +154,7 @@ export function TrialBalancePanel({ companyId }: TrialBalancePanelProps) {
       </div>
 
       {/* Error display */}
-      {error && (
-        <div className="p-4 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-          <span>{error}</span>
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onRetry={loadTrialBalance} />}
 
       {/* Status Summary Banner */}
       {data && (
@@ -201,36 +197,30 @@ export function TrialBalancePanel({ companyId }: TrialBalancePanelProps) {
       )}
 
       {/* Trial Balance Table */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-xs">
-            <thead>
-              <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
-                <th className="py-3.5 px-4">كود الحساب</th>
-                <th className="py-3.5 px-4">اسم الحساب</th>
-                <th className="py-3.5 px-4">نوع الحساب</th>
-                <th className="py-3.5 px-4 text-left">إجمالي المدين</th>
-                <th className="py-3.5 px-4 text-left">إجمالي الدائن</th>
-                <th className="py-3.5 px-4 text-left">الرصيد الصافي</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500">
-                    <div className="flex items-center justify-center gap-2">
-                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                      <span>جاري تجميع وحساب ميزان المراجعة...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : !data || data.accounts.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500">
-                    لا توجد حسابات مفعالة ومرحلة في دليل الحسابات
-                  </td>
-                </tr>
-              ) : (
+      <DataTableShell
+        loading={loading}
+        loadingLabel="جاري تجميع وحساب ميزان المراجعة..."
+        isEmpty={!loading && (!data || data.accounts.length === 0)}
+        emptyState={{
+          title: 'لا توجد حسابات مفعّلة ومرحّلة في دليل الحسابات',
+          description: 'قم بترحيل القيود اليومية أو تعديل عوامل التصفية لعرض أرصدة ميزان المراجعة.',
+          icon: <Scale className="w-5 h-5" />,
+        }}
+      >
+        <table className="w-full text-right text-xs">
+          <thead>
+            <tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+              <th className="py-3.5 px-4">كود الحساب</th>
+              <th className="py-3.5 px-4">اسم الحساب</th>
+              <th className="py-3.5 px-4">نوع الحساب</th>
+              <th className="py-3.5 px-4 text-left">إجمالي المدين</th>
+              <th className="py-3.5 px-4 text-left">إجمالي الدائن</th>
+              <th className="py-3.5 px-4 text-left">الرصيد الصافي</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/60 text-slate-200">
+            {data &&
+              (
                 data.accounts.map((row) => (
                   <tr key={row.accountId} className="hover:bg-slate-800/30 transition">
                     <td className="py-3 px-4 font-mono font-semibold text-indigo-300">
@@ -256,28 +246,27 @@ export function TrialBalancePanel({ companyId }: TrialBalancePanelProps) {
                   </tr>
                 ))
               )}
-            </tbody>
-            {data && data.accounts.length > 0 && (
-              <tfoot>
-                <tr className="bg-slate-950 font-bold border-t border-slate-800 text-xs">
-                  <td colSpan={3} className="py-4 px-4 text-right text-slate-300">
-                    الإجمالي العام لميزان المراجعة:
-                  </td>
-                  <td className="py-4 px-4 text-left font-mono text-emerald-400 text-sm">
-                    {data.grandTotalDebit.toFixed(2)}
-                  </td>
-                  <td className="py-4 px-4 text-left font-mono text-rose-400 text-sm">
-                    {data.grandTotalCredit.toFixed(2)}
-                  </td>
-                  <td className="py-4 px-4 text-left font-mono text-slate-300 text-sm">
-                    {(data.grandTotalDebit - data.grandTotalCredit).toFixed(2)}
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
+          </tbody>
+          {data && data.accounts.length > 0 && (
+            <tfoot>
+              <tr className="bg-slate-950 font-bold border-t border-slate-800 text-xs">
+                <td colSpan={3} className="py-4 px-4 text-right text-slate-300">
+                  الإجمالي العام لميزان المراجعة:
+                </td>
+                <td className="py-4 px-4 text-left font-mono text-emerald-400 text-sm">
+                  {data.grandTotalDebit.toFixed(2)}
+                </td>
+                <td className="py-4 px-4 text-left font-mono text-rose-400 text-sm">
+                  {data.grandTotalCredit.toFixed(2)}
+                </td>
+                <td className="py-4 px-4 text-left font-mono text-slate-300 text-sm">
+                  {(data.grandTotalDebit - data.grandTotalCredit).toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </DataTableShell>
     </div>
   );
 }

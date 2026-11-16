@@ -20,6 +20,12 @@ export function requestIdMiddleware(req: ExtendedRequest, res: Response, next: N
   next();
 }
 
+function sanitizeErrorText(input: string): string {
+  return input
+    .replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, 'postgresql://[REDACTED]')
+    .replace(/(password|secret|token|apiKey|csrfSecret)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]');
+}
+
 export function errorHandler(
   err: any,
   req: ExtendedRequest,
@@ -27,8 +33,10 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   const requestId = req.requestId || 'unknown-request';
-  const internalDetail = err?.internalDetail ? ` | Detail: ${err.internalDetail}` : '';
-  console.error(`[ErrorHandler] RequestId: ${requestId} | Method: ${req.method} | Path: ${req.path}${internalDetail}`, err);
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const safeMessage = sanitizeErrorText(rawMessage);
+  const safeCode = err?.code ? ` | Code: ${String(err.code)}` : '';
+  console.error(`[ErrorHandler] RequestId: ${requestId} | Method: ${req.method} | Path: ${req.path}${safeCode} | Message: ${safeMessage}`);
 
   if (res.headersSent) {
     return;

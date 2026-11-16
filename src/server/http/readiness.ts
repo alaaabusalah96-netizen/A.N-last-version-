@@ -5,7 +5,13 @@ import { getDefaultExecutor } from '../db/index.js';
 import { assertSafeDbRole } from '../db/roleGuard.js';
 
 export function handleLiveness(_req: Request, res: Response): void {
-  res.status(200).json({ status: 'ok', service: 'an-erp-platform' });
+  res.status(200).json({
+    status: 'ok',
+    service: 'an-erp-platform',
+    version: process.env.APP_VERSION || '1.0.0',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
 }
 
 export async function handleReadiness(_req: Request, res: Response): Promise<void> {
