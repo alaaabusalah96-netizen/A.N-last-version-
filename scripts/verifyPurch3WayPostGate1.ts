@@ -110,6 +110,7 @@ async function run() {
   const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   const companyIds: string[] = [];
   const userIds: string[] = [];
+  let cleanupFailed = false;
 
   try {
     const companyRepo = new CompanyRepository();
@@ -219,57 +220,140 @@ async function run() {
       l1Rejected && invAfterRej.status === 'draft' && jeRejRes.rows.length === 0
     );
 
-    // L2 ACCEPT within_tolerance: Invoice unitCost = 104 (4% variance <= 5% tolerance) -> within_tolerance
-    const tolDraft = await defaultInvoiceService.createInvoice(
+    // L2 ACCEPT partial invoice 1 (qty=4 of 10, unitCost=100) -> status=posted, JE exists and is posted
+    const partialDraft1 = await defaultInvoiceService.createInvoice(
       companyAId,
       {
         supplierId: supplier.id,
-        supplierInvoiceNo: `INV-TOL-${unique}`,
-        lines: [{ grnLineId, qty: 2, unitCost: 104 }],
+        supplierInvoiceNo: `INV-PART-1-${unique}`,
+        lines: [{ grnLineId, qty: 4, unitCost: 100 }],
       },
       userId
     );
-    const postedTol = await defaultInvoiceService.postInvoice(companyAId, tolDraft.id, userId);
+    const postedPart1 = await defaultInvoiceService.postInvoice(companyAId, partialDraft1.id, userId);
+    const jePart1Res = await executor.query<any>(
+      `SELECT id, status FROM journal_entries WHERE company_id = $1 AND id = $2`,
+      [companyAId, postedPart1.journalEntryId]
+    );
     await check(
-      'L2 ACCEPT within_tolerance: Invoice with 4% price variance posts successfully',
-      postedTol.status === 'posted'
+      'L2 ACCEPT partial: Invoice 1 with partial qty (4 of 10) posts successfully and creates posted journal entry',
+      postedPart1.status === 'posted' && jePart1Res.rows.length === 1 && jePart1Res.rows[0].status === 'posted'
+    );
+
+    // L3 ACCEPT completing remaining (qty=6 of 10 remaining, unitCost=104 within 5% tolerance) -> status=posted
+    const partialDraft2 = await defaultInvoiceService.createInvoice(
+      companyAId,
+      {
+        supplierId: supplier.id,
+        supplierInvoiceNo: `INV-PART-2-${unique}`,
+        lines: [{ grnLineId, qty: 6, unitCost: 104 }],
+      },
+      userId
+    );
+    const postedPart2 = await defaultInvoiceService.postInvoice(companyAId, partialDraft2.id, userId);
+    const jePart2Res = await executor.query<any>(
+      `SELECT id, status FROM journal_entries WHERE company_id = $1 AND id = $2`,
+      [companyAId, postedPart2.journalEntryId]
+    );
+    await check(
+      'L3 ACCEPT completing: Invoice 2 completing remaining qty (6 of 10) at +4% cost posts successfully',
+      postedPart2.status === 'posted' && jePart2Res.rows.length === 1 && jePart2Res.rows[0].status === 'posted'
+    );
+
+    // L4 REJECT over remaining (qty=2 when remaining=0) -> throws ValidationError, remains draft, zero JE
+    const overDraft = await defaultInvoiceService.createInvoice(
+      companyAId,
+      {
+        supplierId: supplier.id,
+        supplierInvoiceNo: `INV-OVER-${unique}`,
+        lines: [{ grnLineId, qty: 2, unitCost: 100 }],
+      },
+      userId
+    );
+    let l4Rejected = false;
+    try {
+      await defaultInvoiceService.postInvoice(companyAId, overDraft.id, userId);
+    } catch (err) {
+      if (err instanceof ValidationError) l4Rejected = true;
+    }
+    const invAfterOver = await defaultInvoiceService.getInvoice(companyAId, overDraft.id);
+    const jeOverRes = await executor.query<any>(
+      `SELECT id FROM journal_entries WHERE company_id = $1 AND memo LIKE $2`,
+      [companyAId, `%${overDraft.supplierInvoiceNo}%`]
+    );
+    await check(
+      'L4 REJECT over remaining: Invoice 3 exceeding remaining GRN qty is rejected, remains draft, and has zero journal entries',
+      l4Rejected && invAfterOver.status === 'draft' && jeOverRes.rows.length === 0
     );
 
     console.log('PASS: verifyPurch3WayPostGate1 completed successfully.');
   } finally {
     const adminPoolUrl = process.env.MIGRATION_DATABASE_URL || dbUrl;
-    const client = new pg.Client(buildPgConfig(adminPoolUrl, process.env));
-    await client.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('DELETE FROM purch_supplier_invoice_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM purch_supplier_invoices WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM accounts WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM inv_items WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM inv_warehouses WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM audit_logs WHERE company_id = ANY($1::uuid[])', [companyIds]);
-      await client.query('DELETE FROM companies WHERE id = ANY($1::uuid[])', [companyIds]);
-      if (userIds.length > 0) {
-        await client.query('DELETE FROM audit_logs WHERE actor_user_id = ANY($1::uuid[])', [userIds]);
-        await client.query('DELETE FROM platform_users WHERE id = ANY($1::uuid[])', [userIds]);
+    if (adminPoolUrl && companyIds.length > 0) {
+      const client = new pg.Client(buildPgConfig(adminPoolUrl, process.env));
+      let triggersDisabled = false;
+      try {
+        await client.connect();
+        await client.query('BEGIN');
+        await client.query('ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
+        triggersDisabled = true;
+
+        await client.query('DELETE FROM purch_supplier_invoice_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_supplier_invoices WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM accounts WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_items WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_warehouses WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM audit_logs WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM companies WHERE id = ANY($1::uuid[])', [companyIds]);
+        if (userIds.length > 0) {
+          await client.query('DELETE FROM audit_logs WHERE actor_user_id = ANY($1::uuid[])', [userIds]);
+          await client.query('DELETE FROM platform_users WHERE id = ANY($1::uuid[])', [userIds]);
+        }
+        await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
+        triggersDisabled = false;
+        await client.query('COMMIT');
+      } catch (e) {
+        cleanupFailed = true;
+        try {
+          await client.query('ROLLBACK');
+        } catch {}
+        console.error('[cleanup] error during cleanup transaction:', e);
+      } finally {
+        if (triggersDisabled) {
+          try {
+            await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
+            await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
+            await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
+            console.log('[cleanup] Restored immutability triggers on maintenance connection in finally block.');
+          } catch (enableErr) {
+            cleanupFailed = true;
+            console.error('[cleanup] FATAL: Failed to re-enable triggers in finally block:', enableErr);
+          }
+        }
+        await client.end();
       }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK').catch(() => {});
-      console.error('[cleanup] error:', e);
-    } finally {
-      await client.end();
     }
     await closeAllExecutors();
   }
+
+  const { exitCode } = summary();
+  if (cleanupFailed) {
+    console.error('[cleanup] Cleanup failed. Treating test as failure.');
+    process.exit(1);
+  }
+  process.exit(exitCode);
 }
 
 run().catch((err) => {

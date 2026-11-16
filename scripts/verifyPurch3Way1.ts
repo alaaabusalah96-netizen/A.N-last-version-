@@ -115,7 +115,7 @@ async function run() {
     priceExceededRes.status === 'variance_exceeded' && priceExceededRes.priceVariancePct === 12
   );
 
-  const qtyExceededRes = evaluateThreeWayLineMatch({
+  const partialRes = evaluateThreeWayLineMatch({
     grnLineId: 'g1',
     itemId: 'i1',
     poLineId: 'p1',
@@ -123,12 +123,48 @@ async function run() {
     poUnitCost: 100,
     grnQty: 10,
     grnUnitCost: 100,
-    invoiceQty: 8, // qtyVariance = 2 !== 0 under strict qtyTol=0
+    invoiceQty: 4, // 4 of 10 under same price -> allowed (matched)
     invoiceUnitCost: 100,
   });
+  const overGrnRes = evaluateThreeWayLineMatch({
+    grnLineId: 'g1',
+    itemId: 'i1',
+    poLineId: 'p1',
+    poQty: 10,
+    poUnitCost: 100,
+    grnQty: 10,
+    grnUnitCost: 100,
+    invoiceQty: 11, // 11 of 10 -> variance_exceeded
+    invoiceUnitCost: 100,
+  });
+  const overPoRes = evaluateThreeWayLineMatch({
+    grnLineId: 'g1',
+    itemId: 'i1',
+    poLineId: 'p1',
+    poQty: 5,
+    poUnitCost: 100,
+    grnQty: 10,
+    grnUnitCost: 100,
+    invoiceQty: 6, // 6 with poQty 5 -> variance_exceeded
+    invoiceUnitCost: 100,
+  });
+  const partialPriceExceededRes = evaluateThreeWayLineMatch({
+    grnLineId: 'g1',
+    itemId: 'i1',
+    poLineId: 'p1',
+    poQty: 10,
+    poUnitCost: 100,
+    grnQty: 10,
+    grnUnitCost: 100,
+    invoiceQty: 4,
+    invoiceUnitCost: 112, // +12% price variance -> variance_exceeded (price)
+  });
   await check(
-    'S6: Quantity mismatch under strict qtyTolerancePct=0 returns status=variance_exceeded',
-    qtyExceededRes.status === 'variance_exceeded' && qtyExceededRes.qtyVariance === 2
+    'S6: Partial qty (4 of 10) matches; over-GRN (11 of 10), over-PO (6 of 5), and partial +12% price fail as variance_exceeded',
+    partialRes.status === 'matched' &&
+      overGrnRes.status === 'variance_exceeded' &&
+      overPoRes.status === 'variance_exceeded' &&
+      partialPriceExceededRes.status === 'variance_exceeded'
   );
 
   const grnOnlyMatched = evaluateThreeWayLineMatch({
@@ -338,7 +374,7 @@ async function run() {
       report3.overallStatus === 'variance_exceeded' && report3.lines[0]?.priceVariancePct === 12
     );
 
-    // L4: Strict qty tolerance (qtyTolerancePct=0): partial qty=6 vs GRN qty=10 yields variance_exceeded
+    // L4: Partial qty (qty=6 vs GRN qty=10) yields matched
     const case4 = await createPoLinkedGrn(10, 100);
     const inv4 = await defaultInvoiceService.createInvoice(
       companyAId,
@@ -347,8 +383,8 @@ async function run() {
     );
     const report4 = await defaultThreeWayMatchService.evaluateInvoice(companyAId, inv4.id);
     await check(
-      'L4: Live qty discrepancy (6 vs 10) yields overallStatus=variance_exceeded under qtyTolerancePct=0',
-      report4.overallStatus === 'variance_exceeded' && report4.lines[0]?.qtyVariance === 4
+      'L4: Live partial qty (6 of 10) yields overallStatus=matched',
+      report4.overallStatus === 'matched' && report4.lines[0]?.qtyVariance === 4
     );
 
     // L5: Tenant isolation on evaluateInvoice

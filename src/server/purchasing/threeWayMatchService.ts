@@ -70,12 +70,12 @@ export function evaluateThreeWayLineMatch(
   const poUnitCost = input.poUnitCost !== null && input.poUnitCost !== undefined ? toDecimal(input.poUnitCost, 4) : null;
 
   const qtyVariance = toDecimal(grnQty - invoiceQty, 4);
-  const qtyDiffAbs = Math.abs(grnQty - invoiceQty);
-  const qtyVariancePct = grnQty > 0 ? (qtyDiffAbs / grnQty) * 100 : (qtyDiffAbs > 0 ? 100 : 0);
-  const exceedsGrnQtyTolerance =
-    qtyDiffAbs > 0 && (policy.qtyTolerancePct <= 0 || qtyVariancePct > policy.qtyTolerancePct);
+  const exceedsGrnOver =
+    policy.qtyTolerancePct > 0
+      ? invoiceQty > grnQty * (1 + policy.qtyTolerancePct / 100)
+      : invoiceQty > grnQty;
   const exceedsPoQty = poQty !== null && invoiceQty > poQty;
-  const qtyExceeded = exceedsGrnQtyTolerance || exceedsPoQty;
+  const qtyExceeded = exceedsGrnOver || exceedsPoQty;
 
   const hasPoRef = Boolean(poLineId && poUnitCost !== null);
   const refUnitCost = hasPoRef ? (poUnitCost as number) : grnUnitCost;
@@ -94,10 +94,18 @@ export function evaluateThreeWayLineMatch(
 
   if (qtyExceeded && priceExceeded) {
     status = 'variance_exceeded';
-    messageAr = `تجاوز فارق الكمية (${Math.abs(qtyVariance)}) وفارق السعر (${priceVariancePct.toFixed(2)}%) حدود التسامح المسموح بها`;
+    messageAr = exceedsPoQty && exceedsGrnOver
+      ? `تجاوزت الكمية المفوترة (${invoiceQty}) كمية الاستلام (${grnQty}) وكمية أمر الشراء (${poQty}) وفارق السعر (${priceVariancePct.toFixed(2)}%)`
+      : exceedsPoQty
+      ? `تجاوزت الكمية المفوترة (${invoiceQty}) كمية أمر الشراء (${poQty}) وفارق السعر (${priceVariancePct.toFixed(2)}%)`
+      : `تجاوزت الكمية المفوترة (${invoiceQty}) كمية الاستلام (${grnQty}) وفارق السعر (${priceVariancePct.toFixed(2)}%) حدود التسامح المسموح بها`;
   } else if (qtyExceeded) {
     status = 'variance_exceeded';
-    messageAr = `تجاوز فارق الكمية (${Math.abs(qtyVariance)}) حد التسامح المسموح به للكمية (${policy.qtyTolerancePct}%)`;
+    messageAr = exceedsPoQty && exceedsGrnOver
+      ? `تجاوزت الكمية المفوترة (${invoiceQty}) كمية الاستلام (${grnQty}) وكمية أمر الشراء (${poQty})`
+      : exceedsPoQty
+      ? `تجاوزت الكمية المفوترة (${invoiceQty}) كمية أمر الشراء المعتمدة (${poQty})`
+      : `تجاوزت الكمية المفوترة (${invoiceQty}) كمية الاستلام المسموح بها (${grnQty})`;
   } else if (priceExceeded) {
     status = 'variance_exceeded';
     messageAr = hasPoRef

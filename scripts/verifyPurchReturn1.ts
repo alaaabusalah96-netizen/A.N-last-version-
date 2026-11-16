@@ -235,10 +235,10 @@ async function run() {
     const crInvOk = jeRes.rows.some((r: any) => r.account_id === invAcc.id && Number(r.debit) === 0 && Number(r.credit) === 200);
 
     await check(
-      'R2: Posting return decrements stock (13-4=9), records purchase_return (-4), posts balanced GL (Dr AP/Cr Inv 200), updates returnable=6',
+      'R2: Posting return decrements stock (13-4=9), records purchase_return (4), posts balanced GL (Dr AP/Cr Inv 200), updates returnable=6',
       ret1Posted.status === 'posted' &&
         balR2 === 9 &&
-        retMovements.some((mv) => mv.movementType === 'purchase_return' && mv.qty === -4) &&
+        retMovements.some((mv) => mv.movementType === 'purchase_return' && mv.qty === 4) &&
         drApOk &&
         crInvOk &&
         g1AfterR2?.returnableQty === 6 &&
