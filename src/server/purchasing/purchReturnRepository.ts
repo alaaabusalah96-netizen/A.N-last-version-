@@ -416,10 +416,13 @@ export class PurchReturnRepository {
       for (let i = 0; i < input.lines.length; i++) {
         const l = input.lines[i];
         const grnLineRes = await executor.query<any>(
-          `SELECT item_id as "itemId" FROM purch_grn_lines WHERE id = $1 AND company_id = $2`,
-          [l.grnLineId, companyId]
+          `SELECT item_id as "itemId" FROM purch_grn_lines WHERE id = $1 AND company_id = $2 AND grn_id = $3`,
+          [l.grnLineId.trim(), companyId, input.grnId]
         );
         const itemId = grnLineRes.rows[0]?.itemId;
+        if (!itemId) {
+          throw new Error(`GRN line '${l.grnLineId}' does not belong to GRN '${input.grnId}'`);
+        }
 
         const lineSql = `
           INSERT INTO purch_return_lines (

@@ -101,6 +101,31 @@ export class PurchReturnService {
         throw new ValidationError('المورد في المرتجع لا يطابق مورد سند الاستلام');
       }
 
+      const whRes = await tx.query<any>(
+        `SELECT id, is_active FROM inv_warehouses WHERE company_id = $1 AND id = $2`,
+        [companyId, input.warehouseId]
+      );
+      if (whRes.rows.length === 0 || !whRes.rows[0].is_active) {
+        throw new ValidationError('المستودع المحدد غير موجود أو غير نشط');
+      }
+
+      if (input.invoiceId) {
+        const invRes = await tx.query<any>(
+          `SELECT id, status, supplier_id FROM purch_supplier_invoices WHERE company_id = $1 AND id = $2`,
+          [companyId, input.invoiceId]
+        );
+        if (invRes.rows.length === 0) {
+          throw new NotFoundError('فاتورة المورد المرتبطة غير موجودة');
+        }
+        const inv = invRes.rows[0];
+        if (inv.status !== 'posted') {
+          throw new ValidationError('لا يمكن ربط مرتجع مشتريات بفاتورة مورد غير مرحلة');
+        }
+        if (inv.supplier_id !== input.supplierId) {
+          throw new ValidationError('فاتورة المورد لا تتبع نفس المورد في المرتجع');
+        }
+      }
+
       const returnableLines = await this.returnRepo.listReturnableGrnLines(companyId, input.supplierId, tx);
       const returnableMap = new Map<string, any>();
       for (const rl of returnableLines) {
@@ -128,6 +153,9 @@ export class PurchReturnService {
         const out = returnableMap.get(normalized);
         if (!out) {
           throw new ValidationError('بند سند الاستلام المحدد غير متاح للإرجاع أو تم إرجاعه كاملاً');
+        }
+        if (out.grnId !== input.grnId) {
+          throw new ValidationError('بند سند الاستلام المحدد لا يتبع سند الاستلام المختار في المرتجع');
         }
 
         if (toMinorUnits(line.qty, 4) > toMinorUnits(out.returnableQty, 4)) {
@@ -170,21 +198,49 @@ export class PurchReturnService {
     });
   }
 
-  private async resolveGlMapping(companyId: string): Promise<{
+  private async resolveGlMapping(companyId: string, tx?: any): Promise<{
     inventoryAccountId: string;
     purchasesClearingAccountId: string;
     accountsPayableAccountId: string;
   }> {
-    const settings = await this.settingsRepo.getByCompanyId(companyId);
-    if (!settings || !settings.inventoryAccountId || !settings.purchasesClearingAccountId) {
+    let invFromConfig = '';
+    let clrFromConfig = '';
+    let apFromConfig = '';
+
+    try {
+      const grnCfg = await this.glMappingService.resolve(companyId, 'accounting.grn_mapping');
+      invFromConfig = (grnCfg.accounts.inventory_account_id || '').trim();
+      clrFromConfig = (grnCfg.accounts.purchases_clearing_account_id || '').trim();
+    } catch {
+      // fallback to company_settings
+    }
+
+    try {
+      const invCfg = await this.glMappingService.resolve(companyId, 'accounting.purchase_invoice_mapping');
+      if (!clrFromConfig) {
+        clrFromConfig = (invCfg.accounts.purchases_clearing_account_id || '').trim();
+      }
+      apFromConfig = (invCfg.accounts.accounts_payable_account_id || '').trim();
+    } catch {
+      // fallback to company_settings
+    }
+
+    const settings = await this.settingsRepo.getByCompanyId(companyId, tx);
+    const inventoryAccountId = invFromConfig || settings?.inventoryAccountId || '';
+    const purchasesClearingAccountId = clrFromConfig || settings?.purchasesClearingAccountId || '';
+    const accountsPayableAccountId =
+      apFromConfig || settings?.accountsPayableAccountId || purchasesClearingAccountId;
+
+    if (!inventoryAccountId || !purchasesClearingAccountId) {
       throw new ValidationError(
         'يرجى ضبط حساب المخزون وحساب المشتريات المعلقة في إعدادات الشركة قبل ترحيل مرتجعات المشتريات.'
       );
     }
+
     return {
-      inventoryAccountId: settings.inventoryAccountId,
-      purchasesClearingAccountId: settings.purchasesClearingAccountId,
-      accountsPayableAccountId: settings.accountsPayableAccountId || settings.purchasesClearingAccountId,
+      inventoryAccountId,
+      purchasesClearingAccountId,
+      accountsPayableAccountId,
     };
   }
 
@@ -213,6 +269,19 @@ export class PurchReturnService {
         throw new ValidationError('مرتجع المشتريات لا يحتوي على بنود لترحيلها');
       }
 
+      if (ret.invoiceId) {
+        const invRes = await tx.query<any>(
+          `SELECT id, status, supplier_id FROM purch_supplier_invoices WHERE company_id = $1 AND id = $2`,
+          [companyId, ret.invoiceId]
+        );
+        if (invRes.rows.length === 0) {
+          throw new ValidationError('فاتورة المورد المرتبطة بالمرتجع غير موجودة');
+        }
+        if (invRes.rows[0].status !== 'posted' || invRes.rows[0].supplier_id !== ret.supplierId) {
+          throw new ValidationError('فاتورة المورد المرتبطة بالمرتجع غير مرحلة أو لا تتبع نفس المورد');
+        }
+      }
+
       const whRes = await tx.query<any>(`SELECT id, is_active FROM inv_warehouses WHERE company_id = $1 AND id = $2 FOR UPDATE`, [
         companyId,
         ret.warehouseId,
@@ -225,19 +294,20 @@ export class PurchReturnService {
       const grnLineIds = ret.lines.map((l) => l.grnLineId).sort();
 
       const grnLinesRes = await tx.query<any>(
-        `SELECT id, qty::text FROM purch_grn_lines WHERE company_id = $1 AND id = ANY($2::uuid[]) ORDER BY id ASC FOR UPDATE`,
+        `SELECT id, grn_id as "grnId", qty::text FROM purch_grn_lines WHERE company_id = $1 AND id = ANY($2::uuid[]) ORDER BY id ASC FOR UPDATE`,
         [companyId, grnLineIds]
       );
-      const grnQtyMap = new Map<string, number>();
+      const grnLineMap = new Map<string, { grnId: string; qty: number }>();
       for (const gl of grnLinesRes.rows) {
-        grnQtyMap.set(gl.id, toDecimal(gl.qty, 4));
+        grnLineMap.set(gl.id, { grnId: gl.grnId, qty: toDecimal(gl.qty, 4) });
       }
 
       for (const line of ret.lines) {
-        const gQty = grnQtyMap.get(line.grnLineId);
-        if (gQty === undefined) {
-          throw new ValidationError('أحد بنود سند الاستلام المرتبطة بالمرتجع غير موجود');
+        const glInfo = grnLineMap.get(line.grnLineId);
+        if (!glInfo || glInfo.grnId !== ret.grnId) {
+          throw new ValidationError('أحد بنود سند الاستلام المرتبطة بالمرتجع غير موجود أو لا يتبع سند الاستلام');
         }
+        const gQty = glInfo.qty;
 
         const prevRetRes = await tx.query<any>(
           `SELECT COALESCE(SUM(prl.qty), 0)::text as total
@@ -247,7 +317,7 @@ export class PurchReturnService {
           [companyId, line.grnLineId, ret.id]
         );
         const alreadyReturned = toDecimal(prevRetRes.rows[0]?.total || '0', 4);
-        if (alreadyReturned + line.qty > gQty) {
+        if (toMinorUnits(alreadyReturned, 4) + toMinorUnits(line.qty, 4) > toMinorUnits(gQty, 4)) {
           throw new ValidationError(
             `كمية المرتجع للبند تتجاوز الكمية المتبقية القابلة للإرجاع من سند الاستلام`
           );
@@ -255,7 +325,10 @@ export class PurchReturnService {
 
         totalAmount += toDecimal(line.qty, 4) * toDecimal(line.unitCost, 4);
 
-        await this.stockRepo.decrementBalance(companyId, ret.warehouseId, line.itemId, line.qty, tx);
+        const updatedBalance = await this.stockRepo.decrementBalance(companyId, ret.warehouseId, line.itemId, line.qty, tx);
+        if (!updatedBalance) {
+          throw new ValidationError('رصيد المخزون المتاح في المستودع غير كافٍ لإتمام مرتجع المشتريات');
+        }
         await this.stockRepo.createMovement(
           companyId,
           ret.warehouseId,
@@ -274,7 +347,7 @@ export class PurchReturnService {
         throw new ValidationError('قيمة المرتجع الإجمالية يجب أن تكون أكبر من الصفر');
       }
 
-      const glAccounts = await this.resolveGlMapping(companyId);
+      const glAccounts = await this.resolveGlMapping(companyId, tx);
 
       const entryDate = ISO_DATE.test(ret.returnDate) ? ret.returnDate : new Date().toISOString().slice(0, 10);
       const returnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'purchase_return', 'PRTN', tx);

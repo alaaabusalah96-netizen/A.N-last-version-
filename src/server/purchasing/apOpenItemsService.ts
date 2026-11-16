@@ -1,6 +1,6 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
-import { toDecimal } from '../lib/numeric.js';
+import { MONEY_SCALE, fromMinorUnits, toMinorUnits } from '../lib/numeric.js';
 
 export interface ApOpenItemRow {
   invoiceId: string;
@@ -18,6 +18,44 @@ export interface ApOpenItemRow {
   remainingOpenAmount: number;
   paymentStatus: 'open' | 'partial' | 'paid';
   agingDays: number;
+}
+
+export function computeApOpenAmounts(
+  invoiceTotalRaw: unknown,
+  creditedReturnTotalRaw: unknown,
+  paidPaymentTotalRaw: unknown
+): {
+  invoiceTotal: number;
+  creditedReturnTotal: number;
+  paidPaymentTotal: number;
+  remainingOpenAmount: number;
+  paymentStatus: 'open' | 'partial' | 'paid';
+} {
+  const invUnits = toMinorUnits(invoiceTotalRaw, MONEY_SCALE);
+  const retUnits = toMinorUnits(creditedReturnTotalRaw, MONEY_SCALE);
+  const payUnits = toMinorUnits(paidPaymentTotalRaw, MONEY_SCALE);
+  const openUnits = invUnits - retUnits - payUnits;
+
+  const invoiceTotal = Number(fromMinorUnits(invUnits, MONEY_SCALE));
+  const creditedReturnTotal = Number(fromMinorUnits(retUnits, MONEY_SCALE));
+  const paidPaymentTotal = Number(fromMinorUnits(payUnits, MONEY_SCALE));
+  const remainingOpenAmount =
+    openUnits > BigInt(0) ? Number(fromMinorUnits(openUnits, MONEY_SCALE)) : 0;
+
+  let paymentStatus: 'open' | 'partial' | 'paid' = 'open';
+  if (remainingOpenAmount <= 0) {
+    paymentStatus = 'paid';
+  } else if (paidPaymentTotal > 0 || creditedReturnTotal > 0) {
+    paymentStatus = 'partial';
+  }
+
+  return {
+    invoiceTotal,
+    creditedReturnTotal,
+    paidPaymentTotal,
+    remainingOpenAmount,
+    paymentStatus,
+  };
 }
 
 export class ApOpenItemsService {
@@ -41,13 +79,13 @@ export class ApOpenItemsService {
           si.invoice_no as "invoiceNo",
           si.invoice_date as "invoiceDate",
           si.due_date as "dueDate",
-          COALESCE(inv_totals.invoice_total, 0) as "invoiceTotal",
-          COALESCE(ret_totals.credited_total, 0) as "creditedReturnTotal",
-          COALESCE(pay_totals.paid_total, 0) as "paidPaymentTotal",
+          COALESCE(inv_totals.invoice_total, 0)::text as "invoiceTotal",
+          COALESCE(ret_totals.credited_total, 0)::text as "creditedReturnTotal",
+          COALESCE(pay_totals.paid_total, 0)::text as "paidPaymentTotal",
           GREATEST(
             0,
             COALESCE(inv_totals.invoice_total, 0) - COALESCE(ret_totals.credited_total, 0) - COALESCE(pay_totals.paid_total, 0)
-          ) as "remainingOpenAmount",
+          )::text as "remainingOpenAmount",
           COALESCE(invoice_date, CURRENT_DATE) as "invDateRaw"
         FROM purch_supplier_invoices si
         INNER JOIN purch_suppliers s ON s.id = si.supplier_id AND s.company_id = si.company_id
@@ -78,17 +116,11 @@ export class ApOpenItemsService {
       const today = new Date();
 
       for (const r of res.rows) {
-        const invoiceTotal = toDecimal(r.invoiceTotal, 2);
-        const creditedReturnTotal = toDecimal(r.creditedReturnTotal, 2);
-        const paidPaymentTotal = toDecimal(r.paidPaymentTotal, 2);
-        const remainingOpenAmount = toDecimal(r.remainingOpenAmount, 2);
-
-        let paymentStatus: 'open' | 'partial' | 'paid' = 'open';
-        if (remainingOpenAmount <= 0) {
-          paymentStatus = 'paid';
-        } else if (paidPaymentTotal > 0 || creditedReturnTotal > 0) {
-          paymentStatus = 'partial';
-        }
+        const amounts = computeApOpenAmounts(
+          r.invoiceTotal,
+          r.creditedReturnTotal,
+          r.paidPaymentTotal
+        );
 
         const invDate = new Date(r.invDateRaw);
         const agingDays = Math.max(0, Math.floor((today.getTime() - invDate.getTime()) / (1000 * 60 * 60 * 24)));
@@ -103,11 +135,11 @@ export class ApOpenItemsService {
           invoiceNo: r.invoiceNo || null,
           invoiceDate: String(r.invoiceDate).slice(0, 10),
           dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
-          invoiceTotal,
-          creditedReturnTotal,
-          paidPaymentTotal,
-          remainingOpenAmount,
-          paymentStatus,
+          invoiceTotal: amounts.invoiceTotal,
+          creditedReturnTotal: amounts.creditedReturnTotal,
+          paidPaymentTotal: amounts.paidPaymentTotal,
+          remainingOpenAmount: amounts.remainingOpenAmount,
+          paymentStatus: amounts.paymentStatus,
           agingDays,
         });
       }

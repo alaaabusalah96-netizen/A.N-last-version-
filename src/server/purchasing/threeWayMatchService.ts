@@ -43,6 +43,98 @@ export interface InvoiceThreeWayMatchReport {
   policy: ThreeWayMatchPolicy;
 }
 
+export interface EvaluateLineMatchInput {
+  grnLineId: string;
+  itemId: string;
+  itemCode?: string;
+  itemNameAr?: string;
+  poLineId?: string | null;
+  poQty?: number | null;
+  poUnitCost?: number | null;
+  grnQty: number;
+  grnUnitCost: number;
+  invoiceQty: number;
+  invoiceUnitCost: number;
+}
+
+export function evaluateThreeWayLineMatch(
+  input: EvaluateLineMatchInput,
+  policy: ThreeWayMatchPolicy = DEFAULT_THREE_WAY_POLICY
+): LineMatchResult {
+  const grnQty = toDecimal(input.grnQty, 4);
+  const grnUnitCost = toDecimal(input.grnUnitCost, 4);
+  const invoiceQty = toDecimal(input.invoiceQty, 4);
+  const invoiceUnitCost = toDecimal(input.invoiceUnitCost, 4);
+  const poLineId = input.poLineId || null;
+  const poQty = input.poQty !== null && input.poQty !== undefined ? toDecimal(input.poQty, 4) : null;
+  const poUnitCost = input.poUnitCost !== null && input.poUnitCost !== undefined ? toDecimal(input.poUnitCost, 4) : null;
+
+  const qtyVariance = toDecimal(grnQty - invoiceQty, 4);
+  const qtyDiffAbs = Math.abs(grnQty - invoiceQty);
+  const qtyVariancePct = grnQty > 0 ? (qtyDiffAbs / grnQty) * 100 : (qtyDiffAbs > 0 ? 100 : 0);
+  const exceedsGrnQtyTolerance =
+    qtyDiffAbs > 0 && (policy.qtyTolerancePct <= 0 || qtyVariancePct > policy.qtyTolerancePct);
+  const exceedsPoQty = poQty !== null && invoiceQty > poQty;
+  const qtyExceeded = exceedsGrnQtyTolerance || exceedsPoQty;
+
+  const hasPoRef = Boolean(poLineId && poUnitCost !== null);
+  const refUnitCost = hasPoRef ? (poUnitCost as number) : grnUnitCost;
+  const priceDiff = Math.abs(invoiceUnitCost - refUnitCost);
+  const priceVariancePct =
+    refUnitCost > 0
+      ? (priceDiff / refUnitCost) * 100
+      : (priceDiff > policy.priceRoundingAbs ? 100 : 0);
+
+  const priceWithinRounding = priceDiff <= policy.priceRoundingAbs;
+  const priceWithinTolerance = !priceWithinRounding && priceVariancePct <= policy.priceTolerancePct;
+  const priceExceeded = !priceWithinRounding && !priceWithinTolerance;
+
+  let status: MatchStatus;
+  let messageAr: string;
+
+  if (qtyExceeded && priceExceeded) {
+    status = 'variance_exceeded';
+    messageAr = `تجاوز فارق الكمية (${Math.abs(qtyVariance)}) وفارق السعر (${priceVariancePct.toFixed(2)}%) حدود التسامح المسموح بها`;
+  } else if (qtyExceeded) {
+    status = 'variance_exceeded';
+    messageAr = `تجاوز فارق الكمية (${Math.abs(qtyVariance)}) حد التسامح المسموح به للكمية (${policy.qtyTolerancePct}%)`;
+  } else if (priceExceeded) {
+    status = 'variance_exceeded';
+    messageAr = hasPoRef
+      ? `تجاوز فارق السعر (${priceVariancePct.toFixed(2)}%) الحد الأقصى للتسامح (${policy.priceTolerancePct}%)`
+      : `تجاوز فارق السعر عن الاستلام (${priceVariancePct.toFixed(2)}%) الحد المسموح (${policy.priceTolerancePct}%)`;
+  } else if (priceWithinTolerance) {
+    status = 'within_tolerance';
+    messageAr = hasPoRef
+      ? `فارق السعر (${priceVariancePct.toFixed(2)}%) ضمن نسبة التسامح المسموح بها (${policy.priceTolerancePct}%)`
+      : `فارق السعر عن الاستلام (${priceVariancePct.toFixed(2)}%) ضمن حد التسامح (${policy.priceTolerancePct}%)`;
+  } else if (!poLineId) {
+    status = 'grn_only';
+    messageAr = 'مطابقة ثنائية (بدون أمر شراء مرتبط)';
+  } else {
+    status = 'matched';
+    messageAr = 'مطابق لأمر الشراء وسند الاستلام';
+  }
+
+  return {
+    grnLineId: input.grnLineId,
+    itemId: input.itemId,
+    itemCode: input.itemCode,
+    itemNameAr: input.itemNameAr,
+    poLineId,
+    poQty,
+    poUnitCost,
+    grnQty,
+    grnUnitCost,
+    invoiceQty,
+    invoiceUnitCost,
+    qtyVariance,
+    priceVariancePct: Number(priceVariancePct.toFixed(2)),
+    status,
+    messageAr,
+  };
+}
+
 export class ThreeWayMatchService {
   getPolicy(): ThreeWayMatchPolicy {
     return { ...DEFAULT_THREE_WAY_POLICY };
@@ -79,8 +171,8 @@ export class ThreeWayMatchService {
            po_l.unit_cost as "poUnitCost"
          FROM purch_supplier_invoice_lines sil
          INNER JOIN inv_items i ON i.id = sil.item_id AND i.company_id = sil.company_id
-         INNER JOIN purch_grn_lines gl ON gl.id = sil.grn_line_id AND gl.company_id = gl.company_id
-         LEFT JOIN purch_po_lines po_l ON po_l.id = gl.po_line_id AND po_l.company_id = gl.company_id
+         INNER JOIN purch_grn_lines gl ON gl.id = sil.grn_line_id AND gl.company_id = sil.company_id
+         LEFT JOIN purch_po_lines po_l ON po_l.id = gl.po_line_id AND po_l.company_id = sil.company_id
          WHERE sil.company_id = $1 AND sil.invoice_id = $2
          ORDER BY sil.line_no ASC;`,
         [companyId, invoiceId]
@@ -96,69 +188,28 @@ export class ThreeWayMatchService {
       };
 
       for (const r of linesRes.rows) {
-        const grnQty = toDecimal(r.grnQty, 4);
-        const grnUnitCost = toDecimal(r.grnUnitCost, 4);
-        const invoiceQty = toDecimal(r.invoiceQty, 4);
-        const invoiceUnitCost = toDecimal(r.invoiceUnitCost, 4);
-        const poLineId = r.poLineId || null;
-        const poUnitCost = r.poUnitCost !== null && r.poUnitCost !== undefined ? toDecimal(r.poUnitCost, 4) : null;
+        const lineResult = evaluateThreeWayLineMatch(
+          {
+            grnLineId: r.grnLineId,
+            itemId: r.itemId,
+            itemCode: r.itemCode,
+            itemNameAr: r.itemNameAr,
+            poLineId: r.poLineId || null,
+            poQty: r.poQty !== null && r.poQty !== undefined ? toDecimal(r.poQty, 4) : null,
+            poUnitCost: r.poUnitCost !== null && r.poUnitCost !== undefined ? toDecimal(r.poUnitCost, 4) : null,
+            grnQty: toDecimal(r.grnQty, 4),
+            grnUnitCost: toDecimal(r.grnUnitCost, 4),
+            invoiceQty: toDecimal(r.invoiceQty, 4),
+            invoiceUnitCost: toDecimal(r.invoiceUnitCost, 4),
+          },
+          DEFAULT_THREE_WAY_POLICY
+        );
 
-        let status: MatchStatus = 'matched';
-        let messageAr = 'مطابق تماماً (3-Way Match)';
-        let priceVariancePct = 0;
-
-        if (!poLineId) {
-          status = 'grn_only';
-          messageAr = 'مطابقة ثنائية (بدون أمر شراء مرتبط)';
-        } else if (poUnitCost !== null && poUnitCost > 0) {
-          const diff = Math.abs(invoiceUnitCost - poUnitCost);
-          priceVariancePct = (diff / poUnitCost) * 100;
-          if (diff <= DEFAULT_THREE_WAY_POLICY.priceRoundingAbs) {
-            status = 'matched';
-            messageAr = 'مطابق لأمر الشراء';
-          } else if (priceVariancePct <= DEFAULT_THREE_WAY_POLICY.priceTolerancePct) {
-            status = 'within_tolerance';
-            messageAr = `فارق السعر (${priceVariancePct.toFixed(2)}%) ضمن نسبة التسامح المسموح بها (${DEFAULT_THREE_WAY_POLICY.priceTolerancePct}%)`;
-          } else {
-            status = 'variance_exceeded';
-            messageAr = `تجاوز فارق السعر (${priceVariancePct.toFixed(2)}%) الحد الأقصى للتسامح (${DEFAULT_THREE_WAY_POLICY.priceTolerancePct}%)`;
-          }
-        } else {
-          const diff = Math.abs(invoiceUnitCost - grnUnitCost);
-          priceVariancePct = grnUnitCost > 0 ? (diff / grnUnitCost) * 100 : 0;
-          if (diff <= DEFAULT_THREE_WAY_POLICY.priceRoundingAbs) {
-            status = 'matched';
-            messageAr = 'مطابق لسند الاستلام';
-          } else if (priceVariancePct <= DEFAULT_THREE_WAY_POLICY.priceTolerancePct) {
-            status = 'within_tolerance';
-            messageAr = `فارق السعر عن الاستلام (${priceVariancePct.toFixed(2)}%) ضمن حد التسامح`;
-          } else {
-            status = 'variance_exceeded';
-            messageAr = `تجاوز فارق السعر عن الاستلام (${priceVariancePct.toFixed(2)}%) الحد المسموح`;
-          }
+        if (statusPriority[lineResult.status] > statusPriority[worstStatus]) {
+          worstStatus = lineResult.status;
         }
 
-        if (statusPriority[status] > statusPriority[worstStatus]) {
-          worstStatus = status;
-        }
-
-        results.push({
-          grnLineId: r.grnLineId,
-          itemId: r.itemId,
-          itemCode: r.itemCode,
-          itemNameAr: r.itemNameAr,
-          poLineId,
-          poQty: r.poQty !== null ? toDecimal(r.poQty, 4) : null,
-          poUnitCost,
-          grnQty,
-          grnUnitCost,
-          invoiceQty,
-          invoiceUnitCost,
-          qtyVariance: toDecimal(grnQty - invoiceQty, 4),
-          priceVariancePct: Number(priceVariancePct.toFixed(2)),
-          status,
-          messageAr,
-        });
+        results.push(lineResult);
       }
 
       if (results.length === 0) {
