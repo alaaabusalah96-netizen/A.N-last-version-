@@ -107,6 +107,7 @@ export interface SalesInvoiceLine {
   taxRate: number;
   taxAmount: number;
   lineTotal: number;
+  netAmount?: number;
   lineNo: number;
 }
 
@@ -125,6 +126,9 @@ export interface SalesInvoice {
   subtotal: number;
   taxAmount: number;
   totalAmount: number;
+  netAmount?: number;
+  grossAmount?: number;
+  cogsAmount?: number;
   memo?: string | null;
   journalEntryId?: string | null;
   journalEntryNo?: string | null;

@@ -1,8 +1,113 @@
 import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
-import { SalesInvoice, SalesInvoiceLine, CreateSalesInvoiceInput } from './salesTypes.js';
+import { SalesInvoice, SalesInvoiceLine, CreateSalesInvoiceInput, CreateSalesInvoiceLineInput } from './salesTypes.js';
+import { MONEY_SCALE, fromMinorUnits, toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
+
+function divideHalfUp(numerator: bigint, divisor: bigint): bigint {
+  if (numerator >= 0n) {
+    return (numerator + divisor / 2n) / divisor;
+  }
+  return -((-numerator + divisor / 2n) / divisor);
+}
+
+export function multiplyToMinorUnits(
+  a: unknown,
+  aScale: number,
+  b: unknown,
+  bScale: number,
+  targetScale: number = MONEY_SCALE
+): bigint {
+  const aUnits = toMinorUnits(a, aScale);
+  const bUnits = toMinorUnits(b, bScale);
+  const prod = aUnits * bUnits;
+  const shift = aScale + bScale - targetScale;
+  if (shift > 0) {
+    return divideHalfUp(prod, 10n ** BigInt(shift));
+  }
+  if (shift < 0) {
+    return prod * 10n ** BigInt(-shift);
+  }
+  return prod;
+}
+
+export function percentOfMinorUnits(baseUnits: bigint, ratePct: unknown): bigint {
+  const rateUnits = toMinorUnits(ratePct, 2); // 15.00% -> 1500n
+  if (rateUnits === 0n || baseUnits === 0n) return 0n;
+  // baseUnits * rateUnits / (100 * 100)
+  return divideHalfUp(baseUnits * rateUnits, 10000n);
+}
+
+export interface ComputedInvoiceTotals {
+  subtotal: string;
+  taxAmount: string;
+  totalAmount: string;
+  subtotalNum: number;
+  taxAmountNum: number;
+  totalAmountNum: number;
+  lines: Array<
+    CreateSalesInvoiceLineInput & {
+      taxRate: number;
+      lineSubtotal: string;
+      taxAmount: string;
+      lineTotal: string;
+      lineNo: number;
+    }
+  >;
+}
+
+export function computeSalesInvoiceTotals(lines: CreateSalesInvoiceLineInput[]): ComputedInvoiceTotals {
+  let subtotalUnits = 0n;
+  let taxAmountUnits = 0n;
+
+  const computedLines = lines.map((l, idx) => {
+    const qty = l.qty;
+    const unitPrice = l.unitPrice;
+    const lineSubUnits = multiplyToMinorUnits(qty, 4, unitPrice, 4, MONEY_SCALE);
+    const taxRate = toDecimal(l.taxRate ?? 0, 2);
+    const lineTaxUnits = percentOfMinorUnits(lineSubUnits, taxRate);
+    const lineTotalUnits = lineSubUnits + lineTaxUnits;
+
+    subtotalUnits += lineSubUnits;
+    taxAmountUnits += lineTaxUnits;
+
+    return {
+      ...l,
+      taxRate,
+      lineSubtotal: fromMinorUnits(lineSubUnits, MONEY_SCALE),
+      taxAmount: fromMinorUnits(lineTaxUnits, MONEY_SCALE),
+      lineTotal: fromMinorUnits(lineTotalUnits, MONEY_SCALE),
+      lineNo: idx + 1,
+    };
+  });
+
+  const totalAmountUnits = subtotalUnits + taxAmountUnits;
+  const subtotalStr = fromMinorUnits(subtotalUnits, MONEY_SCALE);
+  const taxAmountStr = fromMinorUnits(taxAmountUnits, MONEY_SCALE);
+  const totalAmountStr = fromMinorUnits(totalAmountUnits, MONEY_SCALE);
+
+  return {
+    subtotal: subtotalStr,
+    taxAmount: taxAmountStr,
+    totalAmount: totalAmountStr,
+    subtotalNum: toMoney(subtotalStr),
+    taxAmountNum: toMoney(taxAmountStr),
+    totalAmountNum: toMoney(totalAmountStr),
+    lines: computedLines,
+  };
+}
 
 function mapHeaderRow(row: any): SalesInvoice {
+  const subtotalUnits = toMinorUnits(row.subtotal ?? 0, MONEY_SCALE);
+  const taxUnits = toMinorUnits(row.tax_amount ?? 0, MONEY_SCALE);
+  const grossUnits = row.total_amount !== undefined && row.total_amount !== null
+    ? toMinorUnits(row.total_amount, MONEY_SCALE)
+    : subtotalUnits + taxUnits;
+
+  const subtotal = toMoney(fromMinorUnits(subtotalUnits, MONEY_SCALE));
+  const taxAmount = toMoney(fromMinorUnits(taxUnits, MONEY_SCALE));
+  const totalAmount = toMoney(fromMinorUnits(grossUnits, MONEY_SCALE));
+  const grossAmount = toMoney(fromMinorUnits(subtotalUnits + taxUnits, MONEY_SCALE));
+
   return {
     id: row.id,
     companyId: row.company_id,
@@ -15,9 +120,11 @@ function mapHeaderRow(row: any): SalesInvoice {
     invoiceDate: row.invoice_date instanceof Date ? row.invoice_date.toISOString().slice(0, 10) : String(row.invoice_date).slice(0, 10),
     dueDate: row.due_date ? (row.due_date instanceof Date ? row.due_date.toISOString().slice(0, 10) : String(row.due_date).slice(0, 10)) : null,
     status: row.status,
-    subtotal: parseFloat(row.subtotal || '0'),
-    taxAmount: parseFloat(row.tax_amount || '0'),
-    totalAmount: parseFloat(row.total_amount || '0'),
+    subtotal,
+    taxAmount,
+    totalAmount,
+    netAmount: subtotal,
+    grossAmount,
     memo: row.memo || null,
     journalEntryId: row.journal_entry_id || null,
     journalEntryNo: row.journal_entry_no || null,
@@ -30,6 +137,10 @@ function mapHeaderRow(row: any): SalesInvoice {
 }
 
 function mapLineRow(row: any): SalesInvoiceLine {
+  const taxAmountUnits = toMinorUnits(row.tax_amount ?? 0, MONEY_SCALE);
+  const lineTotalUnits = toMinorUnits(row.line_total ?? 0, MONEY_SCALE);
+  const netUnits = lineTotalUnits - taxAmountUnits;
+
   return {
     id: row.id,
     invoiceId: row.invoice_id,
@@ -39,11 +150,12 @@ function mapLineRow(row: any): SalesInvoiceLine {
     itemNameAr: row.item_name_ar,
     itemUom: row.item_uom,
     deliveryLineId: row.delivery_line_id || null,
-    qty: parseFloat(row.qty || '0'),
-    unitPrice: parseFloat(row.unit_price || '0'),
-    taxRate: parseFloat(row.tax_rate || '0'),
-    taxAmount: parseFloat(row.tax_amount || '0'),
-    lineTotal: parseFloat(row.line_total || '0'),
+    qty: toDecimal(row.qty ?? 0, 4),
+    unitPrice: toDecimal(row.unit_price ?? 0, 4),
+    taxRate: toDecimal(row.tax_rate ?? 0, 2),
+    taxAmount: toMoney(fromMinorUnits(taxAmountUnits, MONEY_SCALE)),
+    lineTotal: toMoney(fromMinorUnits(lineTotalUnits, MONEY_SCALE)),
+    netAmount: toMoney(fromMinorUnits(netUnits, MONEY_SCALE)),
     lineNo: parseInt(row.line_no, 10) || 1,
   };
 }
@@ -126,36 +238,13 @@ export class SalesInvoiceRepository {
     return {
       id: res.rows[0].id,
       status: res.rows[0].status,
-      totalAmount: parseFloat(res.rows[0].totalAmount || '0'),
+      totalAmount: toMoney(res.rows[0].totalAmount ?? 0),
     };
   }
 
   async createDraft(companyId: string, input: CreateSalesInvoiceInput, actorUserId?: string, customExecutor?: DbExecutor): Promise<SalesInvoice> {
     const run = async (executor: DbExecutor) => {
-      let subtotal = 0;
-      let taxAmount = 0;
-
-      const computedLines = input.lines.map((l, idx) => {
-        const qty = l.qty;
-        const unitPrice = l.unitPrice;
-        const lineSubtotal = qty * unitPrice;
-        const taxRate = l.taxRate ?? 0;
-        const lineTax = (lineSubtotal * taxRate) / 100;
-        const lineTotal = lineSubtotal + lineTax;
-
-        subtotal += lineSubtotal;
-        taxAmount += lineTax;
-
-        return {
-          ...l,
-          taxRate,
-          taxAmount: lineTax,
-          lineTotal,
-          lineNo: idx + 1,
-        };
-      });
-
-      const totalAmount = subtotal + taxAmount;
+      const computed = computeSalesInvoiceTotals(input.lines);
 
       const headerSql = `
         INSERT INTO sales_invoices (
@@ -172,14 +261,14 @@ export class SalesInvoiceRepository {
         input.invoiceDate || null,
         input.dueDate || null,
         input.memo?.trim() || null,
-        subtotal,
-        taxAmount,
-        totalAmount,
+        computed.subtotal,
+        computed.taxAmount,
+        computed.totalAmount,
         actorUserId || null,
       ]);
       const invoiceId = headerRes.rows[0].id;
 
-      for (const line of computedLines) {
+      for (const line of computed.lines) {
         const lineSql = `
           INSERT INTO sales_invoice_lines (
             company_id, invoice_id, item_id, delivery_line_id, qty, unit_price,
@@ -283,9 +372,9 @@ export class SalesInvoiceRepository {
       const res = await executor.query<any>(sql, params);
       return res.rows.map((r) => ({
         ...r,
-        invoiceTotal: parseFloat(r.invoiceTotal || '0'),
-        collectedAmount: parseFloat(r.collectedAmount || '0'),
-        remainingOpenAmount: parseFloat(r.remainingOpenAmount || '0'),
+        invoiceTotal: toMoney(r.invoiceTotal ?? 0),
+        collectedAmount: toMoney(r.collectedAmount ?? 0),
+        remainingOpenAmount: toMoney(r.remainingOpenAmount ?? 0),
       }));
     };
 

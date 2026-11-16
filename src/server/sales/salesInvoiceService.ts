@@ -1,4 +1,8 @@
-import { SalesInvoiceRepository, defaultSalesInvoiceRepository } from './salesInvoiceRepository.js';
+import {
+  SalesInvoiceRepository,
+  defaultSalesInvoiceRepository,
+  multiplyToMinorUnits,
+} from './salesInvoiceRepository.js';
 import { CustomerRepository, defaultCustomerRepository } from './customerRepository.js';
 import { JournalRepository, defaultJournalRepository } from '../accounting/journalRepository.js';
 import { JournalService, defaultJournalService } from '../accounting/journalService.js';
@@ -7,8 +11,18 @@ import { SalesInvoice, CreateSalesInvoiceInput } from './salesTypes.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
+import { MONEY_SCALE, fromMinorUnits, toMinorUnits, toMoney } from '../lib/numeric.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+interface AccountRow {
+  id: string;
+  code: string;
+  nameAr: string;
+  accountType: string;
+  isActive: boolean;
+  isPostable: boolean;
+}
 
 export class SalesInvoiceService {
   constructor(
@@ -75,6 +89,11 @@ export class SalesInvoiceService {
         if (typeof line.unitPrice !== 'number' || !Number.isFinite(line.unitPrice) || line.unitPrice < 0) {
           throw new ValidationError('سعر الوحدة غير صالح');
         }
+        if (line.taxRate !== undefined && line.taxRate !== null) {
+          if (typeof line.taxRate !== 'number' || !Number.isFinite(line.taxRate) || line.taxRate < 0 || line.taxRate > 100) {
+            throw new ValidationError('نسبة الضريبة يجب أن تكون بين 0 و 100');
+          }
+        }
         if (line.deliveryLineId) {
           if (seenDeliveryLines.has(line.deliveryLineId)) {
             throw new ValidationError('لا يمكن تكرار نفس بند إذن التسليم في نفس الفاتورة');
@@ -99,12 +118,13 @@ export class SalesInvoiceService {
              WHERE sil.company_id = $1 AND sil.delivery_line_id = $2 AND si.status <> 'cancelled'`,
             [companyId, line.deliveryLineId]
           );
-          const deliveredQty = parseFloat(dlRes.rows[0].qty || '0');
-          const alreadyInvoicedQty = parseFloat(invSumRes.rows[0]?.invoiced_qty || '0');
-          const remainingQty = Math.max(0, deliveredQty - alreadyInvoicedQty);
-          if (line.qty > remainingQty + 0.0001) {
+          const deliveredUnits = toMinorUnits(dlRes.rows[0].qty ?? '0', 4);
+          const alreadyInvoicedUnits = toMinorUnits(invSumRes.rows[0]?.invoiced_qty ?? '0', 4);
+          const lineQtyUnits = toMinorUnits(line.qty, 4);
+          const remainingUnits = deliveredUnits > alreadyInvoicedUnits ? deliveredUnits - alreadyInvoicedUnits : 0n;
+          if (lineQtyUnits > remainingUnits) {
             throw new ValidationError(
-              `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${remainingQty})`
+              `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${fromMinorUnits(remainingUnits, 4)})`
             );
           }
         }
@@ -119,7 +139,13 @@ export class SalesInvoiceService {
           action: 'SALES_INVOICE_CREATE',
           entityType: 'sales_invoices',
           entityId: created.id,
-          metadata: { customerId: input.customerId, totalAmount: created.totalAmount, linesCount: input.lines.length },
+          metadata: {
+            customerId: input.customerId,
+            subtotal: created.subtotal,
+            taxAmount: created.taxAmount,
+            totalAmount: created.totalAmount,
+            linesCount: input.lines.length,
+          },
         },
         { executor: tx }
       );
@@ -185,6 +211,114 @@ export class SalesInvoiceService {
     throw new ValidationError('يرجى ضبط حساب إيراد المبيعات في إعدادات الشركة قبل ترحيل الفواتير');
   }
 
+  /**
+   * Fail-closed output VAT account resolver from company_settings (NO fallback to arbitrary accounts).
+   */
+  private async resolveVatPayableAccount(companyId: string, executor: DbExecutor): Promise<string> {
+    const settingsRes = await executor.query<{ vatAccountId?: string | null }>(
+      `SELECT vat_payable_account_id as "vatAccountId" FROM company_settings WHERE company_id = $1`,
+      [companyId]
+    );
+    const vatAccountId = settingsRes.rows[0]?.vatAccountId?.trim() || '';
+    if (!vatAccountId) {
+      throw new ValidationError(
+        'لا يمكن ترحيل فاتورة خاضعة للضريبة قبل ضبط "حساب ضريبة القيمة المضافة المستحقة" (vat_payable_account_id) في إعدادات الشركة.'
+      );
+    }
+
+    const accRes = await executor.query<AccountRow>(
+      `SELECT id, code, name_ar as "nameAr", account_type as "accountType", is_active as "isActive", is_postable as "isPostable"
+       FROM accounts
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, vatAccountId]
+    );
+    const acc = accRes.rows[0];
+    if (!acc) {
+      throw new ValidationError('حساب ضريبة القيمة المضافة المحدد في إعدادات الشركة غير موجود في دليل الحسابات');
+    }
+    if (!acc.isActive) {
+      throw new ValidationError(`حساب الضريبة ${acc.code} (${acc.nameAr}) غير نشط`);
+    }
+    if (!acc.isPostable) {
+      throw new ValidationError(`حساب الضريبة ${acc.code} (${acc.nameAr}) حساب رئيسي غير قابل للترحيل`);
+    }
+    if (acc.accountType !== 'liability') {
+      throw new ValidationError(
+        `حساب ضريبة المبيعات (${acc.code}) نوعه ${acc.accountType} ويجب أن يكون من نوع التزامات (liability)`
+      );
+    }
+
+    return vatAccountId;
+  }
+
+  /**
+   * Fail-closed COGS & Inventory accounts resolver from company_settings (NO fallback to arbitrary accounts).
+   */
+  private async resolveCogsAndInventoryAccounts(
+    companyId: string,
+    executor: DbExecutor
+  ): Promise<{ cogsAccountId: string; inventoryAccountId: string }> {
+    const settingsRes = await executor.query<{
+      cogsAccountId?: string | null;
+      inventoryAccountId?: string | null;
+    }>(
+      `SELECT cogs_account_id as "cogsAccountId", inventory_account_id as "inventoryAccountId"
+       FROM company_settings
+       WHERE company_id = $1`,
+      [companyId]
+    );
+
+    const cogsAccountId = settingsRes.rows[0]?.cogsAccountId?.trim() || '';
+    const inventoryAccountId = settingsRes.rows[0]?.inventoryAccountId?.trim() || '';
+
+    if (!cogsAccountId || !inventoryAccountId) {
+      throw new ValidationError(
+        'لا يمكن ترحيل فاتورة مبيعات ذات تكلفة بضاعة مباعة قبل ضبط "حساب تكلفة البضاعة المباعة (COGS)" و"حساب المخزون" في إعدادات الشركة.'
+      );
+    }
+
+    if (cogsAccountId === inventoryAccountId) {
+      throw new ValidationError('لا يمكن تعيين نفس الحساب لكل من تكلفة البضاعة المباعة والمخزون');
+    }
+
+    const accRes = await executor.query<AccountRow>(
+      `SELECT id, code, name_ar as "nameAr", account_type as "accountType", is_active as "isActive", is_postable as "isPostable"
+       FROM accounts
+       WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+      [companyId, [cogsAccountId, inventoryAccountId]]
+    );
+
+    const byId = new Map<string, AccountRow>(accRes.rows.map((r) => [r.id, r]));
+    const cogsAcc = byId.get(cogsAccountId);
+    const invAcc = byId.get(inventoryAccountId);
+
+    if (!cogsAcc) {
+      throw new ValidationError('حساب تكلفة البضاعة المباعة المحدد في إعدادات الشركة غير موجود في دليل الحسابات');
+    }
+    if (!cogsAcc.isActive || !cogsAcc.isPostable) {
+      throw new ValidationError(`حساب تكلفة البضاعة المباعة ${cogsAcc.code} (${cogsAcc.nameAr}) غير نشط أو غير قابل للترحيل`);
+    }
+    if (cogsAcc.accountType !== 'expense') {
+      throw new ValidationError(
+        `حساب تكلفة البضاعة المباعة (${cogsAcc.code}) نوعه ${cogsAcc.accountType} ويجب أن يكون مصروف (expense)`
+      );
+    }
+
+    if (!invAcc) {
+      throw new ValidationError('حساب المخزون المحدد في إعدادات الشركة غير موجود في دليل الحسابات');
+    }
+    if (!invAcc.isActive || !invAcc.isPostable) {
+      throw new ValidationError(`حساب المخزون ${invAcc.code} (${invAcc.nameAr}) غير نشط أو غير قابل للترحيل`);
+    }
+    if (invAcc.accountType !== 'asset') {
+      throw new ValidationError(
+        `حساب المخزون (${invAcc.code}) نوعه ${invAcc.accountType} ويجب أن يكون أصل (asset)`
+      );
+    }
+
+    return { cogsAccountId, inventoryAccountId };
+  }
+
   async postInvoice(companyId: string, id: string, actorUserId?: string): Promise<SalesInvoice> {
     if (!companyId) throw new ValidationError('companyId is required');
     if (!id) throw new ValidationError('id is required');
@@ -206,11 +340,25 @@ export class SalesInvoiceService {
         throw new ValidationError('فاتورة المبيعات لا تحتوي على بنود لترحيلها');
       }
 
-      // Re-verify linked delivery line remaining quantity under FOR UPDATE
+      // Re-verify linked delivery line remaining quantity under FOR UPDATE & compute COGS when applicable
+      let totalCogsUnits = 0n;
       for (const line of invoice.lines) {
         if (line.deliveryLineId) {
           const dlRes = await tx.query<any>(
-            `SELECT dl.id, dl.qty
+            `SELECT
+               dl.id,
+               dl.qty,
+               dl.unit_cost,
+               COALESCE(
+                 NULLIF(dl.unit_cost, 0),
+                 (
+                   SELECT CASE WHEN SUM(gl.qty) > 0 THEN SUM(gl.qty * gl.unit_cost) / SUM(gl.qty) ELSE 0 END
+                   FROM purch_grn_lines gl
+                   INNER JOIN purch_grn g ON g.id = gl.grn_id AND g.company_id = gl.company_id
+                   WHERE gl.company_id = dl.company_id AND gl.item_id = dl.item_id AND g.status = 'posted'
+                 ),
+                 0
+               ) as effective_unit_cost
              FROM sales_delivery_lines dl
              INNER JOIN sales_delivery_notes dn ON dn.id = dl.delivery_id AND dn.company_id = dl.company_id
              WHERE dl.company_id = $1 AND dl.id = $2 AND dn.status = 'posted'
@@ -227,42 +375,118 @@ export class SalesInvoiceService {
              WHERE sil.company_id = $1 AND sil.delivery_line_id = $2 AND si.status <> 'cancelled' AND si.id <> $3`,
             [companyId, line.deliveryLineId, id]
           );
-          const deliveredQty = parseFloat(dlRes.rows[0].qty || '0');
-          const otherInvoicedQty = parseFloat(invSumRes.rows[0]?.invoiced_qty || '0');
-          const remainingQty = Math.max(0, deliveredQty - otherInvoicedQty);
-          if (line.qty > remainingQty + 0.0001) {
+          const deliveredUnits = toMinorUnits(dlRes.rows[0].qty ?? '0', 4);
+          const otherInvoicedUnits = toMinorUnits(invSumRes.rows[0]?.invoiced_qty ?? '0', 4);
+          const lineQtyUnits = toMinorUnits(line.qty, 4);
+          const remainingUnits = deliveredUnits > otherInvoicedUnits ? deliveredUnits - otherInvoicedUnits : 0n;
+          if (lineQtyUnits > remainingUnits) {
             throw new ValidationError(
-              `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${remainingQty})`
+              `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${fromMinorUnits(remainingUnits, 4)})`
             );
           }
+
+          const effectiveUnitCost = dlRes.rows[0].effective_unit_cost ?? dlRes.rows[0].unit_cost ?? 0;
+          totalCogsUnits += multiplyToMinorUnits(line.qty, 4, effectiveUnitCost, 4, MONEY_SCALE);
         }
       }
 
-      if (!(invoice.totalAmount > 0)) {
+      // Compute exact minor-unit net vs tax vs gross (gross = net + tax)
+      const grossUnits = toMinorUnits(invoice.totalAmount ?? 0, MONEY_SCALE);
+      const taxUnits = toMinorUnits(invoice.taxAmount ?? 0, MONEY_SCALE);
+      if (taxUnits < 0n) {
+        throw new ValidationError('قيمة الضريبة في فاتورة المبيعات لا يمكن أن تكون سالبة');
+      }
+
+      const hasExplicitSubtotal = invoice.subtotal !== undefined && invoice.subtotal !== null;
+      const netUnits = hasExplicitSubtotal ? toMinorUnits(invoice.subtotal, MONEY_SCALE) : grossUnits - taxUnits;
+
+      if (hasExplicitSubtotal && netUnits + taxUnits !== grossUnits) {
+        throw new ValidationError(
+          `عدم توازن مجاميع الفاتورة: الصافي (${fromMinorUnits(netUnits, 2)}) + الضريبة (${fromMinorUnits(taxUnits, 2)}) لا يساوي الإجمالي (${fromMinorUnits(grossUnits, 2)})`
+        );
+      }
+
+      if (!(grossUnits > 0n) || netUnits < 0n) {
         throw new ValidationError('قيمة فاتورة المبيعات الإجمالية يجب أن تكون أكبر من الصفر لترحيلها');
       }
 
       const arAccountId = await this.resolveArAccount(companyId, tx);
       const revAccountId = await this.resolveRevenueAccount(companyId, tx);
 
+      let vatAccountId: string | null = null;
+      if (taxUnits > 0n) {
+        vatAccountId = await this.resolveVatPayableAccount(companyId, tx);
+        if (vatAccountId === revAccountId || vatAccountId === arAccountId) {
+          throw new ValidationError('حساب ضريبة المبيعات يجب أن يكون حساباً مستقلاً عن حساب الإيراد وحساب العملاء');
+        }
+      }
+
+      let cogsAccounts: { cogsAccountId: string; inventoryAccountId: string } | null = null;
+      if (totalCogsUnits > 0n) {
+        cogsAccounts = await this.resolveCogsAndInventoryAccounts(companyId, tx);
+      }
+
       const invoiceNo = await this.journalRepo.allocateSequenceNumber(companyId, 'sales_invoice', 'SINV', tx);
       const entryDate = ISO_DATE.test(invoice.invoiceDate) ? invoice.invoiceDate : new Date().toISOString().slice(0, 10);
 
-      // Construct balanced journal entry
-      const lines: any[] = [
+      const grossAmount = toMoney(fromMinorUnits(grossUnits, MONEY_SCALE));
+      const netAmount = toMoney(fromMinorUnits(netUnits, MONEY_SCALE));
+      const taxAmount = toMoney(fromMinorUnits(taxUnits, MONEY_SCALE));
+      const cogsAmount = toMoney(fromMinorUnits(totalCogsUnits, MONEY_SCALE));
+
+      // Construct balanced journal entry:
+      // 1) Dr AR (gross = net + tax)
+      // 2) Cr Sales Revenue (net)
+      // 3) Cr VAT Payable (tax, if > 0)
+      // 4) Dr COGS / Cr Inventory (if totalCogs > 0)
+      const lines: Array<{
+        accountId: string;
+        debit: number;
+        credit: number;
+        lineMemo: string;
+      }> = [
         {
           accountId: arAccountId,
-          debit: invoice.totalAmount,
+          debit: grossAmount,
           credit: 0,
           lineMemo: `إثبات مديونية عميل فاتورة مبيعات رقم ${invoiceNo} (${invoice.customerNameAr || ''})`,
         },
-        {
+      ];
+
+      if (netUnits > 0n) {
+        lines.push({
           accountId: revAccountId,
           debit: 0,
-          credit: invoice.totalAmount, // Subtotal + Tax credited to sales revenue (or tax if split)
-          lineMemo: `إيراد مبيعات فاتورة رقم ${invoiceNo}`,
-        },
-      ];
+          credit: netAmount,
+          lineMemo: `إيراد مبيعات (صافي) فاتورة رقم ${invoiceNo}`,
+        });
+      }
+
+      if (taxUnits > 0n && vatAccountId) {
+        lines.push({
+          accountId: vatAccountId,
+          debit: 0,
+          credit: taxAmount,
+          lineMemo: `ضريبة القيمة المضافة المستحقة (VAT) فاتورة رقم ${invoiceNo}`,
+        });
+      }
+
+      if (totalCogsUnits > 0n && cogsAccounts) {
+        lines.push(
+          {
+            accountId: cogsAccounts.cogsAccountId,
+            debit: cogsAmount,
+            credit: 0,
+            lineMemo: `تكلفة البضاعة المباعة (COGS) فاتورة رقم ${invoiceNo}`,
+          },
+          {
+            accountId: cogsAccounts.inventoryAccountId,
+            debit: 0,
+            credit: cogsAmount,
+            lineMemo: `تخفيض المخزون مقابل المبيعات فاتورة رقم ${invoiceNo}`,
+          }
+        );
+      }
 
       const draftJe = await this.journalService.createDraftEntry(
         companyId,
@@ -287,12 +511,22 @@ export class SalesInvoiceService {
           action: 'SALES_INVOICE_POST',
           entityType: 'sales_invoices',
           entityId: id,
-          metadata: { invoiceNo, totalAmount: invoice.totalAmount, journalEntryId: postedJe.id },
+          metadata: {
+            invoiceNo,
+            subtotal: netAmount,
+            taxAmount,
+            totalAmount: grossAmount,
+            cogsAmount,
+            journalEntryId: postedJe.id,
+          },
         },
         { executor: tx }
       );
 
       const posted = await this.invoiceRepo.findById(companyId, id, tx);
+      if (posted) {
+        posted.cogsAmount = cogsAmount;
+      }
       return posted!;
     });
   }

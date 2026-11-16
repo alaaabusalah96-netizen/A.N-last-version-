@@ -85,9 +85,24 @@ async function run() {
   }
 
   const delRepo = fs.readFileSync(path.join(rootDir, 'src/server/sales/salesDeliveryRepository.ts'), 'utf8');
+  const mig048Path = path.join(rootDir, 'database/migrations/048_sales_cogs_vat_accounts.sql');
+  assert(fs.existsSync(mig048Path), 'Migration 048_sales_cogs_vat_accounts.sql exists');
+  const mig048 = fs.readFileSync(mig048Path, 'utf8');
+  const mig048NoComments = mig048.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\r\n]*/g, '');
+  assert(
+    mig048.includes('cogs_account_id') &&
+      mig048.includes('vat_payable_account_id') &&
+      !/\bEXCEPTION\s+WHEN\s+OTHERS\b/i.test(mig048NoComments),
+    'Migration 048 defines cogs_account_id & vat_payable_account_id without EXCEPTION WHEN OTHERS'
+  );
+
   const invRepo = fs.readFileSync(path.join(rootDir, 'src/server/sales/salesInvoiceRepository.ts'), 'utf8');
   assert(!delRepo.includes('i.base_uom') && delRepo.includes('i.uom'), 'salesDeliveryRepository uses inv_items.uom column');
   assert(!invRepo.includes('i.base_uom') && invRepo.includes('i.uom'), 'salesInvoiceRepository uses inv_items.uom column');
+  assert(
+    invRepo.includes('toMinorUnits') && invRepo.includes('fromMinorUnits') && invRepo.includes('toMoney'),
+    'salesInvoiceRepository uses minor-unit money precision helpers'
+  );
 
   const delSvc = fs.readFileSync(path.join(rootDir, 'src/server/sales/salesDeliveryService.ts'), 'utf8');
   assert(
@@ -97,8 +112,12 @@ async function run() {
 
   const invSvc = fs.readFileSync(path.join(rootDir, 'src/server/sales/salesInvoiceService.ts'), 'utf8');
   assert(
-    invSvc.includes('FOR UPDATE OF dl') && invSvc.includes('createDraftEntry') && invSvc.includes('postEntry'),
-    'salesInvoiceService enforces over-invoicing lock and balanced GL posting'
+    invSvc.includes('FOR UPDATE OF dl') &&
+      invSvc.includes('createDraftEntry') &&
+      invSvc.includes('postEntry') &&
+      invSvc.includes('resolveCogsAndInventoryAccounts') &&
+      invSvc.includes('resolveVatPayableAccount'),
+    'salesInvoiceService enforces over-invoicing lock, fail-closed COGS/VAT split, and balanced GL posting'
   );
 
   const colSvc = fs.readFileSync(path.join(rootDir, 'src/server/sales/salesCollectionService.ts'), 'utf8');

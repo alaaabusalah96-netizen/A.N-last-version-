@@ -137,6 +137,7 @@
     "test:cash-period-report-1": "tsx scripts/verifyCashPeriodReport1.ts",
     "test:cash-fk-hardening-1": "tsx scripts/verifyCashFkHardening1.ts",
     "test:sales-cycle-1": "tsx scripts/verifySalesCycle1.ts",
+    "test:sales-cogs-vat-1": "tsx scripts/verifySalesCogsVat1.ts",
     "test:bank-reconcile-1": "tsx scripts/verifyBankReconcile1.ts",
     "test:year-close-1": "tsx scripts/verifyYearClose1.ts",
     "test:reports-ops-1": "tsx scripts/verifyReportsOps1.ts",
