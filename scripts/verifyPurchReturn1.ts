@@ -228,7 +228,7 @@ async function run() {
     // Verify balanced GL journal entry: Dr AP 200 / Cr Inventory 200
     const jeRes = await executor.query<any>(
       `SELECT account_id, debit::numeric as debit, credit::numeric as credit
-       FROM journal_lines WHERE company_id = $1 AND journal_entry_id = $2`,
+       FROM journal_lines WHERE company_id = $1 AND entry_id = $2`,
       [companyAId, ret1Posted.journalEntryId]
     );
     const drApOk = jeRes.rows.some((r: any) => r.account_id === apAcc.id && Number(r.debit) === 200 && Number(r.credit) === 0);

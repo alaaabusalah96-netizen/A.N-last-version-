@@ -574,7 +574,7 @@ async function run() {
       const glRes = await checkClient.query<{ code: string; net_dr_cr: string }>(
         `SELECT a.code, ROUND(SUM(jl.debit - jl.credit), 2)::text as net_dr_cr
          FROM journal_lines jl
-         INNER JOIN journal_entries je ON je.id = jl.journal_entry_id AND je.company_id = jl.company_id
+         INNER JOIN journal_entries je ON je.id = jl.entry_id AND je.company_id = jl.company_id
          INNER JOIN accounts a ON a.id = jl.account_id AND a.company_id = jl.company_id
          WHERE jl.company_id = $1 AND je.status = 'posted'
          GROUP BY a.code`,
