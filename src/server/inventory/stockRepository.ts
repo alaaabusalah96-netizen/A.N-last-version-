@@ -159,6 +159,11 @@ export class StockRepository {
     customExecutor?: DbExecutor
   ): Promise<StockMovement> {
     const run = async (executor: DbExecutor) => {
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new Error(
+          'Stock movement qty must be > 0; direction is expressed by movement_type'
+        );
+      }
       const sql = `
         INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo, created_by, transfer_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

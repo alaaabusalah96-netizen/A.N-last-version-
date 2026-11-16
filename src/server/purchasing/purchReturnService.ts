@@ -334,7 +334,7 @@ export class PurchReturnService {
           ret.warehouseId,
           line.itemId,
           'purchase_return',
-          -line.qty,
+          line.qty,
           `مرتجع مشتريات رقم ${ret.returnNo || ret.id.slice(0, 8)}`,
           actorId,
           undefined,

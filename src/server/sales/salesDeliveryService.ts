@@ -132,7 +132,7 @@ export class SalesDeliveryService {
           note.warehouseId,
           line.itemId,
           'issue',
-          -line.qty,
+          line.qty,
           `صرف مبيعات إذن تسليم رقم ${deliveryNo} (عميل: ${note.customerNameAr || note.customerId})`,
           actorUserId,
           undefined,

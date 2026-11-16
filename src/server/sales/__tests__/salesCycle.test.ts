@@ -131,7 +131,7 @@ describe('AN-SALES-CYCLE-1 Domain Services Unit Tests', () => {
         WH_ID,
         ITEM_ID,
         'issue',
-        -5,
+        5,
         expect.stringContaining('DLV-00001'),
         ACTOR_ID,
         undefined,

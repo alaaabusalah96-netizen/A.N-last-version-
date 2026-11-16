@@ -163,6 +163,7 @@ const scripts = [
   'scripts/verifyUxFoundation1.ts',
   'scripts/verifyCompositeFkSetNull1.ts',
   'scripts/verifySalesCogsVat1.ts',
+  'scripts/verifyStockMovementSign1.ts',
 ];
 
 export interface BatteryItemReport {
