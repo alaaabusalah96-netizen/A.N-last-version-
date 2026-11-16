@@ -144,6 +144,7 @@
     "test:backup-restore-1": "tsx scripts/verifyBackupRestore1.ts",
     "test:monitoring-support-1": "tsx scripts/verifyMonitoringSupport1.ts",
     "test:ux-foundation-1": "tsx scripts/verifyUxFoundation1.ts",
+    "test:composite-fk-set-null-1": "tsx scripts/verifyCompositeFkSetNull1.ts",
     "ops:backup": "tsx scripts/ops/backupDb.ts",
     "ops:restore": "tsx scripts/ops/restoreDb.ts",
     "ops:backup-drill": "tsx scripts/ops/backupRestoreDrill.ts",

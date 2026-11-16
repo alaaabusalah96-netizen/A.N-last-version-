@@ -21,6 +21,23 @@ function isLoopbackUrl(raw: string): boolean {
   }
 }
 
+export function normalizePgColsArray(raw: string[] | string | null | undefined): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((c) => String(c).trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    const unwrapped =
+      trimmed.startsWith('{') && trimmed.endsWith('}') ? trimmed.slice(1, -1) : trimmed;
+    if (!unwrapped) return [];
+    return unwrapped
+      .split(',')
+      .map((part) => part.trim().replace(/^"(.*)"$/, '$1'))
+      .filter(Boolean);
+  }
+  return [];
+}
+
 async function run() {
   const rootDir = process.cwd();
 
@@ -65,6 +82,18 @@ async function run() {
     addsCompositeFk && mig043.includes('pg_constraint')
   );
 
+  // S5: PostgreSQL name[] text serialization "{col1,col2}" normalizes cleanly to array
+  const parsedFromString = normalizePgColsArray('{custody_receivable_account_id,company_id}');
+  const parsedFromArray = normalizePgColsArray(['custody_receivable_account_id', 'company_id']);
+  await check(
+    'S5: normalizePgColsArray parses both PostgreSQL "{a,b}" string and string[] safely',
+    parsedFromString.length === 2 &&
+      parsedFromString[0] === 'custody_receivable_account_id' &&
+      parsedFromString[1] === 'company_id' &&
+      parsedFromArray.length === 2 &&
+      parsedFromArray[0] === 'custody_receivable_account_id'
+  );
+
   // Live loopback PostgreSQL verification
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl || dbUrl.trim() === '') {
@@ -100,7 +129,7 @@ async function run() {
       conname: string;
       confdeltype: string;
       convalidated: boolean;
-      cols: string[];
+      cols: string[] | string;
     }>(`
       SELECT
         c.conname,
@@ -121,7 +150,11 @@ async function run() {
         AND c.confrelid = 'public.accounts'::regclass;
     `);
 
-    const custodyFks = fkRes.rows.filter((r) => r.cols.includes('custody_receivable_account_id'));
+    const normalizedFks = fkRes.rows.map((r) => ({
+      ...r,
+      cols: normalizePgColsArray(r.cols),
+    }));
+    const custodyFks = normalizedFks.filter((r) => r.cols.includes('custody_receivable_account_id'));
     const singleColCustodyFk = custodyFks.find((r) => r.cols.length === 1);
     const compositeCustodyFk = custodyFks.find(
       (r) =>

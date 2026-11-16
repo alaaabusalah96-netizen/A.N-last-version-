@@ -161,6 +161,7 @@ const scripts = [
   'scripts/verifyBackupRestore1.ts',
   'scripts/verifyMonitoringSupport1.ts',
   'scripts/verifyUxFoundation1.ts',
+  'scripts/verifyCompositeFkSetNull1.ts',
 ];
 
 export interface BatteryItemReport {

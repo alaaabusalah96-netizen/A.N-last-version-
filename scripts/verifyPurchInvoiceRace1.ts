@@ -279,7 +279,17 @@ async function run() {
       fulfilledCount === 1 && rejectedCount === 1 && remainingQty === 4
     );
 
-    // T3: Verify DB unique constraint rejects raw duplicate grn_line_id insert on the same invoice (SQLSTATE 23505)
+    // T3: Verify DB unique constraint rejects raw duplicate grn_line_id insert on a draft invoice (SQLSTATE 23505)
+    //     Must use a guaranteed 'draft' invoice so trg_purch_supplier_invoice_lines_posted_guard does not trigger first.
+    const draftForUnique = await defaultInvoiceService.createInvoice(
+      companyId,
+      {
+        supplierId: supplier.id,
+        supplierInvoiceNo: `RACE-UNIQ-DRAFT`,
+        lines: [{ grnLineId, qty: 1, unitCost: 100 }],
+      },
+      userId
+    );
     let dbUniqueRejected = false;
     await executor.withTransaction(async (tx) => {
       await tx.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [companyId]);
@@ -288,7 +298,7 @@ async function run() {
         await tx.query(
           `INSERT INTO purch_supplier_invoice_lines (invoice_id, company_id, grn_line_id, item_id, qty, unit_cost, line_no)
            VALUES ($1, $2, $3, $4, 1, 100, 99)`,
-          [draftA.id, companyId, grnLineId, item.id]
+          [draftForUnique.id, companyId, grnLineId, item.id]
         );
       } catch (pgErr: any) {
         if (pgErr?.code === '23505') {
@@ -298,7 +308,7 @@ async function run() {
       }
     });
     await check(
-      'T3: PostgreSQL UNIQUE (company_id, invoice_id, grn_line_id) rejects duplicate grn_line_id with SQLSTATE 23505',
+      'T3: PostgreSQL UNIQUE (company_id, invoice_id, grn_line_id) rejects duplicate grn_line_id on draft invoice with SQLSTATE 23505',
       dbUniqueRejected
     );
   } catch (err) {
