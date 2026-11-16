@@ -16,6 +16,7 @@ import { defaultGrnService } from '../src/server/purchasing/grnService.js';
 import { defaultInvoiceService } from '../src/server/purchasing/invoiceService.js';
 import { defaultPurchReturnService } from '../src/server/purchasing/purchReturnService.js';
 import { defaultStockRepository } from '../src/server/inventory/stockRepository.js';
+import { withTenantTransaction } from '../src/server/db/transactionManager.js';
 import { ValidationError } from '../src/server/http/errors.js';
 
 console.log('========================================================================');
@@ -226,13 +227,16 @@ async function run() {
     const g1AfterR2 = retLinesAfterR2.find((r) => r.grnLineId === grn1LineId);
 
     // Verify balanced GL journal entry: Dr AP 200 / Cr Inventory 200
-    const jeRes = await executor.query<any>(
-      `SELECT account_id, debit::numeric as debit, credit::numeric as credit
-       FROM journal_lines WHERE company_id = $1 AND entry_id = $2`,
-      [companyAId, ret1Posted.journalEntryId]
+    const jeRes = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query<{ account_id: string; debit: string | number; credit: string | number }>(
+        `SELECT account_id, debit::numeric AS debit, credit::numeric AS credit
+         FROM journal_lines
+         WHERE company_id = $1 AND entry_id = $2`,
+        [companyAId, ret1Posted.journalEntryId]
+      )
     );
-    const drApOk = jeRes.rows.some((r: any) => r.account_id === apAcc.id && Number(r.debit) === 200 && Number(r.credit) === 0);
-    const crInvOk = jeRes.rows.some((r: any) => r.account_id === invAcc.id && Number(r.debit) === 0 && Number(r.credit) === 200);
+    const drApOk = jeRes.rows.some((r) => r.account_id === apAcc.id && Number(r.debit) === 200 && Number(r.credit) === 0);
+    const crInvOk = jeRes.rows.some((r) => r.account_id === invAcc.id && Number(r.debit) === 0 && Number(r.credit) === 200);
 
     await check(
       'R2: Posting return decrements stock (13-4=9), records purchase_return (4), posts balanced GL (Dr AP/Cr Inv 200), updates returnable=6',
@@ -355,19 +359,47 @@ async function run() {
       userId
     );
     // Reduce physical stock below 3 (from 5 down to 1) via stock adjustment test
-    await defaultStockRepository.decrementBalance(companyAId, warehouse.id, item.id, 4, executor);
+    const reduced = await withTenantTransaction(companyAId, async (tx) =>
+      defaultStockRepository.decrementBalance(companyAId, warehouse.id, item.id, 4, tx)
+    );
+    await check('R6-PRE: Physical stock reduced from 5 to 1', reduced?.qty === 1);
+
+    const initialRetMovements = await defaultStockRepository.listMovementsByItem(companyAId, item.id, {
+      warehouseId: warehouse.id,
+      movementType: 'purchase_return',
+    });
+    const initialMvCount = initialRetMovements.length;
+
     let insufficientStockRejected = false;
     try {
       await defaultPurchReturnService.postReturn(companyAId, retStockTest.id, userId);
     } catch (err) {
       if (err instanceof ValidationError) insufficientStockRejected = true;
     }
+
+    const retAfterFail = await defaultPurchReturnService.getReturn(companyAId, retStockTest.id);
     const balAfterR6 = (await defaultStockRepository.listBalancesByItem(companyAId, item.id)).find(
       (b) => b.warehouseId === warehouse.id
     )?.qty;
+    const movementsAfterR6 = await defaultStockRepository.listMovementsByItem(companyAId, item.id, {
+      warehouseId: warehouse.id,
+      movementType: 'purchase_return',
+    });
+    const jeR6Res = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query(
+        `SELECT id FROM journal_entries WHERE company_id = $1 AND memo LIKE $2`,
+        [companyAId, `%${retStockTest.returnNo}%`]
+      )
+    );
+
     await check(
       'R6: Post return fails cleanly without movement/GL drift when physical stock < return qty',
-      insufficientStockRejected && balAfterR6 === 1
+      insufficientStockRejected &&
+        balAfterR6 === 1 &&
+        retAfterFail.status !== 'posted' &&
+        movementsAfterR6.length === initialMvCount &&
+        !retAfterFail.journalEntryId &&
+        jeR6Res.rows.length === 0
     );
   } catch (err) {
     console.error('[verifyPurchReturn1] Fatal test error:', err);
@@ -375,13 +407,15 @@ async function run() {
   } finally {
     const cleanupUrl = process.env.MIGRATION_DATABASE_URL || dbUrl;
     if (cleanupUrl && companyIds.length > 0) {
-      const client = new pg.Client(buildPgConfig(cleanupUrl));
+      const client = new pg.Client(buildPgConfig(cleanupUrl, process.env));
+      let triggersDisabled = false;
       try {
         await client.connect();
         await client.query('BEGIN');
         await client.query('ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable');
         await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
         await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
+        triggersDisabled = true;
 
         await client.query('DELETE FROM purch_return_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_returns WHERE company_id = ANY($1::uuid[])', [companyIds]);
@@ -410,6 +444,7 @@ async function run() {
         await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
         await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
         await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
+        triggersDisabled = false;
         await client.query('COMMIT');
       } catch (cleanupErr) {
         cleanupFailed = true;
@@ -418,6 +453,17 @@ async function run() {
         } catch {}
         console.error('[cleanup] Failed cleaning up verifyPurchReturn1:', cleanupErr);
       } finally {
+        if (triggersDisabled) {
+          try {
+            await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
+            await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
+            await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
+            console.log('[cleanup] Restored immutability triggers on maintenance connection in finally block.');
+          } catch (enableErr) {
+            cleanupFailed = true;
+            console.error('[cleanup] FATAL: Failed to re-enable triggers in finally block:', enableErr);
+          }
+        }
         await client.end();
       }
     }
@@ -426,6 +472,7 @@ async function run() {
 
   const { exitCode } = summary();
   if (cleanupFailed) {
+    console.error('[cleanup] Cleanup failed. Treating test as failure.');
     process.exit(1);
   }
   process.exit(exitCode);

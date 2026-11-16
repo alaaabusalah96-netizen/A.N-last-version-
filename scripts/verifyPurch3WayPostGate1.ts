@@ -14,6 +14,7 @@ import { defaultWarehouseService } from '../src/server/inventory/warehouseServic
 import { defaultItemService } from '../src/server/inventory/itemService.js';
 import { defaultGrnService } from '../src/server/purchasing/grnService.js';
 import { defaultInvoiceService } from '../src/server/purchasing/invoiceService.js';
+import { withTenantTransaction } from '../src/server/db/transactionManager.js';
 import { ValidationError } from '../src/server/http/errors.js';
 
 console.log('========================================================================');
@@ -210,9 +211,11 @@ async function run() {
     }
 
     const invAfterRej = await defaultInvoiceService.getInvoice(companyAId, rejectDraft.id);
-    const jeRejRes = await executor.query<any>(
-      `SELECT id FROM journal_entries WHERE company_id = $1 AND memo LIKE $2`,
-      [companyAId, `%${rejectDraft.supplierInvoiceNo}%`]
+    const jeRejRes = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query(
+        `SELECT id FROM journal_entries WHERE company_id = $1 AND memo LIKE $2`,
+        [companyAId, `%${rejectDraft.supplierInvoiceNo}%`]
+      )
     );
 
     await check(
@@ -220,7 +223,7 @@ async function run() {
       l1Rejected && invAfterRej.status === 'draft' && jeRejRes.rows.length === 0
     );
 
-    // L2 ACCEPT partial invoice 1 (qty=4 of 10, unitCost=100) -> status=posted, JE exists and is posted
+    // Create draft invoice 1 (partial: qty=4, unitCost=100)
     const partialDraft1 = await defaultInvoiceService.createInvoice(
       companyAId,
       {
@@ -230,17 +233,8 @@ async function run() {
       },
       userId
     );
-    const postedPart1 = await defaultInvoiceService.postInvoice(companyAId, partialDraft1.id, userId);
-    const jePart1Res = await executor.query<any>(
-      `SELECT id, status FROM journal_entries WHERE company_id = $1 AND id = $2`,
-      [companyAId, postedPart1.journalEntryId]
-    );
-    await check(
-      'L2 ACCEPT partial: Invoice 1 with partial qty (4 of 10) posts successfully and creates posted journal entry',
-      postedPart1.status === 'posted' && jePart1Res.rows.length === 1 && jePart1Res.rows[0].status === 'posted'
-    );
 
-    // L3 ACCEPT completing remaining (qty=6 of 10 remaining, unitCost=104 within 5% tolerance) -> status=posted
+    // Create draft invoice 2 (partial: qty=6, unitCost=104 within 5% tolerance)
     const partialDraft2 = await defaultInvoiceService.createInvoice(
       companyAId,
       {
@@ -250,17 +244,10 @@ async function run() {
       },
       userId
     );
-    const postedPart2 = await defaultInvoiceService.postInvoice(companyAId, partialDraft2.id, userId);
-    const jePart2Res = await executor.query<any>(
-      `SELECT id, status FROM journal_entries WHERE company_id = $1 AND id = $2`,
-      [companyAId, postedPart2.journalEntryId]
-    );
-    await check(
-      'L3 ACCEPT completing: Invoice 2 completing remaining qty (6 of 10) at +4% cost posts successfully',
-      postedPart2.status === 'posted' && jePart2Res.rows.length === 1 && jePart2Res.rows[0].status === 'posted'
-    );
 
-    // L4 REJECT over remaining (qty=2 when remaining=0) -> throws ValidationError, remains draft, zero JE
+    // L4 scenario order (mandatory):
+    // BEFORE posting partial1 and partial2:
+    // Create draft invoice3 (qty=2) valid against remaining at create time (10 remaining)
     const overDraft = await defaultInvoiceService.createInvoice(
       companyAId,
       {
@@ -270,6 +257,34 @@ async function run() {
       },
       userId
     );
+
+    // L2 ACCEPT partial invoice 1 (qty=4 of 10, unitCost=100) -> status=posted, JE exists and is posted
+    const postedPart1 = await defaultInvoiceService.postInvoice(companyAId, partialDraft1.id, userId);
+    const jePart1Res = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query<{ id: string; status: string }>(
+        `SELECT id, status FROM journal_entries WHERE company_id = $1 AND id = $2`,
+        [companyAId, postedPart1.journalEntryId]
+      )
+    );
+    await check(
+      'L2 ACCEPT partial: Invoice 1 with partial qty (4 of 10) posts successfully and creates posted journal entry',
+      postedPart1.status === 'posted' && jePart1Res.rows.length === 1 && jePart1Res.rows[0].status === 'posted'
+    );
+
+    // L3 ACCEPT completing remaining (qty=6 of 10 remaining, unitCost=104 within 5% tolerance) -> status=posted
+    const postedPart2 = await defaultInvoiceService.postInvoice(companyAId, partialDraft2.id, userId);
+    const jePart2Res = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query<{ id: string; status: string }>(
+        `SELECT id, status FROM journal_entries WHERE company_id = $1 AND id = $2`,
+        [companyAId, postedPart2.journalEntryId]
+      )
+    );
+    await check(
+      'L3 ACCEPT completing: Invoice 2 completing remaining qty (6 of 10) at +4% cost posts successfully',
+      postedPart2.status === 'posted' && jePart2Res.rows.length === 1 && jePart2Res.rows[0].status === 'posted'
+    );
+
+    // L4 REJECT over remaining: Post invoice 3 (qty=2 when remaining=0) -> throws ValidationError, remains draft, zero JE
     let l4Rejected = false;
     try {
       await defaultInvoiceService.postInvoice(companyAId, overDraft.id, userId);
@@ -277,13 +292,36 @@ async function run() {
       if (err instanceof ValidationError) l4Rejected = true;
     }
     const invAfterOver = await defaultInvoiceService.getInvoice(companyAId, overDraft.id);
-    const jeOverRes = await executor.query<any>(
-      `SELECT id FROM journal_entries WHERE company_id = $1 AND memo LIKE $2`,
-      [companyAId, `%${overDraft.supplierInvoiceNo}%`]
+    const jeOverRes = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query(
+        `SELECT id FROM journal_entries WHERE company_id = $1 AND memo LIKE $2`,
+        [companyAId, `%${overDraft.supplierInvoiceNo}%`]
+      )
     );
+
+    const postedQtyRes = await withTenantTransaction(companyAId, async (tx) =>
+      tx.query<{ posted_qty: string | number }>(
+        `SELECT COALESCE(SUM(sil.qty), 0) AS posted_qty
+         FROM purch_supplier_invoice_lines sil
+         INNER JOIN purch_supplier_invoices si
+           ON si.id = sil.invoice_id
+          AND si.company_id = sil.company_id
+         WHERE sil.company_id = $1
+           AND si.company_id = $1
+           AND sil.grn_line_id = $2
+           AND si.status = 'posted'`,
+        [companyAId, grnLineId]
+      )
+    );
+    const postedQty = Number(postedQtyRes.rows[0]?.posted_qty ?? 0);
+
     await check(
-      'L4 REJECT over remaining: Invoice 3 exceeding remaining GRN qty is rejected, remains draft, and has zero journal entries',
-      l4Rejected && invAfterOver.status === 'draft' && jeOverRes.rows.length === 0
+      'L4 REJECT over remaining: Invoice 3 exceeding remaining GRN qty is rejected, remains draft, and has zero journal entries and posted_qty=10',
+      l4Rejected &&
+        invAfterOver.status === 'draft' &&
+        !invAfterOver.journalEntryId &&
+        jeOverRes.rows.length === 0 &&
+        postedQty === 10
     );
 
     console.log('PASS: verifyPurch3WayPostGate1 completed successfully.');
@@ -307,6 +345,8 @@ async function run() {
         await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_movements WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_stock_balances WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
