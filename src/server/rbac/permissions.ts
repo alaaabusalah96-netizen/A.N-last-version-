@@ -57,6 +57,11 @@ export const PERMISSIONS = {
   CUSTODY_APPROVE: 'custody:approve',
   CUSTODY_DISBURSE: 'custody:disburse',
   CUSTODY_SETTLE: 'custody:settle',
+
+  // Sales Revenue Cycle (المبيعات ودورة الإيرادات)
+  SALES_READ: 'sales:read',
+  SALES_WRITE: 'sales:write',
+  SALES_POST: 'sales:post',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | string;
@@ -64,7 +69,7 @@ export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | st
 export interface PermissionCatalogItem {
   code: PermissionCode;
   labelAr: string;
-  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة';
+  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المبيعات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة';
 }
 
 export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
@@ -116,4 +121,10 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.CUSTODY_APPROVE, labelAr: 'اعتماد ورفض طلبات العهد', group: 'الخزينة' },
   { code: PERMISSIONS.CUSTODY_DISBURSE, labelAr: 'صرف العهد النقدية وترحيلها', group: 'الخزينة' },
   { code: PERMISSIONS.CUSTODY_SETTLE, labelAr: 'تسوية وإغلاق العهد النقدية', group: 'الخزينة' },
+
+  // المبيعات
+  { code: PERMISSIONS.SALES_READ, labelAr: 'عرض العملاء وأذون التسليم والفواتير والتحصيلات', group: 'المبيعات' },
+  { code: PERMISSIONS.SALES_WRITE, labelAr: 'إنشاء وتعديل العملاء ومسودات التسليم والفواتير والتحصيل', group: 'المبيعات' },
+  { code: PERMISSIONS.SALES_POST, labelAr: 'ترحيل أذون تسليم المبيعات وفواتير المبيعات والتحصيلات', group: 'المبيعات' },
 ];
+

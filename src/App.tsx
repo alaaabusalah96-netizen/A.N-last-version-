@@ -5,6 +5,7 @@ import { CompaniesPanel } from './components/CompaniesPanel.js';
 import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
 import { InventoryWorkspace } from './components/inventory/InventoryWorkspace.js';
 import { PurchasingWorkspace } from './components/purchasing/PurchasingWorkspace.js';
+import { SalesWorkspace } from './components/sales/SalesWorkspace.js';
 import { CashCustodyWorkspace } from './components/cash/CashCustodyWorkspace.js';
 import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
 import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
@@ -28,7 +29,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'cash' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'sales' | 'cash' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     return window.matchMedia('(min-width: 1024px)').matches;
@@ -152,6 +153,8 @@ export default function App() {
                 ? 'المخزون'
                 : activeNav === 'purchasing'
                 ? 'المشتريات'
+                : activeNav === 'sales'
+                ? 'المبيعات'
                 : activeNav === 'cash'
                 ? 'الخزينة والعهد'
                 : activeNav === 'users'
@@ -177,6 +180,8 @@ export default function App() {
                 ? 'المستودعات والأصناف والأرصدة والحركات'
                 : activeNav === 'purchasing'
                 ? 'الموردون وسندات استلام البضائع GRN'
+                : activeNav === 'sales'
+                ? 'العملاء وأذون التسليم وفواتير المبيعات والتحصيل وأعمار الديون'
                 : activeNav === 'cash'
                 ? 'إدارة الصناديق النقدية وعهد الموظفين والأرصدة المفتوحة'
                 : activeNav === 'users'
@@ -208,6 +213,8 @@ export default function App() {
           <InventoryWorkspace userRole={currentUser.role} />
         ) : activeNav === 'purchasing' ? (
           <PurchasingWorkspace userRole={currentUser.role} />
+        ) : activeNav === 'sales' ? (
+          <SalesWorkspace userRole={currentUser.role} />
         ) : activeNav === 'cash' ? (
           <CashCustodyWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
         ) : activeNav === 'users' ? (

@@ -13,6 +13,7 @@ import { accountingRoutes } from './routes/accountingRoutes.js';
 import { userAdminRoutes } from './routes/userAdminRoutes.js';
 import { inventoryRoutes } from './routes/inventoryRoutes.js';
 import { purchasingRoutes } from './routes/purchasingRoutes.js';
+import { salesRoutes } from './routes/salesRoutes.js';
 import { cashRoutes } from './routes/cashRoutes.js';
 import { configPlatformRoutes } from './routes/configRoutes.js';
 import { rbacRoutes } from './routes/roleRoutes.js';
@@ -59,6 +60,7 @@ export function createApp(): Express {
   app.use('/api/users', userAdminRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/purchasing', purchasingRoutes);
+  app.use('/api/sales', salesRoutes);
   app.use('/api/cash', cashRoutes);
 
   // Configuration Platform — global definitions catalog (Wave A / A2)

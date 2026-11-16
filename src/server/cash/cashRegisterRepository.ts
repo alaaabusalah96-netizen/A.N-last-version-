@@ -298,6 +298,12 @@ export class CashRegisterRepository {
             amount as out_amt
           FROM purch_supplier_payments
           WHERE company_id = $1 AND register_id = $2 AND status = 'posted'
+          UNION ALL
+          SELECT
+            amount as in_amt,
+            0::numeric as out_amt
+          FROM sales_collections
+          WHERE company_id = $1 AND register_id = $2 AND status = 'posted'
         ) unified_cash_flow;
       `;
       const res = await executor.query<{ totalIn: string | number; totalOut: string | number; netMovement: string | number }>(sql, [companyId, registerId]);

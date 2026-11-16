@@ -1,4 +1,4 @@
-import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, Wallet, SlidersHorizontal, Shield, Sliders, X } from 'lucide-react';
+import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, Wallet, SlidersHorizontal, Shield, Sliders, X, TrendingUp } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
 type NavKey =
@@ -6,6 +6,7 @@ type NavKey =
   | 'accounting'
   | 'inventory'
   | 'purchasing'
+  | 'sales'
   | 'cash'
   | 'users'
   | 'roles'
@@ -144,6 +145,23 @@ export function AppSidebar({
           <ShoppingBag className="w-4 h-4 shrink-0" />
           <span>المشتريات</span>
         </button>
+
+        {(userRole === 'platform_admin' ||
+          userRole === 'company_admin' ||
+          permissions.length === 0 ||
+          permissions.includes('sales:read')) && (
+          <button
+            onClick={() => onNavigate('sales')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeNav === 'sales'
+                ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/20 border border-cyan-500/30'
+                : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4 shrink-0" />
+            <span>المبيعات</span>
+          </button>
+        )}
 
         {(userRole === 'platform_admin' ||
           userRole === 'company_admin' ||

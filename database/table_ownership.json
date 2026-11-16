@@ -208,5 +208,36 @@
     "table": "purch_supplier_payments",
     "scope": "tenant",
     "reason": "Per-company supplier cash payments against posted invoices"
+  },
+  {
+    "table": "sales_customers",
+    "scope": "tenant",
+    "reason": "Per-company sales customers master"
+  },
+  {
+    "table": "sales_delivery_notes",
+    "scope": "tenant",
+    "reason": "Per-company sales delivery notes and goods issues"
+  },
+  {
+    "table": "sales_delivery_lines",
+    "scope": "tenant",
+    "reason": "Per-company sales delivery note item lines"
+  },
+  {
+    "table": "sales_invoices",
+    "scope": "tenant",
+    "reason": "Per-company sales invoices (AR)"
+  },
+  {
+    "table": "sales_invoice_lines",
+    "scope": "tenant",
+    "reason": "Per-company sales invoice item lines"
+  },
+  {
+    "table": "sales_collections",
+    "scope": "tenant",
+    "reason": "Per-company customer collections into cash registers"
   }
 ]
+
