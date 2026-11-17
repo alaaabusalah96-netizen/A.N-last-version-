@@ -139,13 +139,14 @@ export class AuthService {
   }
 
   /**
-   * Synchronizes password for an existing platform_admin on server startup.
-   * Strictly non-creating when no account exists (use explicit CLI `bootstrap:admin`).
+   * Verifies an existing platform_admin on server startup without mutating credentials.
+   * Strictly non-creating when no account exists (use explicit CLI `bootstrap:admin`)
+   * and strictly non-mutating when the administrator already exists.
    */
   async bootstrapPlatformAdminFromEnv(): Promise<boolean> {
     const credentials = parsePlatformAdminEnvCredentials(false);
     if (!credentials) {
-      return false; // Neither configured; bootstrap not requested
+      return false; // Neither configured; startup check not requested
     }
 
     const { username, password } = credentials;
@@ -164,22 +165,14 @@ export class AuthService {
           throw new Error(`[auth] FATAL: Bootstrap failed — platform admin account '${username}' is inactive`);
         }
 
-        // Self-Healing: If the existing password hash does not match the current environment secret, synchronize it
+        // Non-mutating check: never overwrite an existing administrator's password_hash on startup
         const isMatch = await verifyPassword(password, existing.passwordHash || '');
         if (!isMatch) {
-          console.log(`[auth] Reconciling password for existing platform admin '${username}'...`);
-          const newHash = await hashPassword(password);
-          const updated = await this.userStore.updatePasswordHash(username, newHash);
-
-          if (!updated) {
-            throw new Error(
-              `[auth] FATAL: Failed to update password hash for platform admin '${username}'. Zero rows affected.`
-            );
-          }
-
-          console.log(`[auth] SUCCESS: Platform admin '${username}' password reconciled.`);
+          console.warn(
+            `[auth] WARNING: Existing platform admin '${username}' password hash does not match current PLATFORM_ADMIN_PASSWORD. Startup password overwrite is disabled; preserving existing password hash.`
+          );
         } else {
-          console.log(`[auth] Platform admin '${username}' is already synchronized.`);
+          console.log(`[auth] Platform admin '${username}' verified (existing credentials preserved).`);
         }
 
         return true;

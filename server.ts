@@ -66,7 +66,7 @@ async function startServer() {
     console.warn('[server] Non-fatal error during startup purge:', err);
   }
 
-  // 3. Initialize platform admin from environment variables
+  // 3. Verify platform admin startup configuration (strictly non-creating and non-mutating)
   const rawUsername = process.env.PLATFORM_ADMIN_USERNAME;
   const rawPassword = process.env.PLATFORM_ADMIN_PASSWORD;
   const hasUsername = Boolean(rawUsername && rawUsername.trim() !== '');
