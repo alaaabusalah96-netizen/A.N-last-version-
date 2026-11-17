@@ -4,28 +4,20 @@ import { defaultAuthService } from './src/server/auth/authService.js';
 import { defaultSessionRepository } from './src/server/auth/sessionRepository.js';
 import { defaultRateLimitStore } from './src/server/security/rateLimitStore.js';
 import { closeAllExecutors, getDefaultExecutor } from './src/server/db/index.js';
-import { runMigrations } from './src/server/db/migrationRunner.js';
 import { assertSafeDbRole } from './src/server/db/roleGuard.js';
 import { assertValidNodeEnv } from './src/server/config/env.js';
 
 const app = createApp();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProd = process.env.NODE_ENV === 'production';
+const requireDb =
+  isProd ||
+  ['1', 'true'].includes(
+    (process.env.REQUIRE_DB || '').trim().toLowerCase()
+  );
 
 async function startServer() {
   assertValidNodeEnv();
-
-  if (process.env.MIGRATION_DATABASE_URL) {
-    try {
-      console.log('[server] MIGRATION_DATABASE_URL detected. Running pending database migrations automatically...');
-      await runMigrations();
-    } catch (migErr) {
-      console.error('[server] FATAL: Automatic migration execution failed:', migErr);
-      if (isProd) {
-        process.exit(1);
-      }
-    }
-  }
   // 1. Startup DB Role Safety & Health Check Retry Loop
   try {
     const executor = await getDefaultExecutor();
@@ -43,17 +35,20 @@ async function startServer() {
         await new Promise((r) => setTimeout(r, 2000));
       }
 
-      if (!healthOk && isProd) {
+      if (!healthOk && requireDb) {
         console.error('[server] FATAL: Database health check failed after 3 attempts in production.');
         process.exit(1);
       }
-    } else if (isProd) {
-      console.error('[server] FATAL: DATABASE_URL missing or unable to connect in production');
+    } else if (requireDb) {
+      console.error(
+        '[server] FATAL: DATABASE_URL is required but no database executor is available.'
+      );
       process.exit(1);
     }
   } catch (err) {
     console.error('[server] Startup guard failure:', err);
-    if (isProd) {
+
+    if (requireDb) {
       process.exit(1);
     }
   }

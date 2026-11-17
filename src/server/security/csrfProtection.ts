@@ -79,8 +79,23 @@ export function createCsrfProtection(options: CsrfOptions = {}): RequestHandler 
   const secret = resolveSecret(options.secret, strict);
 
   return (req: Request, res: Response, next: NextFunction): void => {
-    // Safe HTTP methods bypass CSRF check
+    // Safe methods bypass mutation-token validation.
+    // However, a supplied Origin must still be trusted.
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      const safeMethodOrigin = req.headers.origin as string | undefined;
+
+      if (
+        safeMethodOrigin &&
+        !validateOrigin(safeMethodOrigin, options.allowedOrigins)
+      ) {
+        res.status(403).json({
+          error: 'Forbidden',
+          code: 'CSRF_ORIGIN',
+          message: 'Origin header not allowed',
+        });
+        return;
+      }
+
       return next();
     }
 

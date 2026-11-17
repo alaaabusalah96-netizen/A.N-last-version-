@@ -19,9 +19,12 @@ async function provisionAppRole() {
   assertValidNodeEnv();
   console.log('--- Running Provision App Role Script ---');
 
-  const migrationDbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
-  if (!migrationDbUrl) {
-    console.error('[provision] ERROR: MIGRATION_DATABASE_URL (or DATABASE_URL) is required');
+  const migrationDbUrl = process.env.MIGRATION_DATABASE_URL;
+
+  if (!migrationDbUrl || migrationDbUrl.trim() === '') {
+    console.error(
+      '[provision] ERROR: MIGRATION_DATABASE_URL is required. DATABASE_URL cannot be used as a fallback.'
+    );
     process.exit(1);
   }
 

@@ -3,13 +3,16 @@ import { CorsOriginError } from './errors.js';
 import { validateOrigin } from './originRegistry.js';
 
 /**
- * Hardened CORS Configuration
- * Uses unified origin validation to prevent reflection and spoofing.
+ * Exact-origin CORS middleware.
+ *
+ * Requests without Origin are allowed to continue because
+ * CORS is a browser cross-origin policy, not authentication.
+ *
+ * Requests with an untrusted Origin are rejected server-side.
  */
 export function createCorsMiddleware() {
   return cors({
     origin: (origin, callback) => {
-      // Allow non-browser requests or same-origin requests (origin undefined)
       if (!origin) {
         return callback(null, true);
       }
@@ -18,8 +21,13 @@ export function createCorsMiddleware() {
         return callback(null, true);
       }
 
-      return callback(new CorsOriginError(`CORS policy violation: origin '${origin}' is not permitted`));
+      return callback(
+        new CorsOriginError(
+          'CORS policy violation: origin is not permitted'
+        )
+      );
     },
     credentials: true,
+    optionsSuccessStatus: 204,
   });
 }
