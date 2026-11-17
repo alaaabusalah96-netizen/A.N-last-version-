@@ -23,23 +23,15 @@ export function applySecurityMiddleware(app: Application): void {
               styleSrc: ["'self'", "'unsafe-inline'"],
               imgSrc: ["'self'", 'data:', 'https:'],
               connectSrc: [
-                "'self'", 
-                'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
-                'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
-                'https://erp-platform-foundation.ai.studio',
+                "'self'",
                 'https://aistudio.google.com',
-                'https://*.ai.studio'
               ],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],
               formAction: ["'self'"],
               frameAncestors: [
-                "'self'", 
-                'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
-                'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+                "'self'",
                 'https://aistudio.google.com',
-                'https://erp-platform-foundation.ai.studio',
-                'https://*.ai.studio'
               ],
             },
           }
