@@ -19,6 +19,8 @@ describe('Origin Validation Registry', () => {
     
     expect(validateOrigin(devOrigin)).toBe(true);
     expect(validateOrigin(preOrigin)).toBe(true);
+    expect(validateOrigin('https://erp-platform-foundation.ai.studio')).toBe(true);
+    expect(validateOrigin('https://aistudio.google.com')).toBe(true);
   });
 
   it('should allow origins from CORS_ORIGINS environment variable', () => {
@@ -45,6 +47,8 @@ describe('Origin Validation Registry', () => {
   it('should reject malformed or fake origins', () => {
     expect(validateOrigin('https://fake-ais-dev.run.app')).toBe(false);
     expect(validateOrigin('https://ais-dev-6vklnibghlun634krwmxyl.google.com.attacker.com')).toBe(false);
+    expect(validateOrigin('https://evil.ai.studio.attacker.com')).toBe(false);
+    expect(validateOrigin('http://erp-platform-foundation.ai.studio')).toBe(false);
     expect(validateOrigin('')).toBe(false);
     expect(validateOrigin(undefined)).toBe(false);
   });

@@ -25,7 +25,10 @@ export function applySecurityMiddleware(app: Application): void {
               connectSrc: [
                 "'self'", 
                 'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
-                'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app'
+                'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
+                'https://erp-platform-foundation.ai.studio',
+                'https://aistudio.google.com',
+                'https://*.ai.studio'
               ],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],
@@ -34,7 +37,9 @@ export function applySecurityMiddleware(app: Application): void {
                 "'self'", 
                 'https://ais-dev-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
                 'https://ais-pre-6vklnibghlun634krwmxyl-925777775579.europe-west2.run.app',
-                'https://aistudio.google.com'
+                'https://aistudio.google.com',
+                'https://erp-platform-foundation.ai.studio',
+                'https://*.ai.studio'
               ],
             },
           }

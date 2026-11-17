@@ -10,7 +10,12 @@ export function getAllowedOrigins(): string[] {
     : [];
 
   const previewOrigins = TRUSTED_PREVIEW_HOSTS.map(host => `https://${host}`);
-  const baseOrigins = [...previewOrigins, ...envOrigins];
+  const defaultOrigins = [
+    ...previewOrigins,
+    'https://aistudio.google.com',
+    'https://erp-platform-foundation.ai.studio',
+  ];
+  const baseOrigins = [...defaultOrigins, ...envOrigins];
 
   if (!isProduction()) {
     baseOrigins.push('http://localhost:3000');
@@ -34,6 +39,11 @@ export function validateOrigin(origin: string | undefined, additionalOrigins: st
   
   // Exact match only for security
   if (allAllowed.has(origin)) {
+    return true;
+  }
+
+  // Allow Google AI Studio platform and valid AI Studio app domains
+  if (origin === 'https://aistudio.google.com' || /^https:\/\/[a-z0-9-]+\.ai\.studio$/.test(origin)) {
     return true;
   }
   
