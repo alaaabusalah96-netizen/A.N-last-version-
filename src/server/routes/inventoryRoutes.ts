@@ -10,7 +10,11 @@ import { wrap } from '../http/asyncHandler.js';
 import { isUuid } from '../http/validators.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../http/errors.js';
 
+import { inventoryValuationRoutes } from '../inventory/inventoryValuationRoutes.js';
+
 export const inventoryRoutes = Router();
+
+inventoryRoutes.use('/', inventoryValuationRoutes);
 
 async function assertInventoryPermission(
   user: AuthenticatedRequest['user'],

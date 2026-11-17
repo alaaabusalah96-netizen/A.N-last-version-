@@ -13,9 +13,11 @@ import {
   X,
   History,
   FileText,
+  Layers,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { ItemCardPanel } from './ItemCardPanel.js';
+import { InventoryValuationPanel } from './InventoryValuationPanel.js';
 import {
   DynamicFieldGroup,
   DynamicFieldDefinition,
@@ -77,7 +79,7 @@ interface InventoryWorkspaceProps {
 export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation'>('balances');
   const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -516,9 +518,25 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
           <ArrowRightLeft className="w-4 h-4" />
           <span>التحويلات بين المستودعات</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('valuation')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'valuation'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>تقييم المخزون والتكلفة</span>
+        </button>
       </div>
 
       {/* Tab Panels */}
+      {activeTab === 'valuation' && (
+        <InventoryValuationPanel companyId={selectedCompanyId} userRole={userRole} />
+      )}
+
       {activeTab === 'balances' && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">

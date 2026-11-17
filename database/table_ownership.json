@@ -258,6 +258,51 @@
     "table": "fin_fiscal_year_closes",
     "scope": "tenant",
     "reason": "Per-company fiscal year close records and retained earnings closing entry references"
+  },
+  {
+    "table": "inv_costing_profiles",
+    "scope": "tenant",
+    "reason": "Per-company inventory costing profiles (FIFO, Perpetual Moving Average)"
+  },
+  {
+    "table": "inv_item_costing_profiles",
+    "scope": "tenant",
+    "reason": "Per-company item-to-costing-profile assignments"
+  },
+  {
+    "table": "inv_valuation_balances",
+    "scope": "tenant",
+    "reason": "Per-company warehouse and item monetary valuation balances"
+  },
+  {
+    "table": "inv_cost_layers",
+    "scope": "tenant",
+    "reason": "Per-company FIFO cost layers for perpetual inventory valuation"
+  },
+  {
+    "table": "inv_valuation_movements",
+    "scope": "tenant",
+    "reason": "Per-company inventory valuation movements ledger"
+  },
+  {
+    "table": "inv_cost_allocations",
+    "scope": "tenant",
+    "reason": "Per-company outgoing valuation allocations against FIFO cost layers"
+  },
+  {
+    "table": "inv_cost_adjustments",
+    "scope": "tenant",
+    "reason": "Per-company price variance and cost adjustments"
+  },
+  {
+    "table": "inv_opening_valuations",
+    "scope": "tenant",
+    "reason": "Per-company opening inventory valuation setup and approval records"
+  },
+  {
+    "table": "inv_valuation_reconciliations",
+    "scope": "tenant",
+    "reason": "Per-company inventory subledger to GL control account reconciliations"
   }
 ]
 
