@@ -118,10 +118,18 @@ describe('applySecurityMiddleware Production CSP Hardening', () => {
     expect(directives['frame-ancestors']).toEqual(["'self'", 'https://aistudio.google.com']);
   });
 
-  it('T09: Production connect-src retains the exact https://aistudio.google.com', async () => {
+  it("T09: Production connect-src contains only 'self'", async () => {
     const { cspHeader } = await requestWithSecurityMiddleware('production');
     const directives = parseCspDirectives(cspHeader || '');
-    expect(directives['connect-src']).toEqual(["'self'", 'https://aistudio.google.com']);
+    expect(directives['connect-src']).toEqual(["'self'"]);
+  });
+
+  it('keeps https://aistudio.google.com out of production connect-src while preserving it in frame-ancestors', async () => {
+    const { cspHeader } = await requestWithSecurityMiddleware('production');
+    const directives = parseCspDirectives(cspHeader || '');
+    expect(directives['connect-src']).not.toContain('https://aistudio.google.com');
+    expect(directives['frame-ancestors']).toContain('https://aistudio.google.com');
+    expect(directives['frame-ancestors']).toEqual(["'self'", 'https://aistudio.google.com']);
   });
 
   it("T10: Production default-src remains 'self'", async () => {
@@ -189,5 +197,7 @@ describe('Static security verification for securityMiddleware.ts', () => {
     expect(source).toContain('crossOriginEmbedderPolicy: false');
     expect(source).toContain('frameguard: false');
     expect(source).toContain("app.set('trust proxy', 1)");
+    expect(source).toMatch(/connectSrc:\s*\[\s*"'self'",?\s*\]/);
+    expect(source).toMatch(/frameAncestors:\s*\[\s*"'self'",\s*'https:\/\/aistudio\.google\.com',?\s*\]/);
   });
 });

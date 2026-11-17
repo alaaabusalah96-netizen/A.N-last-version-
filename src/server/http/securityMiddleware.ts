@@ -24,7 +24,6 @@ export function applySecurityMiddleware(app: Application): void {
               imgSrc: ["'self'", 'data:', 'https:'],
               connectSrc: [
                 "'self'",
-                'https://aistudio.google.com',
               ],
               objectSrc: ["'none'"],
               baseUri: ["'self'"],
