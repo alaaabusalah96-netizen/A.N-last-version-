@@ -11,10 +11,24 @@ import { GlMappingService } from '../accounting/glMappingService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { SupplierInvoice, CreateSupplierInvoiceInput, OutstandingGrnLineRow } from './purchasingTypes.js';
-import { fromMinorUnits, toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
+import {
+  MONEY_SCALE,
+  COST_SCALE,
+  QTY_SCALE,
+  fromMinorUnits,
+  toMinorUnits,
+  parseExactUnits,
+  mulExactUnits,
+  rescaleUnits,
+  unitsToSafeNumber,
+} from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
 import { DbExecutor } from '../db/types.js';
 import { defaultThreeWayMatchService, ThreeWayMatchService } from './threeWayMatchService.js';
+import {
+  defaultInventoryValuationService,
+  InventoryValuationService,
+} from '../inventory/inventoryValuationService.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -30,7 +44,11 @@ export class InvoiceService {
     private auditService: AuditService = defaultAuditService,
     private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
     private accountRepo: AccountRepository = defaultAccountRepository,
-    private threeWayMatchService: Pick<ThreeWayMatchService, 'evaluateInvoice'> = defaultThreeWayMatchService
+    private threeWayMatchService: Pick<ThreeWayMatchService, 'evaluateInvoice'> = defaultThreeWayMatchService,
+    private valuationService: Pick<
+      InventoryValuationService,
+      'applyPurchasePriceVariance' | 'linkCostAdjustmentsJournal'
+    > = defaultInventoryValuationService
   ) {
     this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
   }
@@ -241,6 +259,50 @@ export class InvoiceService {
     );
   }
 
+  private async resolvePpvInventoryAccount(companyId: string, tx: DbExecutor): Promise<string> {
+    let inventoryAccountId = '';
+    try {
+      const grnCfg = await this.glMappingService.resolve(companyId, 'accounting.grn_mapping');
+      inventoryAccountId = (grnCfg.accounts.inventory_account_id || '').trim();
+    } catch {
+      // fallback to company_settings
+    }
+    if (!inventoryAccountId) {
+      const settings = await this.settingsRepo.getByCompanyId(companyId, tx);
+      inventoryAccountId = (settings?.inventoryAccountId || '').trim();
+    }
+    if (!inventoryAccountId) {
+      throw new ValidationError(
+        'لا يمكن تسوية فرق سعر فاتورة المورد على المخزون قبل ضبط "حساب المخزون" في إعدادات الشركة.'
+      );
+    }
+    const acc = await this.accountRepo.findById(companyId, inventoryAccountId, tx);
+    if (!acc || !acc.isActive || !acc.isPostable || acc.accountType !== 'asset') {
+      throw new ValidationError('حساب المخزون المحدد غير صالح أو غير قابل للترحيل لتسوية فرق سعر الفاتورة');
+    }
+    return acc.id;
+  }
+
+  private async resolvePpvCogsAccount(companyId: string, tx: DbExecutor): Promise<string> {
+    const res = await tx.query<{ cogsAccountId?: string | null }>(
+      `SELECT cogs_account_id as "cogsAccountId" FROM company_settings WHERE company_id = $1`,
+      [companyId]
+    );
+    const cogsAccountId = (res.rows[0]?.cogsAccountId || '').trim();
+    if (!cogsAccountId) {
+      throw new ValidationError(
+        'لا يمكن ترحيل فرق سعر فاتورة المورد للكميات المباعة قبل ضبط "حساب تكلفة البضاعة المباعة (COGS)" في إعدادات الشركة.'
+      );
+    }
+    const acc = await this.accountRepo.findById(companyId, cogsAccountId, tx);
+    if (!acc || !acc.isActive || !acc.isPostable || acc.accountType !== 'expense') {
+      throw new ValidationError(
+        'حساب تكلفة البضاعة المباعة المحدد غير صالح أو غير قابل للترحيل أو ليس من نوع مصروف (expense)'
+      );
+    }
+    return acc.id;
+  }
+
   async postInvoice(companyId: string, invoiceId: string, actorId?: string): Promise<SupplierInvoice> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('companyId is required');
@@ -287,29 +349,36 @@ export class InvoiceService {
         tx
       );
 
-      let totalAmount = 0;
+      let totalInvoiceUnits = 0n;
       for (const line of invoice.lines) {
         const grnSummary = lockedGrnMap.get(line.grnLineId);
         if (!grnSummary || grnSummary.grnStatus !== 'posted' || grnSummary.grnSupplierId !== invoice.supplierId) {
           throw new ValidationError('أحد بنود الفاتورة لم يعد لديه بند استلام صالح أو مرحل لهذا المورد');
         }
 
-        const grnUnits = toMinorUnits(grnSummary.grnQty, 4);
-        const alreadyPostedUnits = toMinorUnits(grnSummary.postedQty, 4);
-        const lineUnits = toMinorUnits(line.qty, 4);
+        const grnUnits = toMinorUnits(grnSummary.grnQty, QTY_SCALE);
+        const alreadyPostedUnits = toMinorUnits(grnSummary.postedQty, QTY_SCALE);
+        const lineUnits = parseExactUnits(line.qty, QTY_SCALE, 'lineQty');
         const remainingUnits = grnUnits - alreadyPostedUnits;
 
         if (remainingUnits <= 0n || alreadyPostedUnits + lineUnits > grnUnits) {
-          const remainingFormatted = fromMinorUnits(remainingUnits > 0n ? remainingUnits : 0n, 4);
+          const remainingFormatted = fromMinorUnits(remainingUnits > 0n ? remainingUnits : 0n, QTY_SCALE);
           throw new ValidationError(
             `كمية البند (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة (${remainingFormatted})`
           );
         }
 
-        totalAmount += toDecimal(line.qty, 4) * toDecimal(line.unitCost, 4);
+        const lineCostUnits = mulExactUnits(
+          lineUnits,
+          QTY_SCALE,
+          parseExactUnits(line.unitCost, COST_SCALE, 'lineUnitCost'),
+          COST_SCALE,
+          COST_SCALE
+        );
+        totalInvoiceUnits += lineCostUnits;
       }
 
-      totalAmount = toMoney(totalAmount);
+      const totalAmount = unitsToSafeNumber(rescaleUnits(totalInvoiceUnits, COST_SCALE, MONEY_SCALE), MONEY_SCALE);
       if (!(totalAmount > 0)) {
         throw new ValidationError('لا يمكن ترحيل فاتورة بقيمة إجمالية صفر أو سالبة');
       }
@@ -328,6 +397,92 @@ export class InvoiceService {
       const gl = await this.resolveGlMapping(companyId);
       await this.assertGlAccountsUsable(companyId, gl, tx);
 
+      // Apply Purchase Price Variance (PPV) proportionally between Remaining Inventory & Consumed/COGS
+      let totalClearingDebitUnits = 0n;
+      let totalApCreditUnits = 0n;
+      let totalRemainingInventoryAdjUnits = 0n;
+      let totalConsumedCogsAdjUnits = 0n;
+      const adjustmentIds: string[] = [];
+
+      for (const line of invoice.lines) {
+        const grnSummary = lockedGrnMap.get(line.grnLineId)!;
+        const ppv = await this.valuationService.applyPurchasePriceVariance(
+          companyId,
+          {
+            grnId: grnSummary.grnId,
+            grnLineId: line.grnLineId,
+            invoiceId,
+            invoiceLineId: line.id,
+            warehouseId: grnSummary.warehouseId,
+            itemId: grnSummary.itemId,
+            invoicedQty: line.qty,
+            grnUnitCost: grnSummary.grnUnitCost,
+            invoiceUnitCost: line.unitCost,
+            reason: `تسوية فرق سعر فاتورة المورد (${invoice.supplierInvoiceNo})`,
+            approvedBy: actorId || null,
+            createdBy: actorId || null,
+          },
+          tx
+        );
+
+        totalClearingDebitUnits += ppv.grnMoneyUnits;
+        totalApCreditUnits += ppv.invoiceMoneyUnits;
+        totalRemainingInventoryAdjUnits += ppv.remainingMoneyUnits;
+        totalConsumedCogsAdjUnits += ppv.consumedMoneyUnits;
+        for (const adj of ppv.adjustments) {
+          adjustmentIds.push(adj.id);
+        }
+      }
+
+      const clearingAmount = unitsToSafeNumber(totalClearingDebitUnits, MONEY_SCALE);
+      const apAmount = unitsToSafeNumber(totalApCreditUnits, MONEY_SCALE);
+
+      const jeLines: Array<{ accountId: string; debit: number; credit: number; lineMemo: string }> = [];
+
+      if (clearingAmount > 0) {
+        jeLines.push({
+          accountId: gl.purchasesClearingAccountId,
+          debit: clearingAmount,
+          credit: 0,
+          lineMemo: `تسوية المشتريات المعلقة بتكلفة الاستلام فاتورة ${invoice.supplierInvoiceNo}`,
+        });
+      }
+
+      if (totalRemainingInventoryAdjUnits !== 0n) {
+        const invAccountId = await this.resolvePpvInventoryAccount(companyId, tx);
+        const absInvAmount = unitsToSafeNumber(
+          totalRemainingInventoryAdjUnits > 0n ? totalRemainingInventoryAdjUnits : -totalRemainingInventoryAdjUnits,
+          MONEY_SCALE
+        );
+        jeLines.push({
+          accountId: invAccountId,
+          debit: totalRemainingInventoryAdjUnits > 0n ? absInvAmount : 0,
+          credit: totalRemainingInventoryAdjUnits < 0n ? absInvAmount : 0,
+          lineMemo: `تسوية فرق سعر المشتريات على المخزون المتبقي (${invoice.supplierInvoiceNo})`,
+        });
+      }
+
+      if (totalConsumedCogsAdjUnits !== 0n) {
+        const cogsAccountId = await this.resolvePpvCogsAccount(companyId, tx);
+        const absCogsAmount = unitsToSafeNumber(
+          totalConsumedCogsAdjUnits > 0n ? totalConsumedCogsAdjUnits : -totalConsumedCogsAdjUnits,
+          MONEY_SCALE
+        );
+        jeLines.push({
+          accountId: cogsAccountId,
+          debit: totalConsumedCogsAdjUnits > 0n ? absCogsAmount : 0,
+          credit: totalConsumedCogsAdjUnits < 0n ? absCogsAmount : 0,
+          lineMemo: `تسوية فرق سعر المشتريات على تكلفة البضاعة المباعة (${invoice.supplierInvoiceNo})`,
+        });
+      }
+
+      jeLines.push({
+        accountId: gl.accountsPayableAccountId,
+        debit: 0,
+        credit: apAmount > 0 ? apAmount : totalAmount,
+        lineMemo: `حساب المورد / الدائنين فاتورة ${invoice.supplierInvoiceNo}`,
+      });
+
       const entryDate = ISO_DATE.test(invoice.invoiceDate) ? invoice.invoiceDate : new Date().toISOString().slice(0, 10);
       const invoiceNo = await this.journalRepo.allocateSequenceNumber(companyId, 'purchase_invoice', 'PINV', tx);
 
@@ -336,20 +491,7 @@ export class InvoiceService {
         {
           entryDate,
           memo: `ترحيل فاتورة مورد رقم ${invoiceNo} (فاتورة رقم: ${invoice.supplierInvoiceNo})`,
-          lines: [
-            {
-              accountId: gl.purchasesClearingAccountId,
-              debit: totalAmount,
-              credit: 0,
-              lineMemo: `استحقاق مشتريات فاتورة ${invoice.supplierInvoiceNo}`,
-            },
-            {
-              accountId: gl.accountsPayableAccountId,
-              debit: 0,
-              credit: totalAmount,
-              lineMemo: `حساب المورد / الدائنين فاتورة ${invoice.supplierInvoiceNo}`,
-            },
-          ],
+          lines: jeLines,
         },
         actorId || '',
         false,
@@ -357,6 +499,10 @@ export class InvoiceService {
       );
 
       const postedJe = await this.journalService.postEntry(companyId, draftJe.id, actorId || '', false, tx);
+
+      if (adjustmentIds.length > 0) {
+        await this.valuationService.linkCostAdjustmentsJournal(companyId, adjustmentIds, postedJe.id, tx);
+      }
 
       await this.invoiceRepo.markPosted(companyId, invoiceId, invoiceNo, postedJe.id, actorId || '', tx);
 
@@ -370,7 +516,10 @@ export class InvoiceService {
           metadata: {
             invoiceNo,
             supplierInvoiceNo: invoice.supplierInvoiceNo,
-            totalAmount,
+            totalAmount: apAmount > 0 ? apAmount : totalAmount,
+            clearingClearedAmount: clearingAmount,
+            ppvInventoryAdjustment: unitsToSafeNumber(totalRemainingInventoryAdjUnits, MONEY_SCALE),
+            ppvCogsAdjustment: unitsToSafeNumber(totalConsumedCogsAdjUnits, MONEY_SCALE),
             journalEntryId: postedJe.id,
             glSource: gl.source,
           },

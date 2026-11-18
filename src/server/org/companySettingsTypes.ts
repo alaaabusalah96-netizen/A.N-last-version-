@@ -10,6 +10,8 @@ export interface CompanySettings {
   purchasesClearingAccountId?: string | null;
   custodyReceivableAccountId?: string | null;
   accountsPayableAccountId?: string | null;
+  inventoryAdjustmentAccountId?: string | null;
+  openingBalanceEquityAccountId?: string | null;
   updatedAt: string;
   updatedBy?: string | null;
 }
@@ -25,4 +27,6 @@ export interface UpsertCompanySettingsInput {
   purchasesClearingAccountId?: string | null;
   custodyReceivableAccountId?: string | null;
   accountsPayableAccountId?: string | null;
+  inventoryAdjustmentAccountId?: string | null;
+  openingBalanceEquityAccountId?: string | null;
 }

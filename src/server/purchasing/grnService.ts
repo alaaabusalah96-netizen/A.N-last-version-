@@ -10,13 +10,24 @@ import { defaultCompanySettingsRepository, CompanySettingsRepository } from '../
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { GrnHeader, CreateGrnInput } from './purchasingTypes.js';
-import { toDecimal, toMoney } from '../lib/numeric.js';
+import {
+  toDecimal,
+  toMoney,
+  QTY_SCALE,
+  COST_SCALE,
+  MONEY_SCALE,
+  parseExactUnits,
+  mulExactUnits,
+  rescaleUnits,
+  unitsToSafeNumber,
+} from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
 import { defaultConfigService, ConfigService } from '../config-platform/configService.js';
 import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
 import { findGlEvent } from '../accounting/glEventCatalog.js';
 import { GlMappingService } from '../accounting/glMappingService.js';
 import { DbExecutor } from '../db/types.js';
+import { defaultInventoryValuationService, InventoryValuationService } from '../inventory/inventoryValuationService.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,7 +44,8 @@ export class GrnService {
     private journalRepo: JournalRepository = defaultJournalRepository,
     private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository,
     private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
-    private accountRepo: AccountRepository = defaultAccountRepository
+    private accountRepo: AccountRepository = defaultAccountRepository,
+    private valuationService: Pick<InventoryValuationService, 'processReceipt' | 'getItemCostingMethod'> = defaultInventoryValuationService
   ) {
     this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
   }
@@ -370,30 +382,29 @@ export class GrnService {
         }
       }
 
-      let totalAmount = 0;
+      // Exact BigInt line accumulation (avoid floating-point drift)
+      let totalCostUnits = 0n;
       for (const line of grn.lines) {
-        totalAmount += toDecimal(line.qty) * toDecimal(line.unitCost || 0);
+        const lineQtyUnits = parseExactUnits(line.qty, QTY_SCALE, 'qty');
+        const lineUnitCostUnits = parseExactUnits(line.unitCost ?? 0, COST_SCALE, 'unitCost');
+        totalCostUnits += mulExactUnits(lineQtyUnits, QTY_SCALE, lineUnitCostUnits, COST_SCALE, COST_SCALE);
       }
-      totalAmount = toMoney(totalAmount);
+      const totalAmount = toMoney(unitsToSafeNumber(rescaleUnits(totalCostUnits, COST_SCALE, MONEY_SCALE), MONEY_SCALE));
       if (!(totalAmount > 0)) {
         throw new ValidationError(
           'لا يمكن الترحيل المحاسبي: إجمالي قيمة السند صفر. يجب إدخال تكلفة وحدة أكبر من صفر لكل بند قبل الترحيل.'
         );
       }
 
+      // Validate every item has an explicit approved costing profile before creating GL journal entries
+      for (const line of grn.lines) {
+        await this.valuationService.getItemCostingMethod(companyId, line.itemId, tx);
+      }
+
       await this.assertGlAccountsUsable(companyId, gl, tx);
 
       const entryDate = this.resolveEntryDate(grn);
       const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
-
-      // WRITE phase — stock then GL (same tx)
-      for (const line of grn.lines) {
-        await this.stockRepo.incrementBalance(companyId, grn.warehouseId, line.itemId, toDecimal(line.qty), tx);
-        await this.stockRepo.createMovement(
-          companyId, grn.warehouseId, line.itemId, 'receive', toDecimal(line.qty),
-          `استلام مشتريات (سند رقم ${grnNo})`, actorId, undefined, tx
-        );
-      }
 
       const journalEntry = await defaultJournalService.createDraftEntry(
         companyId,
@@ -411,6 +422,55 @@ export class GrnService {
       );
 
       const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '', false, tx);
+
+      // WRITE phase — Single coordinated transaction: stock balance + stock movement + valuation layer/pool + movement
+      for (const line of grn.lines) {
+        const lineQty = toDecimal(line.qty, 4);
+        const lineUnitCost = toDecimal(line.unitCost ?? 0, 4);
+        const preStock = await this.stockRepo.getBalanceForUpdate(companyId, grn.warehouseId, line.itemId, tx);
+        const updatedStock = await this.stockRepo.incrementBalance(
+          companyId,
+          grn.warehouseId,
+          line.itemId,
+          lineQty,
+          tx
+        );
+
+        await this.stockRepo.createMovement(
+          companyId,
+          grn.warehouseId,
+          line.itemId,
+          'receive',
+          lineQty,
+          `استلام بضائع سند ${grnNo}`,
+          actorId,
+          undefined,
+          tx
+        );
+
+        await this.valuationService.processReceipt(
+          companyId,
+          {
+            warehouseId: grn.warehouseId,
+            itemId: line.itemId,
+            qty: lineQty,
+            unitCost: lineUnitCost,
+            sourceType: 'GRN',
+            sourceId: grnId,
+            sourceLineId: line.id,
+            journalEntryId: postedJournal.id,
+            movementType: 'RECEIVE',
+            reason: `ترحيل سند استلام ${grnNo}`,
+            costSource: 'GRN',
+            stockSyncMode: 'external_verified',
+            expectedPreStockQty: preStock?.qty ?? 0,
+            expectedPostStockQty: updatedStock.qty,
+          },
+          actorId,
+          tx
+        );
+      }
+
       await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', postedJournal.id, tx);
 
       // If linked to PO, check if all PO lines are fully received -> auto close PO

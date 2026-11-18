@@ -19,6 +19,8 @@ export class CompanySettingsRepository {
           purchases_clearing_account_id as "purchasesClearingAccountId",
           custody_receivable_account_id as "custodyReceivableAccountId",
           accounts_payable_account_id as "accountsPayableAccountId",
+          inventory_adjustment_account_id as "inventoryAdjustmentAccountId",
+          opening_balance_equity_account_id as "openingBalanceEquityAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -46,6 +48,8 @@ export class CompanySettingsRepository {
           purchases_clearing_account_id,
           custody_receivable_account_id,
           accounts_payable_account_id,
+          inventory_adjustment_account_id,
+          opening_balance_equity_account_id,
           updated_at, 
           updated_by
         )
@@ -61,6 +65,8 @@ export class CompanySettingsRepository {
           $10,
           $13,
           $15,
+          $17,
+          $19,
           NOW(), 
           $8
         )
@@ -75,6 +81,8 @@ export class CompanySettingsRepository {
           purchases_clearing_account_id = CASE WHEN $12 THEN EXCLUDED.purchases_clearing_account_id ELSE company_settings.purchases_clearing_account_id END,
           custody_receivable_account_id = CASE WHEN $14 THEN EXCLUDED.custody_receivable_account_id ELSE company_settings.custody_receivable_account_id END,
           accounts_payable_account_id = CASE WHEN $16 THEN EXCLUDED.accounts_payable_account_id ELSE company_settings.accounts_payable_account_id END,
+          inventory_adjustment_account_id = CASE WHEN $18 THEN EXCLUDED.inventory_adjustment_account_id ELSE company_settings.inventory_adjustment_account_id END,
+          opening_balance_equity_account_id = CASE WHEN $20 THEN EXCLUDED.opening_balance_equity_account_id ELSE company_settings.opening_balance_equity_account_id END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -89,6 +97,8 @@ export class CompanySettingsRepository {
           purchases_clearing_account_id as "purchasesClearingAccountId",
           custody_receivable_account_id as "custodyReceivableAccountId",
           accounts_payable_account_id as "accountsPayableAccountId",
+          inventory_adjustment_account_id as "inventoryAdjustmentAccountId",
+          opening_balance_equity_account_id as "openingBalanceEquityAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -110,6 +120,10 @@ export class CompanySettingsRepository {
         input.custodyReceivableAccountId !== undefined,
         input.accountsPayableAccountId === undefined ? null : input.accountsPayableAccountId,
         input.accountsPayableAccountId !== undefined,
+        input.inventoryAdjustmentAccountId === undefined ? null : input.inventoryAdjustmentAccountId,
+        input.inventoryAdjustmentAccountId !== undefined,
+        input.openingBalanceEquityAccountId === undefined ? null : input.openingBalanceEquityAccountId,
+        input.openingBalanceEquityAccountId !== undefined,
       ]);
 
       return res.rows[0];

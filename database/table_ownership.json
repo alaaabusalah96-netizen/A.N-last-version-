@@ -303,6 +303,12 @@
     "table": "inv_valuation_reconciliations",
     "scope": "tenant",
     "reason": "Per-company inventory subledger to GL control account reconciliations"
+  },
+  {
+    "table": "inv_sales_cogs_links",
+    "scope": "tenant",
+    "reason": "Per-company immutable linkage between sales invoice lines, delivery valuation movements, and posted COGS"
   }
 ]
+
 

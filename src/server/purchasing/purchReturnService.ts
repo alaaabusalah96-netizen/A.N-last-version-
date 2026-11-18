@@ -10,7 +10,8 @@ import { defaultStockRepository, StockRepository } from '../inventory/stockRepos
 import { GlMappingService } from '../accounting/glMappingService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
-import { toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
+import { COST_SCALE, MONEY_SCALE, fromMinorUnits, parseExactUnits, rescaleUnits, toDecimal, toMinorUnits, unitsToSafeNumber } from '../lib/numeric.js';
+import { defaultInventoryValuationService, InventoryValuationService } from '../inventory/inventoryValuationService.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -26,7 +27,11 @@ export class PurchReturnService {
     private auditService: AuditService = defaultAuditService,
     private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
     private accountRepo: AccountRepository = defaultAccountRepository,
-    private stockRepo: StockRepository = defaultStockRepository
+    private stockRepo: StockRepository = defaultStockRepository,
+    private valuationService: Pick<
+      InventoryValuationService,
+      'getItemCostingMethod' | 'resolveAndIssuePurchaseReturn' | 'linkValuationMovementJournal'
+    > = defaultInventoryValuationService
   ) {
     this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
   }
@@ -290,17 +295,34 @@ export class PurchReturnService {
         throw new ValidationError('المستودع المحدد غير موجود أو غير نشط');
       }
 
-      let totalAmount = 0;
+      let totalCostUnits = 0n;
       const grnLineIds = ret.lines.map((l) => l.grnLineId).sort();
 
       const grnLinesRes = await tx.query<any>(
-        `SELECT id, grn_id as "grnId", qty::text FROM purch_grn_lines WHERE company_id = $1 AND id = ANY($2::uuid[]) ORDER BY id ASC FOR UPDATE`,
+        `SELECT id, grn_id as "grnId", qty::text, COALESCE(unit_cost, 0)::text as "unitCost", item_id as "itemId"
+         FROM purch_grn_lines
+         WHERE company_id = $1 AND id = ANY($2::uuid[])
+         ORDER BY id ASC
+         FOR UPDATE`,
         [companyId, grnLineIds]
       );
-      const grnLineMap = new Map<string, { grnId: string; qty: number }>();
+      const grnLineMap = new Map<string, { grnId: string; qty: number; unitCost: string; itemId: string }>();
       for (const gl of grnLinesRes.rows) {
-        grnLineMap.set(gl.id, { grnId: gl.grnId, qty: toDecimal(gl.qty, 4) });
+        grnLineMap.set(gl.id, {
+          grnId: gl.grnId,
+          qty: toDecimal(gl.qty, 4),
+          unitCost: gl.unitCost || '0',
+          itemId: gl.itemId,
+        });
       }
+
+      // Check costing profiles & GL accounts before stock/valuation mutations
+      for (const line of ret.lines) {
+        await this.valuationService.getItemCostingMethod(companyId, line.itemId, tx);
+      }
+      const glAccounts = await this.resolveGlMapping(companyId, tx);
+
+      const valuationMovementIds: string[] = [];
 
       for (const line of ret.lines) {
         const glInfo = grnLineMap.get(line.grnLineId);
@@ -323,31 +345,70 @@ export class PurchReturnService {
           );
         }
 
-        totalAmount += toDecimal(line.qty, 4) * toDecimal(line.unitCost, 4);
+        const preStock = await this.stockRepo.getBalanceForUpdate(companyId, ret.warehouseId, line.itemId, tx);
+        const preQty = toDecimal(preStock?.qty ?? 0, 4);
 
-        const updatedBalance = await this.stockRepo.decrementBalance(companyId, ret.warehouseId, line.itemId, line.qty, tx);
+        const updatedBalance = await this.stockRepo.decrementBalance(
+          companyId,
+          ret.warehouseId,
+          line.itemId,
+          line.qty,
+          tx
+        );
         if (!updatedBalance) {
-          throw new ValidationError('رصيد المخزون المتاح في المستودع غير كافٍ لإتمام مرتجع المشتريات');
+          throw new ValidationError(
+            `رصيد غير كافٍ في المستودع لإتمام مرتجع المشتريات (المتاح: ${preQty}، المطلوب: ${line.qty})`
+          );
         }
+
         await this.stockRepo.createMovement(
           companyId,
           ret.warehouseId,
           line.itemId,
           'purchase_return',
           line.qty,
-          `مرتجع مشتريات رقم ${ret.returnNo || ret.id.slice(0, 8)}`,
+          ret.reason || `مرتجع مشتريات من سند استلام ${ret.grnNo || ret.grnId}`,
           actorId,
           undefined,
           tx
         );
+
+        const valRet = await this.valuationService.resolveAndIssuePurchaseReturn(
+          companyId,
+          {
+            grnId: ret.grnId,
+            grnLineId: line.grnLineId,
+            grnQty: gQty,
+            grnUnitCost: glInfo.unitCost,
+            warehouseId: ret.warehouseId,
+            itemId: line.itemId,
+            returnId,
+            returnLineId: line.id,
+            qty: line.qty,
+            reason: ret.reason || 'مرتجع مشتريات بتكلفة الاستلام الأصلية',
+            stockSyncMode: 'external_verified',
+            expectedPreStockQty: preQty,
+          },
+          actorId,
+          tx
+        );
+
+        // Overwrite stored unit_cost on return line with authoritative server valuation cost
+        const serverUnitCostUnits = parseExactUnits(valRet.unitCost, COST_SCALE, 'serverUnitCost');
+        await tx.query(
+          `UPDATE purch_return_lines SET unit_cost = $1 WHERE company_id = $2 AND id = $3`,
+          [fromMinorUnits(serverUnitCostUnits, COST_SCALE), companyId, line.id]
+        );
+
+        totalCostUnits += parseExactUnits(valRet.totalCost, COST_SCALE, 'returnTotalCost');
+        valuationMovementIds.push(valRet.movement.id);
       }
 
-      totalAmount = toMoney(totalAmount);
+      const totalAmountUnits = rescaleUnits(totalCostUnits, COST_SCALE, MONEY_SCALE);
+      const totalAmount = unitsToSafeNumber(totalAmountUnits, MONEY_SCALE);
       if (!(totalAmount > 0)) {
         throw new ValidationError('قيمة المرتجع الإجمالية يجب أن تكون أكبر من الصفر');
       }
-
-      const glAccounts = await this.resolveGlMapping(companyId, tx);
 
       const entryDate = ISO_DATE.test(ret.returnDate) ? ret.returnDate : new Date().toISOString().slice(0, 10);
       const returnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'purchase_return', 'PRTN', tx);
@@ -382,6 +443,10 @@ export class PurchReturnService {
       );
 
       const postedJe = await this.journalService.postEntry(companyId, draftJe.id, actorId || '', false, tx);
+
+      for (const valMovId of valuationMovementIds) {
+        await this.valuationService.linkValuationMovementJournal(companyId, valMovId, postedJe.id, tx);
+      }
 
       await this.returnRepo.markPosted(companyId, returnId, returnNo, postedJe.id, actorId || '', tx);
 

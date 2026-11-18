@@ -63,6 +63,20 @@ export class CompanySettingsService {
         }
       }
 
+      if (typeof input.inventoryAdjustmentAccountId === 'string' && input.inventoryAdjustmentAccountId.trim() !== '') {
+        const account = await defaultAccountRepository.findById(companyId, input.inventoryAdjustmentAccountId, tx);
+        if (!account) throw new ValidationError('حساب تسويات المخزون غير موجود في دليل الحسابات');
+        if (!account.isActive) throw new ValidationError('حساب تسويات المخزون غير نشط');
+        if (!account.isPostable) throw new ValidationError('حساب تسويات المخزون يجب أن يكون حساباً فرعياً قابلاً للترحيل');
+      }
+
+      if (typeof input.openingBalanceEquityAccountId === 'string' && input.openingBalanceEquityAccountId.trim() !== '') {
+        const account = await defaultAccountRepository.findById(companyId, input.openingBalanceEquityAccountId, tx);
+        if (!account) throw new ValidationError('حساب رصيد أول المدة غير موجود في دليل الحسابات');
+        if (!account.isActive) throw new ValidationError('حساب رصيد أول المدة غير نشط');
+        if (!account.isPostable) throw new ValidationError('حساب رصيد أول المدة يجب أن يكون حساباً فرعياً قابلاً للترحيل');
+      }
+
       const settings = await this.repo.upsert(companyId, input, actorId, tx);
 
       await defaultAuditService.record({

@@ -3,31 +3,188 @@ import { defaultInventoryValuationRepository, InventoryValuationRepository } fro
 import { defaultWarehouseRepository, WarehouseRepository } from './warehouseRepository.js';
 import { defaultItemRepository, ItemRepository } from './itemRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
+import { defaultStockRepository, StockRepository } from './stockRepository.js';
+import { defaultCompanySettingsRepository, CompanySettingsRepository } from '../org/companySettingsRepository.js';
+import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
-import { CostingProfile, CostingMethod, ItemCostingAssignment, ValuationBalance, CostLayer, ValuationMovement } from './inventoryValuationTypes.js';
+import {
+  CostingProfile,
+  CostingMethod,
+  ItemCostingAssignment,
+  ValuationBalance,
+  CostLayer,
+  ValuationMovement,
+  CostAllocationRecord,
+  CostAdjustmentRecord,
+  OpeningValuationInput,
+  OpeningValuationRecord,
+  ValuationSetupStatusSummary,
+  ValuationSetupStatusItem,
+  ValuationReconciliationInput,
+  ValuationReconciliationRecord,
+  StockSyncMode,
+} from './inventoryValuationTypes.js';
+import {
+  QTY_SCALE,
+  COST_SCALE,
+  MONEY_SCALE,
+  parseExactUnits,
+  fromMinorUnits,
+  mulExactUnits,
+  divExactUnits,
+  rescaleUnits,
+  allocateProportionalUnits,
+  unitsToSafeNumber,
+} from '../lib/numeric.js';
+
+export interface AllocatedLayerSlice {
+  layerId: string | null;
+  qty: number;
+  unitCost: number;
+  cost: number;
+  sourceType?: string;
+  sourceId?: string;
+  sourceLineId?: string | null;
+  originLayerId?: string | null;
+  originSourceType?: string | null;
+  originSourceId?: string | null;
+  originSourceLineId?: string | null;
+  effectiveDate?: string | null;
+}
+
+export interface ProcessReceiptInput {
+  warehouseId: string;
+  itemId: string;
+  qty: number | string;
+  unitCost?: number | string;
+  totalCost?: number | string;
+  sourceType: string;
+  sourceId: string;
+  sourceLineId?: string | null;
+  journalEntryId?: string | null;
+  movementType?: 'RECEIVE' | 'TRANSFER_IN' | 'OPENING' | 'RETURN' | 'ADJUSTMENT';
+  reason?: string | null;
+  costSource?: string | null;
+  referenceMovementId?: string | null;
+  effectiveDate?: string | null;
+  notes?: string | null;
+  stockSyncMode?: StockSyncMode;
+  expectedPreStockQty?: number | string;
+  expectedPostStockQty?: number | string;
+  originLayerId?: string | null;
+  originSourceType?: string | null;
+  originSourceId?: string | null;
+  originSourceLineId?: string | null;
+}
+
+export interface ProcessIssueInput {
+  warehouseId: string;
+  itemId: string;
+  qty: number | string;
+  sourceType: string;
+  sourceId: string;
+  sourceLineId?: string | null;
+  journalEntryId?: string | null;
+  movementType?: 'ISSUE' | 'TRANSFER_OUT' | 'ADJUSTMENT' | 'RETURN';
+  reason?: string | null;
+  costSource?: string | null;
+  notes?: string | null;
+  stockSyncMode?: StockSyncMode;
+  expectedPreStockQty?: number | string;
+}
+
+export interface PurchasePriceVarianceInput {
+  grnId: string;
+  grnLineId: string;
+  invoiceId: string;
+  invoiceLineId: string;
+  warehouseId: string;
+  itemId: string;
+  invoicedQty: number | string;
+  grnUnitCost: number | string;
+  invoiceUnitCost: number | string;
+  reason?: string | null;
+  journalEntryId?: string | null;
+  approvedBy?: string | null;
+  createdBy?: string | null;
+}
+
+export interface PurchasePriceVarianceResult {
+  costingMethod: CostingMethod;
+  qtyBasis: number;
+  grnTotalUnits: bigint;
+  invoiceTotalUnits: bigint;
+  totalVarianceUnits: bigint;
+  remainingAllocationUnits: bigint;
+  consumedAllocationUnits: bigint;
+  grnMoneyUnits: bigint;
+  invoiceMoneyUnits: bigint;
+  totalVarianceMoneyUnits: bigint;
+  remainingMoneyUnits: bigint;
+  consumedMoneyUnits: bigint;
+  adjustments: CostAdjustmentRecord[];
+}
+
+export interface PurchaseReturnValuationInput {
+  grnId: string;
+  grnLineId: string;
+  grnQty: number | string;
+  grnUnitCost: number | string;
+  warehouseId: string;
+  itemId: string;
+  returnId: string;
+  returnLineId: string;
+  qty: number | string;
+  reason?: string | null;
+  journalEntryId?: string | null;
+  stockSyncMode?: StockSyncMode;
+  expectedPreStockQty?: number | string;
+}
 
 export class InventoryValuationService {
   constructor(
     private valuationRepo: InventoryValuationRepository = defaultInventoryValuationRepository,
     private warehouseRepo: WarehouseRepository = defaultWarehouseRepository,
     private itemRepo: ItemRepository = defaultItemRepository,
-    private auditService: AuditService = defaultAuditService
+    private auditService: AuditService = defaultAuditService,
+    private stockRepo: StockRepository = defaultStockRepository,
+    private companySettingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository,
+    private accountRepo: AccountRepository = defaultAccountRepository
   ) {}
+
+  private async getJournalService() {
+    const mod = await import('../accounting/journalService.js');
+    return mod.defaultJournalService;
+  }
 
   async listProfiles(companyId: string): Promise<CostingProfile[]> {
     if (!companyId) throw new ValidationError('companyId is required');
     return await this.valuationRepo.listProfiles(companyId);
   }
 
-  async createProfile(companyId: string, input: { name: string; costingMethod: CostingMethod; isDefault?: boolean }, userId?: string): Promise<CostingProfile> {
+  async createProfile(
+    companyId: string,
+    input: { name: string; costingMethod: CostingMethod; isDefault?: boolean },
+    userId?: string
+  ): Promise<CostingProfile> {
     if (!companyId) throw new ValidationError('companyId is required');
-    if (!input.name || !input.costingMethod) throw new ValidationError('اسم ملف التكلفة وطريقة التكلفة مطلوبان');
+    if (!input.name?.trim() || !input.costingMethod) {
+      throw new ValidationError('اسم ملف التكلفة وطريقة التكلفة مطلوبان');
+    }
     if (!['FIFO', 'PERPETUAL_MOVING_AVERAGE'].includes(input.costingMethod)) {
       throw new ValidationError('طريقة التكلفة غير صالحة. الطرق المدعومة هي FIFO أو PERPETUAL_MOVING_AVERAGE');
     }
     return await withTenantTransaction(companyId, async (tx) => {
-      const profile = await this.valuationRepo.createProfile(companyId, input, tx);
+      const profile = await this.valuationRepo.createProfile(
+        companyId,
+        {
+          name: input.name.trim(),
+          costingMethod: input.costingMethod,
+          isDefault: Boolean(input.isDefault),
+        },
+        tx
+      );
       await this.auditService.record(
         {
           actorUserId: userId || null,
@@ -43,12 +200,29 @@ export class InventoryValuationService {
     });
   }
 
+  async listItemAssignments(companyId: string): Promise<ItemCostingAssignment[]> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listItemAssignments(companyId);
+  }
+
+  async listUnassignedItems(
+    companyId: string
+  ): Promise<Array<{ itemId: string; itemCode: string; itemNameAr: string; hasStock: boolean }>> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listUnassignedItems(companyId);
+  }
+
   async getItemAssignment(companyId: string, itemId: string): Promise<ItemCostingAssignment | null> {
     if (!companyId || !itemId) throw new ValidationError('companyId and itemId are required');
     return await this.valuationRepo.getItemAssignment(companyId, itemId);
   }
 
-  async assignItemProfile(companyId: string, itemId: string, profileId: string, userId?: string): Promise<ItemCostingAssignment> {
+  async assignItemProfile(
+    companyId: string,
+    itemId: string,
+    profileId: string,
+    userId?: string
+  ): Promise<ItemCostingAssignment> {
     if (!companyId || !itemId || !profileId) throw new ValidationError('البيانات غير مكتملة');
     return await withTenantTransaction(companyId, async (tx) => {
       const profile = await this.valuationRepo.findProfileById(companyId, profileId, tx);
@@ -57,6 +231,17 @@ export class InventoryValuationService {
 
       const item = await this.itemRepo.findById(companyId, itemId, tx);
       if (!item) throw new NotFoundError('الصنف المحدد غير موجود');
+      if (item.isActive === false) throw new ValidationError('الصنف المحدد غير نشط');
+
+      const existing = await this.valuationRepo.getItemAssignment(companyId, itemId, tx);
+      if (existing && existing.costingMethod && existing.costingMethod !== profile.costingMethod) {
+        const hasMovements = await this.valuationRepo.hasFinancialMovementsForItem(companyId, itemId, tx);
+        if (hasMovements) {
+          throw new ValidationError(
+            `COSTING_METHOD_LOCKED: لا يمكن تغيير طريقة تقييم المخزون للصنف (${item.code}) من (${existing.costingMethod}) إلى (${profile.costingMethod}) بعد وجود حركات أو أرصدة تقييم مالية مسجلة.`
+          );
+        }
+      }
 
       const assignment = await this.valuationRepo.assignItemProfile(companyId, itemId, profileId, userId, tx);
       await this.auditService.record(
@@ -79,67 +264,216 @@ export class InventoryValuationService {
     return await this.valuationRepo.listValuationBalances(companyId);
   }
 
-  async getItemCostingMethod(companyId: string, itemId: string, client?: DbExecutor): Promise<CostingMethod> {
+  async listCostLayers(
+    companyId: string,
+    filters?: { warehouseId?: string; itemId?: string; includeExhausted?: boolean }
+  ): Promise<CostLayer[]> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listCostLayers(companyId, filters);
+  }
+
+  async listValuationMovements(
+    companyId: string,
+    filters?: { warehouseId?: string; itemId?: string; limit?: number }
+  ): Promise<ValuationMovement[]> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listValuationMovements(companyId, filters);
+  }
+
+  async listAllocationsForMovement(companyId: string, valuationMovementId: string): Promise<CostAllocationRecord[]> {
+    if (!companyId || !valuationMovementId) throw new ValidationError('companyId and valuationMovementId are required');
+    return await this.valuationRepo.listAllocationsForMovement(companyId, valuationMovementId);
+  }
+
+  async listCostAdjustments(companyId: string): Promise<CostAdjustmentRecord[]> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listCostAdjustments(companyId);
+  }
+
+  async linkValuationMovementJournal(
+    companyId: string,
+    valuationMovementId: string,
+    journalEntryId: string,
+    executor: DbExecutor
+  ): Promise<void> {
+    await this.valuationRepo.linkValuationMovementJournal(companyId, valuationMovementId, journalEntryId, executor);
+  }
+
+  async linkCostAdjustmentsJournal(
+    companyId: string,
+    adjustmentIds: string[],
+    journalEntryId: string,
+    executor: DbExecutor
+  ): Promise<void> {
+    await this.valuationRepo.linkCostAdjustmentsJournal(companyId, adjustmentIds, journalEntryId, executor);
+  }
+
+  async getItemCostingMethod(
+    companyId: string,
+    itemId: string,
+    client?: DbExecutor
+  ): Promise<{ method: CostingMethod; profileId: string }> {
     const assignment = await this.valuationRepo.getItemAssignment(companyId, itemId, client);
-    if (assignment && assignment.costingMethod) {
-      return assignment.costingMethod;
+    if (!assignment || !assignment.profileId || !assignment.costingMethod) {
+      throw new ValidationError(
+        `COSTING_PROFILE_REQUIRED: الصنف غير مرتبط بملف تكلفة معتمد. يجب تعيين ملف تكلفة (FIFO أو PERPETUAL_MOVING_AVERAGE) للصنف قبل إجراء أي حركات مالية.`
+      );
     }
-    return 'FIFO';
+    return { method: assignment.costingMethod, profileId: assignment.profileId };
   }
 
   /**
-   * Process stock receipt (GRN, opening balance, manual receive, return, transfer in)
+   * Process stock receipt (GRN, opening balance, manual receive, return, transfer in).
+   * Strict BigInt fixed-point arithmetic; creates FIFO layers ONLY when method === 'FIFO'.
    */
   async processReceipt(
     companyId: string,
-    input: {
-      warehouseId: string;
-      itemId: string;
-      qty: number;
-      unitCost: number;
-      sourceType: string;
-      sourceId: string;
-      sourceLineId?: string | null;
-      journalEntryId?: string | null;
-      movementType?: 'RECEIVE' | 'TRANSFER_IN' | 'OPENING' | 'RETURN' | 'ADJUSTMENT';
-    },
+    input: ProcessReceiptInput,
     userId?: string,
     tx?: DbExecutor
-  ): Promise<{ balance: ValuationBalance; movement: ValuationMovement }> {
-    if (input.qty <= 0) throw new ValidationError('كمية الاستلام يجب أن تكون أكبر من الصفر');
-    if (input.unitCost < 0) throw new ValidationError('تكلفة الوحدة لا يمكن أن تكون سالبة');
+  ): Promise<{ balance: ValuationBalance; movement: ValuationMovement; layer?: CostLayer | null }> {
+    const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
+    if (qtyUnits <= 0n) {
+      throw new ValidationError('كمية الاستلام يجب أن تكون أكبر من الصفر');
+    }
 
-    const totalCost = Number((input.qty * input.unitCost).toFixed(4));
+    let totalCostUnits: bigint;
+    let unitCostUnits: bigint;
+    if (input.totalCost !== undefined && input.totalCost !== null) {
+      totalCostUnits = parseExactUnits(input.totalCost, COST_SCALE, 'totalCost');
+      if (totalCostUnits < 0n) {
+        throw new ValidationError('التكلفة الإجمالية لا يمكن أن تكون سالبة');
+      }
+      unitCostUnits =
+        input.unitCost !== undefined && input.unitCost !== null
+          ? parseExactUnits(input.unitCost, COST_SCALE, 'unitCost')
+          : divExactUnits(totalCostUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+    } else if (input.unitCost !== undefined && input.unitCost !== null) {
+      unitCostUnits = parseExactUnits(input.unitCost, COST_SCALE, 'unitCost');
+      if (unitCostUnits < 0n) {
+        throw new ValidationError('تكلفة الوحدة لا يمكن أن تكون سالبة');
+      }
+      totalCostUnits = mulExactUnits(qtyUnits, QTY_SCALE, unitCostUnits, COST_SCALE, COST_SCALE);
+    } else {
+      throw new ValidationError('يجب تحديد تكلفة الوحدة أو التكلفة الإجمالية للاستلام');
+    }
+
+    if (unitCostUnits < 0n) {
+      throw new ValidationError('تكلفة الوحدة لا يمكن أن تكون سالبة');
+    }
+
     const movementType = input.movementType || 'RECEIVE';
+    if (
+      (movementType === 'OPENING' ||
+        movementType === 'ADJUSTMENT' ||
+        input.sourceType === 'MANUAL_RECEIPT' ||
+        input.sourceType === 'STOCK_ADJUSTMENT') &&
+      totalCostUnits <= 0n
+    ) {
+      throw new ValidationError('لا يُسمح بإنشاء مخزون مالي بتكلفة صفرية في الاستلام اليدوي أو التسوية أو الرصيد الافتتاحي');
+    }
+
+    const stockSyncMode: StockSyncMode = input.stockSyncMode || 'internal';
 
     const execute = async (client: DbExecutor) => {
-      await this.valuationRepo.lockValuationBalanceForUpdate(companyId, input.warehouseId, input.itemId, client);
+      // Idempotency guard before mutating state
+      const existingMov = await this.valuationRepo.findValuationMovementByIdempotency(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        movementType,
+        input.sourceType,
+        input.sourceId,
+        input.sourceLineId ?? null,
+        client
+      );
+      if (existingMov) {
+        throw new ValidationError(
+          `IDEMPOTENT_DUPLICATE: تم تسجيل حركة تقييم (${movementType}) مسبقاً للمصدر (${input.sourceType}:${input.sourceId}).`
+        );
+      }
 
-      const method = await this.getItemCostingMethod(companyId, input.itemId, client);
+      const currentBalance = await this.valuationRepo.lockValuationBalanceForUpdate(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        client
+      );
+      const prevQtyUnits = currentBalance ? parseExactUnits(currentBalance.quantity, QTY_SCALE, 'prevQty') : 0n;
+      const prevTotalUnits = currentBalance ? parseExactUnits(currentBalance.totalCost, COST_SCALE, 'prevTotalCost') : 0n;
 
-      if (method === 'FIFO' || movementType === 'OPENING' || movementType === 'RECEIVE' || movementType === 'RETURN') {
-        await this.valuationRepo.createCostLayer(
+      const { method } = await this.getItemCostingMethod(companyId, input.itemId, client);
+
+      const newQtyUnits = prevQtyUnits + qtyUnits;
+      const newTotalUnits = prevTotalUnits + totalCostUnits;
+      const newUnitCostUnits =
+        newQtyUnits > 0n ? divExactUnits(newTotalUnits, COST_SCALE, newQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+
+      // Sync or verify stock balance parity inside the same transaction
+      if (stockSyncMode === 'internal') {
+        const preStock = await this.stockRepo.getBalanceForUpdate(companyId, input.warehouseId, input.itemId, client);
+        const preStockUnits = preStock ? parseExactUnits(preStock.qty, QTY_SCALE, 'stockQty') : 0n;
+        if (movementType !== 'OPENING' && preStockUnits !== prevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: يوجد اختلاف بين الرصيد الكمي بالمخزون (${fromMinorUnits(preStockUnits, QTY_SCALE)}) ورصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}). يجب اعتماد الرصيد الافتتاحي المقيّم أو تسوية التطابق أولاً.`
+          );
+        }
+        await this.stockRepo.incrementBalance(
+          companyId,
+          input.warehouseId,
+          input.itemId,
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          client
+        );
+      } else {
+        if (input.expectedPreStockQty !== undefined) {
+          const preUnits = parseExactUnits(input.expectedPreStockQty, QTY_SCALE, 'expectedPreStockQty');
+          if (preUnits !== prevQtyUnits) {
+            throw new ValidationError(
+              `VALUATION_INTEGRITY_ERROR: رصيد المخزون قبل الاستلام (${fromMinorUnits(preUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+            );
+          }
+        }
+        if (input.expectedPostStockQty !== undefined) {
+          const postUnits = parseExactUnits(input.expectedPostStockQty, QTY_SCALE, 'expectedPostStockQty');
+          if (postUnits !== newQtyUnits) {
+            throw new ValidationError(
+              `VALUATION_INTEGRITY_ERROR: رصيد المخزون بعد الاستلام (${fromMinorUnits(postUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(newQtyUnits, QTY_SCALE)}).`
+            );
+          }
+        }
+      }
+
+      let createdLayer: CostLayer | null = null;
+      if (method === 'FIFO') {
+        createdLayer = await this.valuationRepo.createCostLayer(
           companyId,
           {
             warehouseId: input.warehouseId,
             itemId: input.itemId,
-            originalQty: input.qty,
-            unitCost: input.unitCost,
-            totalCost,
+            originalQty: fromMinorUnits(qtyUnits, QTY_SCALE),
+            unitCost: fromMinorUnits(unitCostUnits, COST_SCALE),
+            totalCost: fromMinorUnits(totalCostUnits, COST_SCALE),
             sourceType: input.sourceType,
             sourceId: input.sourceId,
-            sourceLineId: input.sourceLineId,
+            sourceLineId: input.sourceLineId ?? null,
+            originLayerId: input.originLayerId ?? null,
+            originSourceType: input.originSourceType ?? input.sourceType,
+            originSourceId: input.originSourceId ?? input.sourceId,
+            originSourceLineId: input.originSourceLineId ?? input.sourceLineId ?? null,
+            effectiveDate: input.effectiveDate ?? null,
           },
           client
         );
       }
 
-      const balance = await this.valuationRepo.updateValuationBalance(
+      const balance = await this.valuationRepo.setValuationBalanceExact(
         companyId,
         input.warehouseId,
         input.itemId,
-        input.qty,
-        totalCost,
+        fromMinorUnits(newQtyUnits, QTY_SCALE),
+        fromMinorUnits(newTotalUnits, COST_SCALE),
+        fromMinorUnits(newUnitCostUnits, COST_SCALE),
         client
       );
 
@@ -149,126 +483,253 @@ export class InventoryValuationService {
           warehouseId: input.warehouseId,
           itemId: input.itemId,
           movementType,
-          qty: input.qty,
-          unitCost: input.unitCost,
-          totalCost,
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          unitCost: fromMinorUnits(unitCostUnits, COST_SCALE),
+          totalCost: fromMinorUnits(totalCostUnits, COST_SCALE),
           sourceType: input.sourceType,
           sourceId: input.sourceId,
-          sourceLineId: input.sourceLineId,
-          journalEntryId: input.journalEntryId,
-          createdBy: userId,
+          sourceLineId: input.sourceLineId ?? null,
+          journalEntryId: input.journalEntryId ?? null,
+          reason: input.reason ?? null,
+          costSource: input.costSource ?? null,
+          costingMethod: method,
+          referenceMovementId: input.referenceMovementId ?? null,
+          notes: input.notes ?? null,
+          createdBy: userId ?? null,
         },
         client
       );
 
-      return { balance, movement };
+      return { balance, movement, layer: createdLayer };
     };
 
     if (tx) {
       return await execute(tx);
-    } else {
-      return await withTenantTransaction(companyId, async (client) => {
-        return await execute(client);
-      });
     }
+    return await withTenantTransaction(companyId, execute);
   }
 
   /**
-   * Process stock issue with strict no-negative stock protection & FIFO/Moving Average cost calculation.
+   * Process stock issue with strict no-negative protection, exact BigInt decimal math,
+   * strict FIFO layer reconciliation (ZERO fallback), and exact Moving Average pool depletion.
    */
   async processIssue(
     companyId: string,
-    input: {
-      warehouseId: string;
-      itemId: string;
-      qty: number;
-      sourceType: string;
-      sourceId: string;
-      sourceLineId?: string | null;
-      journalEntryId?: string | null;
-      movementType?: 'ISSUE' | 'TRANSFER_OUT' | 'ADJUSTMENT';
-    },
+    input: ProcessIssueInput,
     userId?: string,
     tx?: DbExecutor
-  ): Promise<{ balance: ValuationBalance; movement: ValuationMovement; unitCost: number; totalCost: number }> {
-    if (input.qty <= 0) throw new ValidationError('كمية الصرف يجب أن تكون أكبر من الصفر');
+  ): Promise<{
+    balance: ValuationBalance;
+    movement: ValuationMovement;
+    unitCost: number;
+    totalCost: number;
+    allocatedLayers: AllocatedLayerSlice[];
+  }> {
+    const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
+    if (qtyUnits <= 0n) {
+      throw new ValidationError('كمية الصرف يجب أن تكون أكبر من الصفر');
+    }
     const movementType = input.movementType || 'ISSUE';
+    const stockSyncMode: StockSyncMode = input.stockSyncMode || 'internal';
 
     const execute = async (client: DbExecutor) => {
-      const currentBalance = await this.valuationRepo.lockValuationBalanceForUpdate(companyId, input.warehouseId, input.itemId, client);
-      const availableQty = currentBalance ? Number(currentBalance.quantity) : 0;
-
-      if (availableQty < input.qty) {
-        const item = await this.itemRepo.findById(companyId, input.itemId, client);
-        throw new ValidationError(
-          `رصيد مخزني غير كافٍ للصنف (${item?.code || input.itemId}). المتاح: ${availableQty}، المطلوب للصرف: ${input.qty}. لا يمكن السماح برصيد بالسالب.`
-        );
-      }
-
-      const method = await this.getItemCostingMethod(companyId, input.itemId, client);
-      let totalIssuedCost = 0;
-      const allocatedLayers: { layerId: string | null; qty: number; unitCost: number; cost: number }[] = [];
-
-      if (method === 'FIFO') {
-        const layers = await this.valuationRepo.listActiveCostLayersForUpdate(companyId, input.warehouseId, input.itemId, client);
-        let remainingToIssue = input.qty;
-
-        for (const layer of layers) {
-          if (remainingToIssue <= 0) break;
-          const layerRem = Number(layer.remainingQty);
-          if (layerRem <= 0) continue;
-
-          const takeQty = Math.min(remainingToIssue, layerRem);
-          const takeCost = Number((takeQty * Number(layer.unitCost)).toFixed(4));
-          totalIssuedCost += takeCost;
-
-          const newLayerRem = Number((layerRem - takeQty).toFixed(4));
-          const newLayerTotal = Number((Number(layer.totalCost) - takeCost).toFixed(4));
-          const isExh = newLayerRem <= 0;
-
-          await this.valuationRepo.updateCostLayerRemaining(companyId, layer.id, newLayerRem, Math.max(0, newLayerTotal), isExh, client);
-
-          allocatedLayers.push({
-            layerId: layer.id,
-            qty: takeQty,
-            unitCost: Number(layer.unitCost),
-            cost: takeCost,
-          });
-
-          remainingToIssue = Number((remainingToIssue - takeQty).toFixed(4));
-        }
-
-        if (remainingToIssue > 0) {
-          const fallbackUnitCost = currentBalance && Number(currentBalance.quantity) > 0 ? Number(currentBalance.unitCost) : 0;
-          const fallbackCost = Number((remainingToIssue * fallbackUnitCost).toFixed(4));
-          totalIssuedCost += fallbackCost;
-          allocatedLayers.push({
-            layerId: null,
-            qty: remainingToIssue,
-            unitCost: fallbackUnitCost,
-            cost: fallbackCost,
-          });
-        }
-      } else {
-        const currentAvgUnitCost = currentBalance && Number(currentBalance.quantity) > 0 ? Number(currentBalance.unitCost) : 0;
-        totalIssuedCost = Number((input.qty * currentAvgUnitCost).toFixed(4));
-        allocatedLayers.push({
-          layerId: null,
-          qty: input.qty,
-          unitCost: currentAvgUnitCost,
-          cost: totalIssuedCost,
-        });
-      }
-
-      totalIssuedCost = Number(totalIssuedCost.toFixed(4));
-      const effectiveUnitCost = Number((totalIssuedCost / input.qty).toFixed(4));
-
-      const balance = await this.valuationRepo.updateValuationBalance(
+      // Idempotency check
+      const existingMov = await this.valuationRepo.findValuationMovementByIdempotency(
         companyId,
         input.warehouseId,
         input.itemId,
-        -input.qty,
-        -totalIssuedCost,
+        movementType,
+        input.sourceType,
+        input.sourceId,
+        input.sourceLineId ?? null,
+        client
+      );
+      if (existingMov) {
+        throw new ValidationError(
+          `IDEMPOTENT_DUPLICATE: تم تسجيل حركة صرف التقييم (${movementType}) مسبقاً للمصدر (${input.sourceType}:${input.sourceId}).`
+        );
+      }
+
+      const currentBalance = await this.valuationRepo.lockValuationBalanceForUpdate(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        client
+      );
+      const prevQtyUnits = currentBalance ? parseExactUnits(currentBalance.quantity, QTY_SCALE, 'prevQty') : 0n;
+      const prevTotalUnits = currentBalance ? parseExactUnits(currentBalance.totalCost, COST_SCALE, 'prevTotalCost') : 0n;
+
+      if (prevQtyUnits < qtyUnits) {
+        const item = await this.itemRepo.findById(companyId, input.itemId, client);
+        throw new ValidationError(
+          `رصيد مخزني غير كافٍ للصنف (${item?.code || input.itemId}). المتاح: ${fromMinorUnits(prevQtyUnits, QTY_SCALE)}، المطلوب للصرف: ${fromMinorUnits(qtyUnits, QTY_SCALE)}. لا يمكن السماح برصيد بالسالب.`
+        );
+      }
+
+      if (stockSyncMode === 'internal') {
+        const stockBal = await this.stockRepo.getBalanceForUpdate(companyId, input.warehouseId, input.itemId, client);
+        const stockQtyUnits = stockBal ? parseExactUnits(stockBal.qty, QTY_SCALE, 'stockQty') : 0n;
+        if (stockQtyUnits !== prevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: عدم تطابق الرصيد الكمي بالمستودع (${fromMinorUnits(stockQtyUnits, QTY_SCALE)}) مع رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+          );
+        }
+      } else if (input.expectedPreStockQty !== undefined) {
+        const preUnits = parseExactUnits(input.expectedPreStockQty, QTY_SCALE, 'expectedPreStockQty');
+        if (preUnits !== prevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: رصيد المخزون قبل الصرف (${fromMinorUnits(preUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+          );
+        }
+      }
+
+      const { method } = await this.getItemCostingMethod(companyId, input.itemId, client);
+
+      let totalIssuedCostUnits = 0n;
+      const internalAllocations: Array<{
+        layerId: string | null;
+        qtyUnits: bigint;
+        unitCostUnits: bigint;
+        costUnits: bigint;
+        sourceType?: string;
+        sourceId?: string;
+        sourceLineId?: string | null;
+        originLayerId?: string | null;
+        originSourceType?: string | null;
+        originSourceId?: string | null;
+        originSourceLineId?: string | null;
+        effectiveDate?: string | null;
+      }> = [];
+
+      if (method === 'FIFO') {
+        const layers = await this.valuationRepo.listActiveCostLayersForUpdate(
+          companyId,
+          input.warehouseId,
+          input.itemId,
+          client
+        );
+
+        let totalLayerQtyUnits = 0n;
+        for (const layer of layers) {
+          totalLayerQtyUnits += parseExactUnits(layer.remainingQty, QTY_SCALE, 'layerRemainingQty');
+        }
+        if (totalLayerQtyUnits !== prevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: مجموع الكميات المتبقية في طبقات FIFO (${fromMinorUnits(totalLayerQtyUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+          );
+        }
+
+        let remainingToIssueUnits = qtyUnits;
+        for (const layer of layers) {
+          if (remainingToIssueUnits <= 0n) break;
+          const layerRemUnits = parseExactUnits(layer.remainingQty, QTY_SCALE, 'layerRemainingQty');
+          if (layerRemUnits <= 0n) continue;
+
+          const layerTotalUnits = parseExactUnits(layer.totalCost, COST_SCALE, 'layerTotalCost');
+          const layerUnitCostUnits = parseExactUnits(layer.unitCost, COST_SCALE, 'layerUnitCost');
+
+          const takeQtyUnits = remainingToIssueUnits < layerRemUnits ? remainingToIssueUnits : layerRemUnits;
+          let takeCostUnits: bigint;
+          if (takeQtyUnits === layerRemUnits) {
+            // Exact layer exhaustion: consume 100% of remaining layer value (no penny residue)
+            takeCostUnits = layerTotalUnits;
+          } else {
+            takeCostUnits = mulExactUnits(takeQtyUnits, QTY_SCALE, layerUnitCostUnits, COST_SCALE, COST_SCALE);
+            if (takeCostUnits > layerTotalUnits) takeCostUnits = layerTotalUnits;
+          }
+
+          const newLayerRemUnits = layerRemUnits - takeQtyUnits;
+          const newLayerTotalUnits = layerTotalUnits - takeCostUnits;
+          const isExhausted = newLayerRemUnits === 0n;
+
+          await this.valuationRepo.updateCostLayerRemaining(
+            companyId,
+            layer.id,
+            fromMinorUnits(newLayerRemUnits, QTY_SCALE),
+            fromMinorUnits(newLayerTotalUnits, COST_SCALE),
+            isExhausted,
+            client
+          );
+
+          totalIssuedCostUnits += takeCostUnits;
+          const allocUnitCostUnits =
+            takeQtyUnits > 0n ? divExactUnits(takeCostUnits, COST_SCALE, takeQtyUnits, QTY_SCALE, COST_SCALE) : layerUnitCostUnits;
+
+          internalAllocations.push({
+            layerId: layer.id,
+            qtyUnits: takeQtyUnits,
+            unitCostUnits: allocUnitCostUnits,
+            costUnits: takeCostUnits,
+            sourceType: layer.sourceType,
+            sourceId: layer.sourceId,
+            sourceLineId: layer.sourceLineId ?? null,
+            originLayerId: layer.originLayerId ?? null,
+            originSourceType: layer.originSourceType ?? layer.sourceType,
+            originSourceId: layer.originSourceId ?? layer.sourceId,
+            originSourceLineId: layer.originSourceLineId ?? layer.sourceLineId ?? null,
+            effectiveDate: layer.effectiveDate,
+          });
+
+          remainingToIssueUnits -= takeQtyUnits;
+        }
+
+        if (remainingToIssueUnits > 0n) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: رصيد طبقات FIFO غير كافٍ لتغطية كمية الصرف المطلوبة (المتبقي بدون تغطية طبقة: ${fromMinorUnits(remainingToIssueUnits, QTY_SCALE)}). لا يُسمح بالرجوع لمتوسط التكلفة أو التكلفة الصفرية في نظام FIFO.`
+          );
+        }
+      } else {
+        // PERPETUAL_MOVING_AVERAGE
+        if (qtyUnits === prevQtyUnits) {
+          // Full depletion resets residual cost completely to exact 0
+          totalIssuedCostUnits = prevTotalUnits;
+        } else {
+          const liveAvgUnitCostUnits =
+            prevQtyUnits > 0n ? divExactUnits(prevTotalUnits, COST_SCALE, prevQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+          totalIssuedCostUnits = mulExactUnits(qtyUnits, QTY_SCALE, liveAvgUnitCostUnits, COST_SCALE, COST_SCALE);
+          if (totalIssuedCostUnits > prevTotalUnits) {
+            totalIssuedCostUnits = prevTotalUnits;
+          }
+        }
+        const effectiveAvgUnitUnits = divExactUnits(totalIssuedCostUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+        internalAllocations.push({
+          layerId: null,
+          qtyUnits,
+          unitCostUnits: effectiveAvgUnitUnits,
+          costUnits: totalIssuedCostUnits,
+        });
+      }
+
+      if (totalIssuedCostUnits > prevTotalUnits) {
+        totalIssuedCostUnits = prevTotalUnits;
+      }
+
+      const newQtyUnits = prevQtyUnits - qtyUnits;
+      const newTotalUnits = newQtyUnits === 0n ? 0n : prevTotalUnits - totalIssuedCostUnits;
+      const newUnitCostUnits =
+        newQtyUnits > 0n ? divExactUnits(newTotalUnits, COST_SCALE, newQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+      const effectiveIssueUnitCostUnits = divExactUnits(totalIssuedCostUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+
+      if (stockSyncMode === 'internal') {
+        const decremented = await this.stockRepo.decrementBalance(
+          companyId,
+          input.warehouseId,
+          input.itemId,
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          client
+        );
+        if (!decremented) {
+          throw new ValidationError('فشل خصم الكمية من رصيد المستودع (الرصيد غير كافٍ)');
+        }
+      }
+
+      const balance = await this.valuationRepo.setValuationBalanceExact(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        fromMinorUnits(newQtyUnits, QTY_SCALE),
+        fromMinorUnits(newTotalUnits, COST_SCALE),
+        fromMinorUnits(newUnitCostUnits, COST_SCALE),
         client
       );
 
@@ -278,27 +739,1009 @@ export class InventoryValuationService {
           warehouseId: input.warehouseId,
           itemId: input.itemId,
           movementType,
-          qty: input.qty,
-          unitCost: effectiveUnitCost,
-          totalCost: totalIssuedCost,
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          unitCost: fromMinorUnits(effectiveIssueUnitCostUnits, COST_SCALE),
+          totalCost: fromMinorUnits(totalIssuedCostUnits, COST_SCALE),
           sourceType: input.sourceType,
           sourceId: input.sourceId,
-          sourceLineId: input.sourceLineId,
-          journalEntryId: input.journalEntryId,
-          createdBy: userId,
+          sourceLineId: input.sourceLineId ?? null,
+          journalEntryId: input.journalEntryId ?? null,
+          reason: input.reason ?? null,
+          costSource: input.costSource ?? (method === 'FIFO' ? 'FIFO_LAYERS' : 'MOVING_AVERAGE_POOL'),
+          costingMethod: method,
+          notes: input.notes ?? null,
+          createdBy: userId ?? null,
         },
         client
       );
 
-      for (const alloc of allocatedLayers) {
+      for (const alloc of internalAllocations) {
         await this.valuationRepo.createCostAllocation(
           companyId,
           {
             valuationMovementId: movement.id,
             costLayerId: alloc.layerId,
-            allocatedQty: alloc.qty,
-            unitCost: alloc.unitCost,
-            allocatedCost: alloc.cost,
+            allocatedQty: fromMinorUnits(alloc.qtyUnits, QTY_SCALE),
+            unitCost: fromMinorUnits(alloc.unitCostUnits, COST_SCALE),
+            allocatedCost: fromMinorUnits(alloc.costUnits, COST_SCALE),
+          },
+          client
+        );
+      }
+
+      const allocatedLayers: AllocatedLayerSlice[] = internalAllocations.map((a) => ({
+        layerId: a.layerId,
+        qty: unitsToSafeNumber(a.qtyUnits, QTY_SCALE),
+        unitCost: unitsToSafeNumber(a.unitCostUnits, COST_SCALE),
+        cost: unitsToSafeNumber(a.costUnits, COST_SCALE),
+        sourceType: a.sourceType,
+        sourceId: a.sourceId,
+        sourceLineId: a.sourceLineId ?? null,
+        originLayerId: a.originLayerId ?? null,
+        originSourceType: a.originSourceType ?? null,
+        originSourceId: a.originSourceId ?? null,
+        originSourceLineId: a.originSourceLineId ?? null,
+        effectiveDate: a.effectiveDate ?? null,
+      }));
+
+      return {
+        balance,
+        movement,
+        unitCost: unitsToSafeNumber(effectiveIssueUnitCostUnits, COST_SCALE),
+        totalCost: unitsToSafeNumber(totalIssuedCostUnits, COST_SCALE),
+        allocatedLayers,
+      };
+    };
+
+    if (tx) {
+      return await execute(tx);
+    }
+    return await withTenantTransaction(companyId, execute);
+  }
+
+  /**
+   * Process warehouse transfer preserving exact total value, multi-hop FIFO source layer lineage,
+   * deadlock-safe warehouse lock ordering, and single TRANSFER_IN movement per transfer.
+   */
+  async processTransfer(
+    companyId: string,
+    input: {
+      sourceWarehouseId: string;
+      destWarehouseId: string;
+      itemId: string;
+      qty: number | string;
+      sourceId: string;
+      sourceLineId?: string | null;
+      notes?: string | null;
+      stockSyncMode?: StockSyncMode;
+      expectedPreSourceStockQty?: number | string;
+      expectedPreDestStockQty?: number | string;
+    },
+    userId?: string,
+    tx?: DbExecutor
+  ): Promise<{
+    movementOut: ValuationMovement;
+    movementIn: ValuationMovement;
+    unitCost: number;
+    totalCost: number;
+    allocatedLayers: AllocatedLayerSlice[];
+  }> {
+    if (input.sourceWarehouseId === input.destWarehouseId) {
+      throw new ValidationError('مستودع المصدر ومستودع الوجهة لا يمكن أن يكونا متطابقين');
+    }
+    const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
+    if (qtyUnits <= 0n) {
+      throw new ValidationError('كمية التحويل يجب أن تكون أكبر من الصفر');
+    }
+
+    const stockSyncMode: StockSyncMode = input.stockSyncMode || 'internal';
+
+    const execute = async (client: DbExecutor) => {
+      const sourceWh = await this.warehouseRepo.findById(companyId, input.sourceWarehouseId, client);
+      if (!sourceWh) throw new NotFoundError('مستودع المصدر المحدد غير موجود');
+      if (sourceWh.isActive === false) throw new ValidationError('مستودع المصدر المحدد غير نشط');
+
+      const destWh = await this.warehouseRepo.findById(companyId, input.destWarehouseId, client);
+      if (!destWh) throw new NotFoundError('مستودع الوجهة المحدد غير موجود');
+      if (destWh.isActive === false) throw new ValidationError('مستودع الوجهة المحدد غير نشط');
+
+      const item = await this.itemRepo.findById(companyId, input.itemId, client);
+      if (!item) throw new NotFoundError('الصنف المحدد غير موجود');
+      if (item.isActive === false) throw new ValidationError('الصنف المحدد غير نشط');
+
+      const { method } = await this.getItemCostingMethod(companyId, input.itemId, client);
+
+      // Deadlock-safe deterministic lock ordering across both warehouses
+      const [firstWh, secondWh] = [input.sourceWarehouseId, input.destWarehouseId].sort();
+      await this.valuationRepo.lockValuationBalanceForUpdate(companyId, firstWh, input.itemId, client);
+      await this.valuationRepo.lockValuationBalanceForUpdate(companyId, secondWh, input.itemId, client);
+
+      if (stockSyncMode === 'internal') {
+        await this.stockRepo.ensureBalanceRow(companyId, firstWh, input.itemId, client);
+        await this.stockRepo.ensureBalanceRow(companyId, secondWh, input.itemId, client);
+        await this.stockRepo.getBalanceForUpdate(companyId, firstWh, input.itemId, client);
+        await this.stockRepo.getBalanceForUpdate(companyId, secondWh, input.itemId, client);
+      }
+
+      // Check destination TRANSFER_IN idempotency before mutating source
+      const existingTransferIn = await this.valuationRepo.findValuationMovementByIdempotency(
+        companyId,
+        input.destWarehouseId,
+        input.itemId,
+        'TRANSFER_IN',
+        'WAREHOUSE_TRANSFER',
+        input.sourceId,
+        input.sourceLineId ?? null,
+        client
+      );
+      if (existingTransferIn) {
+        throw new ValidationError('IDEMPOTENT_DUPLICATE: تم تسجيل حركة استلام التحويل المخزني مسبقاً');
+      }
+
+      const issueResult = await this.processIssue(
+        companyId,
+        {
+          warehouseId: input.sourceWarehouseId,
+          itemId: input.itemId,
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          sourceType: 'WAREHOUSE_TRANSFER',
+          sourceId: input.sourceId,
+          sourceLineId: input.sourceLineId ?? null,
+          movementType: 'TRANSFER_OUT',
+          costSource: 'WAREHOUSE_TRANSFER',
+          notes: input.notes ?? null,
+          stockSyncMode,
+          expectedPreStockQty: input.expectedPreSourceStockQty,
+        },
+        userId,
+        client
+      );
+
+      // Re-read locked destination balance and compute exact new destination balance
+      const destCurrent = await this.valuationRepo.lockValuationBalanceForUpdate(
+        companyId,
+        input.destWarehouseId,
+        input.itemId,
+        client
+      );
+      const destPrevQtyUnits = destCurrent ? parseExactUnits(destCurrent.quantity, QTY_SCALE, 'destPrevQty') : 0n;
+      const destPrevTotalUnits = destCurrent ? parseExactUnits(destCurrent.totalCost, COST_SCALE, 'destPrevTotal') : 0n;
+
+      if (stockSyncMode === 'external_verified' && input.expectedPreDestStockQty !== undefined) {
+        const preDestUnits = parseExactUnits(input.expectedPreDestStockQty, QTY_SCALE, 'expectedPreDestStockQty');
+        if (preDestUnits !== destPrevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: رصيد مستودع الوجهة (${fromMinorUnits(preDestUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(destPrevQtyUnits, QTY_SCALE)}).`
+          );
+        }
+      } else if (stockSyncMode === 'internal') {
+        const destStock = await this.stockRepo.getBalanceForUpdate(companyId, input.destWarehouseId, input.itemId, client);
+        const destStockUnits = destStock ? parseExactUnits(destStock.qty, QTY_SCALE, 'destStockQty') : 0n;
+        if (destStockUnits !== destPrevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: عدم تطابق رصيد مستودع الوجهة مع رصيد التقييم.`
+          );
+        }
+        await this.stockRepo.incrementBalance(
+          companyId,
+          input.destWarehouseId,
+          input.itemId,
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          client
+        );
+      }
+
+      const transferTotalUnits = parseExactUnits(issueResult.totalCost, COST_SCALE, 'transferTotalCost');
+      const transferUnitCostUnits = parseExactUnits(issueResult.unitCost, COST_SCALE, 'transferUnitCost');
+
+      // Preserve FIFO layers individually in destination warehouse with full root + immediate layer lineage
+      if (method === 'FIFO') {
+        for (const alloc of issueResult.allocatedLayers) {
+          const allocQtyUnits = parseExactUnits(alloc.qty, QTY_SCALE, 'allocQty');
+          const allocCostUnits = parseExactUnits(alloc.cost, COST_SCALE, 'allocCost');
+          const allocUnitCostUnits = parseExactUnits(alloc.unitCost, COST_SCALE, 'allocUnitCost');
+
+          await this.valuationRepo.createCostLayer(
+            companyId,
+            {
+              warehouseId: input.destWarehouseId,
+              itemId: input.itemId,
+              originalQty: fromMinorUnits(allocQtyUnits, QTY_SCALE),
+              unitCost: fromMinorUnits(allocUnitCostUnits, COST_SCALE),
+              totalCost: fromMinorUnits(allocCostUnits, COST_SCALE),
+              sourceType: 'WAREHOUSE_TRANSFER',
+              sourceId: input.sourceId,
+              sourceLineId: input.sourceLineId ?? null,
+              originLayerId: alloc.layerId,
+              originSourceType: alloc.originSourceType || alloc.sourceType || 'WAREHOUSE_TRANSFER',
+              originSourceId: alloc.originSourceId || alloc.sourceId || input.sourceId,
+              originSourceLineId: alloc.originSourceLineId ?? alloc.sourceLineId ?? input.sourceLineId ?? null,
+              effectiveDate: alloc.effectiveDate ?? null,
+            },
+            client
+          );
+        }
+      }
+
+      const destNewQtyUnits = destPrevQtyUnits + qtyUnits;
+      const destNewTotalUnits = destPrevTotalUnits + transferTotalUnits;
+      const destNewUnitCostUnits =
+        destNewQtyUnits > 0n ? divExactUnits(destNewTotalUnits, COST_SCALE, destNewQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+
+      await this.valuationRepo.setValuationBalanceExact(
+        companyId,
+        input.destWarehouseId,
+        input.itemId,
+        fromMinorUnits(destNewQtyUnits, QTY_SCALE),
+        fromMinorUnits(destNewTotalUnits, COST_SCALE),
+        fromMinorUnits(destNewUnitCostUnits, COST_SCALE),
+        client
+      );
+
+      // Single TRANSFER_IN valuation movement linked to TRANSFER_OUT
+      const movementIn = await this.valuationRepo.createValuationMovement(
+        companyId,
+        {
+          warehouseId: input.destWarehouseId,
+          itemId: input.itemId,
+          movementType: 'TRANSFER_IN',
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          unitCost: fromMinorUnits(transferUnitCostUnits, COST_SCALE),
+          totalCost: fromMinorUnits(transferTotalUnits, COST_SCALE),
+          sourceType: 'WAREHOUSE_TRANSFER',
+          sourceId: input.sourceId,
+          sourceLineId: input.sourceLineId ?? null,
+          costSource: 'WAREHOUSE_TRANSFER',
+          costingMethod: method,
+          referenceMovementId: issueResult.movement.id,
+          notes: input.notes ?? null,
+          createdBy: userId ?? null,
+        },
+        client
+      );
+
+      return {
+        movementOut: issueResult.movement,
+        movementIn,
+        unitCost: issueResult.unitCost,
+        totalCost: issueResult.totalCost,
+        allocatedLayers: issueResult.allocatedLayers,
+      };
+    };
+
+    if (tx) {
+      return await execute(tx);
+    }
+    return await withTenantTransaction(companyId, execute);
+  }
+
+  /**
+   * Allocates Purchase Price Variance (final supplier invoice unit cost vs GRN estimated unit cost)
+   * proportionally between Remaining Inventory (even after inter-warehouse transfers) and Consumed/COGS.
+   * Never creates artificial quantity movements and prevents duplicate reconciliation.
+   */
+  async applyPurchasePriceVariance(
+    companyId: string,
+    input: PurchasePriceVarianceInput,
+    tx: DbExecutor
+  ): Promise<PurchasePriceVarianceResult> {
+    if (!input.grnId || !input.grnLineId || !input.invoiceId || !input.invoiceLineId) {
+      throw new ValidationError('معرّفات إذن الاستلام وفاتورة المورد مطلوبة لتسوية فرق السعر');
+    }
+
+    const existingAdjs = await this.valuationRepo.findCostAdjustmentsByInvoiceLine(
+      companyId,
+      input.invoiceLineId,
+      tx
+    );
+    if (existingAdjs.length > 0) {
+      throw new ValidationError(
+        `IDEMPOTENT_DUPLICATE: تم تسوية فرق السعر لسطر فاتورة المورد (${input.invoiceLineId}) مسبقاً.`
+      );
+    }
+
+    const { method } = await this.getItemCostingMethod(companyId, input.itemId, tx);
+
+    const qtyBasisUnits = parseExactUnits(input.invoicedQty, QTY_SCALE, 'invoicedQty');
+    if (qtyBasisUnits <= 0n) {
+      throw new ValidationError('الكمية المفوترة يجب أن تكون أكبر من الصفر');
+    }
+
+    const origUnitCostUnits = parseExactUnits(input.grnUnitCost, COST_SCALE, 'grnUnitCost');
+    const finalUnitCostUnits = parseExactUnits(input.invoiceUnitCost, COST_SCALE, 'invoiceUnitCost');
+    const unitVarianceUnits = finalUnitCostUnits - origUnitCostUnits;
+
+    const grnTotalUnits = mulExactUnits(qtyBasisUnits, QTY_SCALE, origUnitCostUnits, COST_SCALE, COST_SCALE);
+    const invoiceTotalUnits = mulExactUnits(qtyBasisUnits, QTY_SCALE, finalUnitCostUnits, COST_SCALE, COST_SCALE);
+    const totalVarianceUnits = invoiceTotalUnits - grnTotalUnits;
+
+    const grnMoneyUnits = rescaleUnits(grnTotalUnits, COST_SCALE, MONEY_SCALE);
+    const invoiceMoneyUnits = rescaleUnits(invoiceTotalUnits, COST_SCALE, MONEY_SCALE);
+    const totalVarianceMoneyUnits = invoiceMoneyUnits - grnMoneyUnits;
+
+    if (totalVarianceUnits === 0n && totalVarianceMoneyUnits === 0n) {
+      return {
+        costingMethod: method,
+        qtyBasis: unitsToSafeNumber(qtyBasisUnits, QTY_SCALE),
+        grnTotalUnits,
+        invoiceTotalUnits,
+        totalVarianceUnits: 0n,
+        remainingAllocationUnits: 0n,
+        consumedAllocationUnits: 0n,
+        grnMoneyUnits,
+        invoiceMoneyUnits,
+        totalVarianceMoneyUnits: 0n,
+        remainingMoneyUnits: 0n,
+        consumedMoneyUnits: 0n,
+        adjustments: [],
+      };
+    }
+
+    const adjustments: CostAdjustmentRecord[] = [];
+    let remainingAllocationUnits = 0n;
+    let consumedAllocationUnits = 0n;
+
+    if (method === 'FIFO') {
+      const originLayers = await this.valuationRepo.findLayersByOriginLineForUpdate(
+        companyId,
+        input.grnId,
+        input.grnLineId,
+        tx
+      );
+      const activeLayers = originLayers.filter(
+        (l) => !l.isExhausted && parseExactUnits(l.remainingQty, QTY_SCALE, 'remQty') > 0n
+      );
+
+      let totalLayerRemQtyUnits = 0n;
+      for (const layer of activeLayers) {
+        totalLayerRemQtyUnits += parseExactUnits(layer.remainingQty, QTY_SCALE, 'remQty');
+      }
+
+      const coveredRemQtyUnits = totalLayerRemQtyUnits < qtyBasisUnits ? totalLayerRemQtyUnits : qtyBasisUnits;
+      const consumedQtyUnits = qtyBasisUnits - coveredRemQtyUnits;
+
+      const [plannedRemUnits, plannedConsUnits] = allocateProportionalUnits(totalVarianceUnits, [
+        coveredRemQtyUnits,
+        consumedQtyUnits,
+      ]);
+      consumedAllocationUnits = plannedConsUnits;
+
+      if (activeLayers.length > 0 && plannedRemUnits !== 0n) {
+        const layerWeights = activeLayers.map((l) => parseExactUnits(l.remainingQty, QTY_SCALE, 'remQty'));
+        const layerShares = allocateProportionalUnits(plannedRemUnits, layerWeights);
+
+        // Lock warehouse balances in deterministic order for all touched warehouses
+        const touchedWhs = Array.from(new Set(activeLayers.map((l) => l.warehouseId))).sort();
+        for (const whId of touchedWhs) {
+          await this.valuationRepo.lockValuationBalanceForUpdate(companyId, whId, input.itemId, tx);
+        }
+
+        const whDeltaMap = new Map<string, bigint>();
+        for (let i = 0; i < activeLayers.length; i++) {
+          const layer = activeLayers[i];
+          const layerRemUnits = parseExactUnits(layer.remainingQty, QTY_SCALE, 'remQty');
+          const layerTotalUnits = parseExactUnits(layer.totalCost, COST_SCALE, 'layerTotalCost');
+          let shareUnits = layerShares[i];
+
+          // Prevent negative layer valuation when negative variance exceeds remaining layer book value
+          if (layerTotalUnits + shareUnits < 0n) {
+            const maxReduction = -layerTotalUnits;
+            const overflow = shareUnits - maxReduction;
+            shareUnits = maxReduction;
+            consumedAllocationUnits += overflow;
+          }
+
+          const newLayerTotalUnits = layerTotalUnits + shareUnits;
+          const newLayerUnitCostUnits =
+            layerRemUnits > 0n ? divExactUnits(newLayerTotalUnits, COST_SCALE, layerRemUnits, QTY_SCALE, COST_SCALE) : 0n;
+
+          await this.valuationRepo.updateCostLayerValuation(
+            companyId,
+            layer.id,
+            fromMinorUnits(newLayerUnitCostUnits, COST_SCALE),
+            fromMinorUnits(newLayerTotalUnits, COST_SCALE),
+            tx
+          );
+
+          remainingAllocationUnits += shareUnits;
+          whDeltaMap.set(layer.warehouseId, (whDeltaMap.get(layer.warehouseId) || 0n) + shareUnits);
+
+          const isFirst = i === 0;
+          const rowConsumed = isFirst ? 0n : 0n; // finalized below if multi-layer
+          if (!isFirst) {
+            const adj = await this.valuationRepo.createCostAdjustment(
+              companyId,
+              {
+                sourceType: 'SUPPLIER_INVOICE_PPV',
+                sourceId: input.invoiceId,
+                sourceLineId: input.invoiceLineId,
+                grnId: input.grnId,
+                grnLineId: input.grnLineId,
+                invoiceId: input.invoiceId,
+                invoiceLineId: input.invoiceLineId,
+                costLayerId: layer.id,
+                itemId: input.itemId,
+                warehouseId: layer.warehouseId,
+                costingMethod: method,
+                qtyBasis: fromMinorUnits(layerRemUnits, QTY_SCALE),
+                originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+                finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+                unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+                adjustmentAmount: fromMinorUnits(shareUnits, COST_SCALE),
+                remainingAllocation: fromMinorUnits(shareUnits, COST_SCALE),
+                consumedAllocation: fromMinorUnits(rowConsumed, COST_SCALE),
+                status: 'posted',
+                reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
+                journalEntryId: input.journalEntryId ?? null,
+                approvedBy: input.approvedBy ?? null,
+                createdBy: input.createdBy ?? null,
+              },
+              tx
+            );
+            adjustments.push(adj);
+          }
+        }
+
+        // Update warehouse valuation balances once per touched warehouse (handling negative clamp safety)
+        for (const whId of touchedWhs) {
+          const delta = whDeltaMap.get(whId) || 0n;
+          if (delta === 0n) continue;
+          const bal = await this.valuationRepo.lockValuationBalanceForUpdate(companyId, whId, input.itemId, tx);
+          const curQtyUnits = bal ? parseExactUnits(bal.quantity, QTY_SCALE, 'curQty') : 0n;
+          const curTotalUnits = bal ? parseExactUnits(bal.totalCost, COST_SCALE, 'curTotal') : 0n;
+          let actualDelta = delta;
+          if (curTotalUnits + actualDelta < 0n) {
+            const clamped = -curTotalUnits;
+            const diff = actualDelta - clamped;
+            actualDelta = clamped;
+            remainingAllocationUnits += diff; // reduces negative or shifts difference to consumed
+            consumedAllocationUnits += diff;
+          }
+          const nextTotalUnits = curTotalUnits + actualDelta;
+          const nextUnitCostUnits =
+            curQtyUnits > 0n ? divExactUnits(nextTotalUnits, COST_SCALE, curQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+          await this.valuationRepo.setValuationBalanceExact(
+            companyId,
+            whId,
+            input.itemId,
+            fromMinorUnits(curQtyUnits, QTY_SCALE),
+            fromMinorUnits(nextTotalUnits, COST_SCALE),
+            fromMinorUnits(nextUnitCostUnits, COST_SCALE),
+            tx
+          );
+        }
+
+        // Create adjustment record for first layer carrying any consumed allocation too
+        const firstLayer = activeLayers[0];
+        const firstLayerAdjustedShare =
+          totalVarianceUnits - consumedAllocationUnits - adjustments.reduce(
+            (acc, a) => acc + parseExactUnits(a.remainingAllocation, COST_SCALE, 'remAlloc'),
+            0n
+          );
+        const firstAdj = await this.valuationRepo.createCostAdjustment(
+          companyId,
+          {
+            sourceType: 'SUPPLIER_INVOICE_PPV',
+            sourceId: input.invoiceId,
+            sourceLineId: input.invoiceLineId,
+            grnId: input.grnId,
+            grnLineId: input.grnLineId,
+            invoiceId: input.invoiceId,
+            invoiceLineId: input.invoiceLineId,
+            costLayerId: firstLayer.id,
+            itemId: input.itemId,
+            warehouseId: firstLayer.warehouseId,
+            costingMethod: method,
+            qtyBasis: fromMinorUnits(qtyBasisUnits, QTY_SCALE),
+            originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+            finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+            unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+            adjustmentAmount: fromMinorUnits(firstLayerAdjustedShare + consumedAllocationUnits, COST_SCALE),
+            remainingAllocation: fromMinorUnits(firstLayerAdjustedShare, COST_SCALE),
+            consumedAllocation: fromMinorUnits(consumedAllocationUnits, COST_SCALE),
+            status: 'posted',
+            reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
+            journalEntryId: input.journalEntryId ?? null,
+            approvedBy: input.approvedBy ?? null,
+            createdBy: input.createdBy ?? null,
+          },
+          tx
+        );
+        adjustments.unshift(firstAdj);
+      } else {
+        // 100% consumed inventory (0 active FIFO layers left)
+        remainingAllocationUnits = 0n;
+        consumedAllocationUnits = totalVarianceUnits;
+        const adj = await this.valuationRepo.createCostAdjustment(
+          companyId,
+          {
+            sourceType: 'SUPPLIER_INVOICE_PPV',
+            sourceId: input.invoiceId,
+            sourceLineId: input.invoiceLineId,
+            grnId: input.grnId,
+            grnLineId: input.grnLineId,
+            invoiceId: input.invoiceId,
+            invoiceLineId: input.invoiceLineId,
+            costLayerId: null,
+            itemId: input.itemId,
+            warehouseId: input.warehouseId,
+            costingMethod: method,
+            qtyBasis: fromMinorUnits(qtyBasisUnits, QTY_SCALE),
+            originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+            finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+            unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+            adjustmentAmount: fromMinorUnits(totalVarianceUnits, COST_SCALE),
+            remainingAllocation: '0.0000',
+            consumedAllocation: fromMinorUnits(totalVarianceUnits, COST_SCALE),
+            status: 'posted',
+            reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن مخزون مستنفد (COGS)',
+            journalEntryId: input.journalEntryId ?? null,
+            approvedBy: input.approvedBy ?? null,
+            createdBy: input.createdBy ?? null,
+          },
+          tx
+        );
+        adjustments.push(adj);
+      }
+    } else {
+      // PERPETUAL_MOVING_AVERAGE across primary GRN warehouse and any destination warehouses with remaining stock
+      const candidateRes = await tx.query<{ warehouseId: string }>(
+        `SELECT warehouse_id as "warehouseId"
+         FROM inv_valuation_balances
+         WHERE company_id = $1 AND item_id = $2 AND (quantity > 0 OR warehouse_id = $3)
+         ORDER BY CASE WHEN warehouse_id = $3 THEN 0 ELSE 1 END, warehouse_id ASC;`,
+        [companyId, input.itemId, input.warehouseId]
+      );
+      const whIds = candidateRes.rows.length > 0
+        ? Array.from(new Set(candidateRes.rows.map((r) => r.warehouseId)))
+        : [input.warehouseId];
+
+      // Deadlock-safe lock order: sort by warehouseId ASC
+      const sortedLocks = [...whIds].sort();
+      const lockedBalances = new Map<string, ValuationBalance>();
+      for (const whId of sortedLocks) {
+        const bal = await this.valuationRepo.lockValuationBalanceForUpdate(companyId, whId, input.itemId, tx);
+        if (bal) lockedBalances.set(whId, bal);
+      }
+
+      // Compute remaining coverable qty (GRN warehouse priority, then transferred warehouses)
+      let remToCover = qtyBasisUnits;
+      const whCoverWeights: Array<{ whId: string; coverQtyUnits: bigint }> = [];
+      for (const whId of whIds) {
+        if (remToCover <= 0n) break;
+        const bal = lockedBalances.get(whId);
+        const whQtyUnits = bal ? parseExactUnits(bal.quantity, QTY_SCALE, 'whQty') : 0n;
+        if (whQtyUnits <= 0n) continue;
+        const take = whQtyUnits < remToCover ? whQtyUnits : remToCover;
+        whCoverWeights.push({ whId, coverQtyUnits: take });
+        remToCover -= take;
+      }
+
+      const coveredRemQtyUnits = qtyBasisUnits - remToCover;
+      const consumedQtyUnits = remToCover;
+      const [plannedRemUnits, plannedConsUnits] = allocateProportionalUnits(totalVarianceUnits, [
+        coveredRemQtyUnits,
+        consumedQtyUnits,
+      ]);
+      consumedAllocationUnits = plannedConsUnits;
+
+      if (whCoverWeights.length > 0 && plannedRemUnits !== 0n) {
+        const shares = allocateProportionalUnits(
+          plannedRemUnits,
+          whCoverWeights.map((w) => w.coverQtyUnits)
+        );
+
+        for (let i = 0; i < whCoverWeights.length; i++) {
+          const { whId, coverQtyUnits } = whCoverWeights[i];
+          const bal = lockedBalances.get(whId)!;
+          const curQtyUnits = parseExactUnits(bal.quantity, QTY_SCALE, 'curQty');
+          const curTotalUnits = parseExactUnits(bal.totalCost, COST_SCALE, 'curTotal');
+          let shareUnits = shares[i];
+
+          if (curTotalUnits + shareUnits < 0n) {
+            const clamped = -curTotalUnits;
+            const overflow = shareUnits - clamped;
+            shareUnits = clamped;
+            consumedAllocationUnits += overflow;
+          }
+
+          const nextTotalUnits = curTotalUnits + shareUnits;
+          const nextUnitCostUnits =
+            curQtyUnits > 0n ? divExactUnits(nextTotalUnits, COST_SCALE, curQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+          await this.valuationRepo.setValuationBalanceExact(
+            companyId,
+            whId,
+            input.itemId,
+            fromMinorUnits(curQtyUnits, QTY_SCALE),
+            fromMinorUnits(nextTotalUnits, COST_SCALE),
+            fromMinorUnits(nextUnitCostUnits, COST_SCALE),
+            tx
+          );
+          remainingAllocationUnits += shareUnits;
+
+          if (i > 0) {
+            const adj = await this.valuationRepo.createCostAdjustment(
+              companyId,
+              {
+                sourceType: 'SUPPLIER_INVOICE_PPV',
+                sourceId: input.invoiceId,
+                sourceLineId: input.invoiceLineId,
+                grnId: input.grnId,
+                grnLineId: input.grnLineId,
+                invoiceId: input.invoiceId,
+                invoiceLineId: input.invoiceLineId,
+                costLayerId: null,
+                itemId: input.itemId,
+                warehouseId: whId,
+                costingMethod: method,
+                qtyBasis: fromMinorUnits(coverQtyUnits, QTY_SCALE),
+                originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+                finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+                unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+                adjustmentAmount: fromMinorUnits(shareUnits, COST_SCALE),
+                remainingAllocation: fromMinorUnits(shareUnits, COST_SCALE),
+                consumedAllocation: '0.0000',
+                status: 'posted',
+                reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
+                journalEntryId: input.journalEntryId ?? null,
+                approvedBy: input.approvedBy ?? null,
+                createdBy: input.createdBy ?? null,
+              },
+              tx
+            );
+            adjustments.push(adj);
+          }
+        }
+
+        const firstWh = whCoverWeights[0];
+        const otherRemSum = adjustments.reduce(
+          (acc, a) => acc + parseExactUnits(a.remainingAllocation, COST_SCALE, 'remAlloc'),
+          0n
+        );
+        const firstRem = remainingAllocationUnits - otherRemSum;
+        const firstAdj = await this.valuationRepo.createCostAdjustment(
+          companyId,
+          {
+            sourceType: 'SUPPLIER_INVOICE_PPV',
+            sourceId: input.invoiceId,
+            sourceLineId: input.invoiceLineId,
+            grnId: input.grnId,
+            grnLineId: input.grnLineId,
+            invoiceId: input.invoiceId,
+            invoiceLineId: input.invoiceLineId,
+            costLayerId: null,
+            itemId: input.itemId,
+            warehouseId: firstWh.whId,
+            costingMethod: method,
+            qtyBasis: fromMinorUnits(qtyBasisUnits, QTY_SCALE),
+            originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+            finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+            unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+            adjustmentAmount: fromMinorUnits(firstRem + consumedAllocationUnits, COST_SCALE),
+            remainingAllocation: fromMinorUnits(firstRem, COST_SCALE),
+            consumedAllocation: fromMinorUnits(consumedAllocationUnits, COST_SCALE),
+            status: 'posted',
+            reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
+            journalEntryId: input.journalEntryId ?? null,
+            approvedBy: input.approvedBy ?? null,
+            createdBy: input.createdBy ?? null,
+          },
+          tx
+        );
+        adjustments.unshift(firstAdj);
+      } else {
+        remainingAllocationUnits = 0n;
+        consumedAllocationUnits = totalVarianceUnits;
+        const adj = await this.valuationRepo.createCostAdjustment(
+          companyId,
+          {
+            sourceType: 'SUPPLIER_INVOICE_PPV',
+            sourceId: input.invoiceId,
+            sourceLineId: input.invoiceLineId,
+            grnId: input.grnId,
+            grnLineId: input.grnLineId,
+            invoiceId: input.invoiceId,
+            invoiceLineId: input.invoiceLineId,
+            costLayerId: null,
+            itemId: input.itemId,
+            warehouseId: input.warehouseId,
+            costingMethod: method,
+            qtyBasis: fromMinorUnits(qtyBasisUnits, QTY_SCALE),
+            originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+            finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+            unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+            adjustmentAmount: fromMinorUnits(totalVarianceUnits, COST_SCALE),
+            remainingAllocation: '0.0000',
+            consumedAllocation: fromMinorUnits(totalVarianceUnits, COST_SCALE),
+            status: 'posted',
+            reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن مخزون مستنفد (COGS)',
+            journalEntryId: input.journalEntryId ?? null,
+            approvedBy: input.approvedBy ?? null,
+            createdBy: input.createdBy ?? null,
+          },
+          tx
+        );
+        adjustments.push(adj);
+      }
+    }
+
+    // Exact MONEY_SCALE (2 decimals) split preserving remainingMoney + consumedMoney === totalVarianceMoneyUnits
+    let remainingMoneyUnits = 0n;
+    let consumedMoneyUnits = 0n;
+    if (totalVarianceMoneyUnits !== 0n) {
+      if (remainingAllocationUnits === 0n) {
+        consumedMoneyUnits = totalVarianceMoneyUnits;
+      } else if (consumedAllocationUnits === 0n) {
+        remainingMoneyUnits = totalVarianceMoneyUnits;
+      } else {
+        const absRem = remainingAllocationUnits < 0n ? -remainingAllocationUnits : remainingAllocationUnits;
+        const absCons = consumedAllocationUnits < 0n ? -consumedAllocationUnits : consumedAllocationUnits;
+        const [remM, consM] = allocateProportionalUnits(totalVarianceMoneyUnits, [absRem, absCons]);
+        remainingMoneyUnits = remM;
+        consumedMoneyUnits = consM;
+      }
+    }
+
+    return {
+      costingMethod: method,
+      qtyBasis: unitsToSafeNumber(qtyBasisUnits, QTY_SCALE),
+      grnTotalUnits,
+      invoiceTotalUnits,
+      totalVarianceUnits,
+      remainingAllocationUnits,
+      consumedAllocationUnits,
+      grnMoneyUnits,
+      invoiceMoneyUnits,
+      totalVarianceMoneyUnits,
+      remainingMoneyUnits,
+      consumedMoneyUnits,
+      adjustments,
+    };
+  }
+
+  /**
+   * Resolves authoritative source cost for a Purchase Return linked to a specific GRN line,
+   * accounting for prior issues, inter-warehouse transfers, and posted supplier invoice PPVs.
+   * Rejects return if source provenance cannot be satisfied.
+   */
+  async resolveAndIssuePurchaseReturn(
+    companyId: string,
+    input: PurchaseReturnValuationInput,
+    userId?: string,
+    tx?: DbExecutor
+  ): Promise<{
+    balance: ValuationBalance;
+    movement: ValuationMovement;
+    unitCost: number;
+    totalCost: number;
+    costingMethod: CostingMethod;
+  }> {
+    const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
+    const grnQtyUnits = parseExactUnits(input.grnQty, QTY_SCALE, 'grnQty');
+    const grnUnitCostUnits = parseExactUnits(input.grnUnitCost, COST_SCALE, 'grnUnitCost');
+    if (qtyUnits <= 0n || grnQtyUnits <= 0n) {
+      throw new ValidationError('كمية المرتجع وكمية الاستلام الأصلية يجب أن تكون أكبر من الصفر');
+    }
+
+    const stockSyncMode: StockSyncMode = input.stockSyncMode || 'internal';
+
+    const execute = async (client: DbExecutor) => {
+      const existingMov = await this.valuationRepo.findValuationMovementByIdempotency(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        'RETURN',
+        'PURCHASE_RETURN',
+        input.returnId,
+        input.returnLineId,
+        client
+      );
+      if (existingMov) {
+        throw new ValidationError('IDEMPOTENT_DUPLICATE: تم تسجيل حركة التقييم لمرتجع المشتريات هذا مسبقاً');
+      }
+
+      const { method } = await this.getItemCostingMethod(companyId, input.itemId, client);
+
+      const currentBalance = await this.valuationRepo.lockValuationBalanceForUpdate(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        client
+      );
+      const prevQtyUnits = currentBalance ? parseExactUnits(currentBalance.quantity, QTY_SCALE, 'prevQty') : 0n;
+      const prevTotalUnits = currentBalance ? parseExactUnits(currentBalance.totalCost, COST_SCALE, 'prevTotalCost') : 0n;
+
+      if (prevQtyUnits < qtyUnits) {
+        throw new ValidationError(
+          `رصيد مخزني غير كافٍ لإتمام مرتجع المشتريات (المتاح: ${fromMinorUnits(prevQtyUnits, QTY_SCALE)}، المطلوب: ${fromMinorUnits(qtyUnits, QTY_SCALE)}).`
+        );
+      }
+
+      if (stockSyncMode === 'external_verified' && input.expectedPreStockQty !== undefined) {
+        const preUnits = parseExactUnits(input.expectedPreStockQty, QTY_SCALE, 'expectedPreStockQty');
+        if (preUnits !== prevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: عدم تطابق الرصيد الكمي بالمستودع (${fromMinorUnits(preUnits, QTY_SCALE)}) مع رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+          );
+        }
+      } else if (stockSyncMode === 'internal') {
+        const stockBal = await this.stockRepo.getBalanceForUpdate(companyId, input.warehouseId, input.itemId, client);
+        const stockUnits = stockBal ? parseExactUnits(stockBal.qty, QTY_SCALE, 'stockQty') : 0n;
+        if (stockUnits !== prevQtyUnits) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم تطابق الرصيد الكمي بالمستودع مع رصيد التقييم');
+        }
+      }
+
+      let returnTotalUnits = 0n;
+      const allocated: Array<{ layerId: string | null; qtyUnits: bigint; unitCostUnits: bigint; costUnits: bigint }> = [];
+
+      if (method === 'FIFO') {
+        // Lock all layers descending from (grnId, grnLineId) across warehouses
+        const originLayers = await this.valuationRepo.findLayersByOriginLineForUpdate(
+          companyId,
+          input.grnId,
+          input.grnLineId,
+          client
+        );
+
+        const whLayers = originLayers.filter(
+          (l) => l.warehouseId === input.warehouseId && !l.isExhausted && parseExactUnits(l.remainingQty, QTY_SCALE, 'rem') > 0n
+        );
+        const whLayerRemSum = whLayers.reduce(
+          (sum, l) => sum + parseExactUnits(l.remainingQty, QTY_SCALE, 'rem'),
+          0n
+        );
+        if (whLayerRemSum < qtyUnits) {
+          const allWhRemSum = originLayers
+            .filter((l) => !l.isExhausted)
+            .reduce((sum, l) => sum + parseExactUnits(l.remainingQty, QTY_SCALE, 'rem'), 0n);
+          throw new ValidationError(
+            allWhRemSum >= qtyUnits
+              ? `الكمية المتاحة من طبقات الاستلام الأصلية في هذا المستودع (${fromMinorUnits(whLayerRemSum, QTY_SCALE)}) أقل من كمية المرتجع (${fromMinorUnits(qtyUnits, QTY_SCALE)}) بسبب تحويل جزء من البضاعة لمستودع آخر.`
+              : `VALUATION_INTEGRITY_ERROR: الكمية المتبقية في طبقات FIFO المرتبطة بإذن الاستلام الأصلي (${fromMinorUnits(whLayerRemSum, QTY_SCALE)}) غير كافية لمرتجع (${fromMinorUnits(qtyUnits, QTY_SCALE)}).`
+          );
+        }
+
+        let remToReturn = qtyUnits;
+        for (const layer of whLayers) {
+          if (remToReturn <= 0n) break;
+          const layerRem = parseExactUnits(layer.remainingQty, QTY_SCALE, 'rem');
+          const layerTotal = parseExactUnits(layer.totalCost, COST_SCALE, 'layerTotal');
+          const layerUnitCost = parseExactUnits(layer.unitCost, COST_SCALE, 'layerUnitCost');
+
+          const takeQty = remToReturn < layerRem ? remToReturn : layerRem;
+          let takeCost =
+            takeQty === layerRem
+              ? layerTotal
+              : mulExactUnits(takeQty, QTY_SCALE, layerUnitCost, COST_SCALE, COST_SCALE);
+          if (takeCost > layerTotal) takeCost = layerTotal;
+
+          await this.valuationRepo.updateCostLayerRemaining(
+            companyId,
+            layer.id,
+            fromMinorUnits(layerRem - takeQty, QTY_SCALE),
+            fromMinorUnits(layerTotal - takeCost, COST_SCALE),
+            layerRem - takeQty === 0n,
+            client
+          );
+
+          returnTotalUnits += takeCost;
+          allocated.push({
+            layerId: layer.id,
+            qtyUnits: takeQty,
+            unitCostUnits: divExactUnits(takeCost, COST_SCALE, takeQty, QTY_SCALE, COST_SCALE),
+            costUnits: takeCost,
+          });
+          remToReturn -= takeQty;
+        }
+      } else {
+        // PERPETUAL_MOVING_AVERAGE: derive authoritative GRN source unit cost including posted PPV adjustments
+        const postedAdjs = await this.valuationRepo.findCostAdjustmentsByGrnLine(companyId, input.grnLineId, client);
+        let sourceUnitCostUnits = grnUnitCostUnits;
+        if (postedAdjs.length > 0) {
+          let totalRemainingAdjOnGrn = 0n;
+          for (const a of postedAdjs) {
+            totalRemainingAdjOnGrn += parseExactUnits(a.remainingAllocation, COST_SCALE, 'remAlloc');
+          }
+          const baseTotal = mulExactUnits(grnQtyUnits, QTY_SCALE, grnUnitCostUnits, COST_SCALE, COST_SCALE);
+          const adjustedTotal = baseTotal + totalRemainingAdjOnGrn;
+          if (adjustedTotal < 0n) {
+            throw new ValidationError('VALUATION_INTEGRITY_ERROR: تكلفة المصدر المعدلة للمرتجع سالبة');
+          }
+          sourceUnitCostUnits = divExactUnits(adjustedTotal, COST_SCALE, grnQtyUnits, QTY_SCALE, COST_SCALE);
+        }
+
+        returnTotalUnits = mulExactUnits(qtyUnits, QTY_SCALE, sourceUnitCostUnits, COST_SCALE, COST_SCALE);
+        if (qtyUnits === prevQtyUnits) {
+          // If returning the entire remaining pool and rounding differs by tiny epsilon, or protect non-negative pool
+          if (returnTotalUnits > prevTotalUnits) {
+            const diff = returnTotalUnits - prevTotalUnits;
+            if (diff <= 10n) {
+              returnTotalUnits = prevTotalUnits;
+            } else {
+              throw new ValidationError(
+                `VALUATION_INTEGRITY_ERROR: القيمة الدفترية المتبقية بالمستودع (${fromMinorUnits(prevTotalUnits, COST_SCALE)}) لا تكفي لتغطية تكلفة المرتجع الأصلية (${fromMinorUnits(returnTotalUnits, COST_SCALE)}).`
+              );
+            }
+          }
+        } else if (returnTotalUnits > prevTotalUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: القيمة الدفترية المتبقية بالمستودع (${fromMinorUnits(prevTotalUnits, COST_SCALE)}) لا تكفي لتغطية تكلفة المرتجع الأصلية (${fromMinorUnits(returnTotalUnits, COST_SCALE)}).`
+          );
+        }
+
+        const effectiveUnit = divExactUnits(returnTotalUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+        allocated.push({
+          layerId: null,
+          qtyUnits,
+          unitCostUnits: effectiveUnit,
+          costUnits: returnTotalUnits,
+        });
+      }
+
+      if (returnTotalUnits > prevTotalUnits) {
+        throw new ValidationError('VALUATION_INTEGRITY_ERROR: تتجاوز تكلفة المرتجع الرصيد القيمي المتاح بالمستودع');
+      }
+
+      const newQtyUnits = prevQtyUnits - qtyUnits;
+      const newTotalUnits = newQtyUnits === 0n ? 0n : prevTotalUnits - returnTotalUnits;
+      const newUnitCostUnits =
+        newQtyUnits > 0n ? divExactUnits(newTotalUnits, COST_SCALE, newQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+      const effectiveReturnUnitCostUnits = divExactUnits(returnTotalUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+
+      if (stockSyncMode === 'internal') {
+        const decremented = await this.stockRepo.decrementBalance(
+          companyId,
+          input.warehouseId,
+          input.itemId,
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          client
+        );
+        if (!decremented) {
+          throw new ValidationError('رصيد غير كافٍ لإتمام مرتجع المشتريات');
+        }
+      }
+
+      const balance = await this.valuationRepo.setValuationBalanceExact(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        fromMinorUnits(newQtyUnits, QTY_SCALE),
+        fromMinorUnits(newTotalUnits, COST_SCALE),
+        fromMinorUnits(newUnitCostUnits, COST_SCALE),
+        client
+      );
+
+      const movement = await this.valuationRepo.createValuationMovement(
+        companyId,
+        {
+          warehouseId: input.warehouseId,
+          itemId: input.itemId,
+          movementType: 'RETURN',
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          unitCost: fromMinorUnits(effectiveReturnUnitCostUnits, COST_SCALE),
+          totalCost: fromMinorUnits(returnTotalUnits, COST_SCALE),
+          sourceType: 'PURCHASE_RETURN',
+          sourceId: input.returnId,
+          sourceLineId: input.returnLineId,
+          journalEntryId: input.journalEntryId ?? null,
+          reason: input.reason ?? 'مرتجع مشتريات بتكلفة الاستلام الأصلية',
+          costSource: 'GRN_SOURCE_PROVENANCE',
+          costingMethod: method,
+          createdBy: userId ?? null,
+        },
+        client
+      );
+
+      for (const alloc of allocated) {
+        await this.valuationRepo.createCostAllocation(
+          companyId,
+          {
+            valuationMovementId: movement.id,
+            costLayerId: alloc.layerId,
+            allocatedQty: fromMinorUnits(alloc.qtyUnits, QTY_SCALE),
+            unitCost: fromMinorUnits(alloc.unitCostUnits, COST_SCALE),
+            allocatedCost: fromMinorUnits(alloc.costUnits, COST_SCALE),
           },
           client
         );
@@ -307,70 +1750,681 @@ export class InventoryValuationService {
       return {
         balance,
         movement,
-        unitCost: effectiveUnitCost,
-        totalCost: totalIssuedCost,
+        unitCost: unitsToSafeNumber(effectiveReturnUnitCostUnits, COST_SCALE),
+        totalCost: unitsToSafeNumber(returnTotalUnits, COST_SCALE),
+        costingMethod: method,
       };
     };
 
     if (tx) {
       return await execute(tx);
-    } else {
-      return await withTenantTransaction(companyId, async (client) => {
-        return await execute(client);
-      });
     }
+    return await withTenantTransaction(companyId, execute);
   }
 
-  /**
-   * Process warehouse transfer preserving total value and cost lineage.
-   */
-  async processTransfer(
+  // =========================================================================
+  // Opening Valuation & Existing Company Setup Status
+  // =========================================================================
+
+  async getSetupStatus(companyId: string): Promise<ValuationSetupStatusSummary> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const unassignedItems = await this.valuationRepo.listUnassignedItems(companyId, tx);
+      const rowsRes = await tx.query<any>(
+        `SELECT
+           COALESCE(sb.warehouse_id, vb.warehouse_id, ov.warehouse_id) as "warehouseId",
+           w.code as "warehouseCode",
+           w.name_ar as "warehouseNameAr",
+           COALESCE(sb.item_id, vb.item_id, ov.item_id) as "itemId",
+           i.code as "itemCode",
+           i.name_ar as "itemNameAr",
+           cp.costing_method as "costingMethod",
+           cp.name as "profileName",
+           COALESCE(sb.qty, 0)::text as "stockQty",
+           COALESCE(vb.quantity, 0)::text as "valuationQty",
+           COALESCE(vb.total_cost, 0)::text as "valuationTotalCost",
+           ov.status as "openingStatus"
+         FROM inv_stock_balances sb
+         FULL OUTER JOIN inv_valuation_balances vb
+           ON vb.company_id = sb.company_id AND vb.warehouse_id = sb.warehouse_id AND vb.item_id = sb.item_id
+         LEFT JOIN LATERAL (
+           SELECT ov1.warehouse_id, ov1.item_id, ov1.status
+           FROM inv_opening_valuations ov1
+           WHERE ov1.company_id = COALESCE(sb.company_id, vb.company_id)
+             AND ov1.warehouse_id = COALESCE(sb.warehouse_id, vb.warehouse_id)
+             AND ov1.item_id = COALESCE(sb.item_id, vb.item_id)
+           ORDER BY CASE WHEN ov1.status = 'approved' THEN 0 WHEN ov1.status = 'pending_setup' THEN 1 ELSE 2 END, ov1.created_at DESC
+           LIMIT 1
+         ) ov ON true
+         JOIN inv_warehouses w
+           ON w.company_id = COALESCE(sb.company_id, vb.company_id) AND w.id = COALESCE(sb.warehouse_id, vb.warehouse_id)
+         JOIN inv_items i
+           ON i.company_id = COALESCE(sb.company_id, vb.company_id) AND i.id = COALESCE(sb.item_id, vb.item_id)
+         LEFT JOIN inv_item_costing_profiles icp
+           ON icp.company_id = i.company_id AND icp.item_id = i.id
+         LEFT JOIN inv_costing_profiles cp
+           ON cp.company_id = icp.company_id AND cp.id = icp.profile_id AND cp.is_active = true
+         WHERE COALESCE(sb.company_id, vb.company_id) = $1
+         ORDER BY w.code ASC, i.code ASC;`,
+        [companyId]
+      );
+
+      let readyCount = 0;
+      let blockedCount = 0;
+      const warehouseItemStatuses: ValuationSetupStatusItem[] = rowsRes.rows.map((r: any) => {
+        const stockQtyUnits = parseExactUnits(r.stockQty || '0', QTY_SCALE, 'stockQty');
+        const valQtyUnits = parseExactUnits(r.valuationQty || '0', QTY_SCALE, 'valQty');
+        const openingStatus = (r.openingStatus || 'not_created') as ValuationSetupStatusItem['openingStatus'];
+
+        let issueReason: string | null = null;
+        if (!r.costingMethod) {
+          issueReason = 'لم يتم تعيين ملف تكلفة للصنف';
+        } else if (stockQtyUnits !== valQtyUnits) {
+          issueReason =
+            openingStatus === 'pending_setup'
+              ? 'كمية المخزون لم تُعتمد قيمتها الافتتاحية بعد'
+              : 'يوجد رصيد مخزني بدون تقييم مطابق — يتطلب تقييماً افتتاحياً معتمداً';
+        }
+
+        const isReady = issueReason === null;
+        if (isReady) readyCount++;
+        else blockedCount++;
+
+        return {
+          warehouseId: r.warehouseId,
+          warehouseCode: r.warehouseCode,
+          warehouseNameAr: r.warehouseNameAr,
+          itemId: r.itemId,
+          itemCode: r.itemCode,
+          itemNameAr: r.itemNameAr,
+          costingMethod: r.costingMethod ?? null,
+          profileName: r.profileName ?? null,
+          stockQty: unitsToSafeNumber(stockQtyUnits, QTY_SCALE),
+          valuationQty: unitsToSafeNumber(valQtyUnits, QTY_SCALE),
+          valuationTotalCost: unitsToSafeNumber(parseExactUnits(r.valuationTotalCost || '0', COST_SCALE, 'valTotal'), COST_SCALE),
+          openingStatus,
+          isReady,
+          issueReason,
+        };
+      });
+
+      return {
+        companyId,
+        unassignedItems,
+        warehouseItemStatuses,
+        readyCount,
+        blockedCount,
+      };
+    });
+  }
+
+  async listOpeningValuations(companyId: string): Promise<OpeningValuationRecord[]> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listOpeningValuations(companyId);
+  }
+
+  async createOpeningValuation(
     companyId: string,
-    input: {
-      sourceWarehouseId: string;
-      destWarehouseId: string;
-      itemId: string;
-      qty: number;
-      sourceId: string;
-      sourceLineId?: string | null;
-    },
+    input: OpeningValuationInput,
     userId?: string
-  ): Promise<void> {
-    if (input.sourceWarehouseId === input.destWarehouseId) {
-      throw new ValidationError('مستودع المصدر ومستودع الوجهة لا يمكن أن يكونا متطابقين');
+  ): Promise<OpeningValuationRecord> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    if (!input.warehouseId || !input.itemId) {
+      throw new ValidationError('المستودع والصنف مطلوبان لتسجيل الرصيد الافتتاحي');
     }
 
-    await withTenantTransaction(companyId, async (client) => {
-      const issueResult = await this.processIssue(
+    const qtyUnits = parseExactUnits(input.quantity, QTY_SCALE, 'quantity');
+    if (qtyUnits <= 0n) {
+      throw new ValidationError('كمية الرصيد الافتتاحي يجب أن تكون أكبر من الصفر');
+    }
+
+    let totalCostUnits: bigint;
+    let unitCostUnits: bigint;
+    if (input.totalCost !== undefined && input.totalCost !== null) {
+      totalCostUnits = parseExactUnits(input.totalCost, COST_SCALE, 'totalCost');
+      if (totalCostUnits <= 0n) {
+        throw new ValidationError('التكلفة الإجمالية للرصيد الافتتاحي يجب أن تكون أكبر من الصفر');
+      }
+      unitCostUnits = divExactUnits(totalCostUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+    } else if (input.unitCost !== undefined && input.unitCost !== null) {
+      unitCostUnits = parseExactUnits(input.unitCost, COST_SCALE, 'unitCost');
+      if (unitCostUnits <= 0n) {
+        throw new ValidationError('تكلفة الوحدة للرصيد الافتتاحي يجب أن تكون أكبر من الصفر');
+      }
+      totalCostUnits = mulExactUnits(qtyUnits, QTY_SCALE, unitCostUnits, COST_SCALE, COST_SCALE);
+    } else {
+      throw new ValidationError('يجب تحديد التكلفة الإجمالية أو تكلفة الوحدة للرصيد الافتتاحي');
+    }
+
+    return await withTenantTransaction(companyId, async (tx) => {
+      const wh = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
+      if (!wh) throw new NotFoundError('المستودع المحدد غير موجود');
+      if (wh.isActive === false) throw new ValidationError('المستودع المحدد غير نشط');
+
+      const item = await this.itemRepo.findById(companyId, input.itemId, tx);
+      if (!item) throw new NotFoundError('الصنف المحدد غير موجود');
+      if (item.isActive === false) throw new ValidationError('الصنف المحدد غير نشط');
+
+      const { method } = await this.getItemCostingMethod(companyId, input.itemId, tx);
+
+      const existingApprovedRes = await tx.query<{ id: string }>(
+        `SELECT id FROM inv_opening_valuations WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND status = 'approved' LIMIT 1;`,
+        [companyId, input.warehouseId, input.itemId]
+      );
+      if (existingApprovedRes.rows.length > 0) {
+        throw new ValidationError('يوجد تقييم رصيد افتتاحي معتمد مسبقاً لهذا الصنف في هذا المستودع');
+      }
+
+      const record = await this.valuationRepo.createOpeningValuation(
         companyId,
         {
-          warehouseId: input.sourceWarehouseId,
+          warehouseId: input.warehouseId,
           itemId: input.itemId,
-          qty: input.qty,
-          sourceType: 'WAREHOUSE_TRANSFER',
-          sourceId: input.sourceId,
-          sourceLineId: input.sourceLineId,
-          movementType: 'TRANSFER_OUT',
+          costingMethod: method,
+          quantity: fromMinorUnits(qtyUnits, QTY_SCALE),
+          totalCost: fromMinorUnits(totalCostUnits, COST_SCALE),
+          unitCost: fromMinorUnits(unitCostUnits, COST_SCALE),
+          reason: input.reason ?? null,
+          evidenceRef: input.evidenceRef ?? null,
+          createdBy: userId ?? null,
         },
-        userId,
-        client
+        tx
       );
 
-      await this.processReceipt(
+      await this.auditService.record(
+        {
+          actorUserId: userId || null,
+          companyId,
+          action: 'CREATE_OPENING_VALUATION',
+          entityType: 'inv_opening_valuation',
+          entityId: record.id,
+          metadata: {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            quantity: record.quantity,
+            totalCost: record.totalCost,
+            costingMethod: method,
+          },
+        },
+        { executor: tx }
+      );
+
+      return record;
+    });
+  }
+
+  async approveOpeningValuation(
+    companyId: string,
+    openingId: string,
+    actorId: string,
+    isPlatformAdmin: boolean = false
+  ): Promise<OpeningValuationRecord> {
+    if (!companyId || !openingId || !actorId) {
+      throw new ValidationError('البيانات غير مكتملة لاعتماد التقييم الافتتاحي');
+    }
+
+    return await withTenantTransaction(companyId, async (tx) => {
+      const opening = await this.valuationRepo.findOpeningByIdForUpdate(companyId, openingId, tx);
+      if (!opening) throw new NotFoundError('سجل التقييم الافتتاحي غير موجود');
+      if (opening.status !== 'pending_setup') {
+        throw new ValidationError(`لا يمكن اعتماد سجل تقييم افتتاحي في حالة '${opening.status}'`);
+      }
+
+      const { method } = await this.getItemCostingMethod(companyId, opening.itemId, tx);
+      if (opening.costingMethod && opening.costingMethod !== method) {
+        throw new ValidationError('طريقة التكلفة الحالية للصنف تختلف عن الطريقة المسجلة في الرصيد الافتتاحي');
+      }
+
+      const qtyUnits = parseExactUnits(opening.quantity, QTY_SCALE, 'openingQty');
+      const totalCostUnits = parseExactUnits(opening.totalCost, COST_SCALE, 'openingTotalCost');
+      const unitCostUnits = parseExactUnits(opening.unitCost, COST_SCALE, 'openingUnitCost');
+
+      const curValBal = await this.valuationRepo.lockValuationBalanceForUpdate(
+        companyId,
+        opening.warehouseId,
+        opening.itemId,
+        tx
+      );
+      const curValQtyUnits = curValBal ? parseExactUnits(curValBal.quantity, QTY_SCALE, 'curValQty') : 0n;
+      if (curValQtyUnits > 0n) {
+        throw new ValidationError('لا يمكن اعتماد تقييم افتتاحي بعد وجود رصيد تقييم نشط لنفس الصنف والمستودع');
+      }
+
+      await this.stockRepo.ensureBalanceRow(companyId, opening.warehouseId, opening.itemId, tx);
+      const curStockBal = await this.stockRepo.getBalanceForUpdate(companyId, opening.warehouseId, opening.itemId, tx);
+      const curStockQtyUnits = curStockBal ? parseExactUnits(curStockBal.qty, QTY_SCALE, 'curStockQty') : 0n;
+
+      if (curStockQtyUnits > 0n && curStockQtyUnits !== qtyUnits) {
+        throw new ValidationError(
+          `كمية التقييم الافتتاحي (${fromMinorUnits(qtyUnits, QTY_SCALE)}) لا تطابق الكمية الفعلية الموجودة بالمستودع (${fromMinorUnits(curStockQtyUnits, QTY_SCALE)}).`
+        );
+      }
+
+      // Resolve & verify company settings GL accounts for opening valuation
+      const settings = await this.companySettingsRepo.getByCompanyId(companyId, tx);
+      const inventoryAccountId = settings?.inventoryAccountId || null;
+      const openingEquityAccountId = settings?.openingBalanceEquityAccountId || null;
+      if (!inventoryAccountId || !openingEquityAccountId) {
+        throw new ValidationError(
+          'إعدادات الحسابات المحاسبية للشركة غير مكتملة لاعتماد الرصيد الافتتاحي: يجب تحديد حساب المخزون وحساب رصيد أول المدة في إعدادات الشركة.'
+        );
+      }
+      if (inventoryAccountId === openingEquityAccountId) {
+        throw new ValidationError('حساب المخزون وحساب رصيد أول المدة لا يمكن أن يكونا نفس الحساب');
+      }
+
+      const invAccount = await this.accountRepo.findById(companyId, inventoryAccountId, tx);
+      if (!invAccount || !invAccount.isActive || !invAccount.isPostable || invAccount.accountType !== 'asset') {
+        throw new ValidationError('حساب المخزون المحدد في الإعدادات غير صالح أو غير قابل للترحيل');
+      }
+      const eqAccount = await this.accountRepo.findById(companyId, openingEquityAccountId, tx);
+      if (!eqAccount || !eqAccount.isActive || !eqAccount.isPostable) {
+        throw new ValidationError('حساب رصيد أول المدة المحدد في الإعدادات غير صالح أو غير قابل للترحيل');
+      }
+
+      const openingMoneyUnits = rescaleUnits(totalCostUnits, COST_SCALE, MONEY_SCALE);
+      const openingAmountNum = unitsToSafeNumber(openingMoneyUnits, MONEY_SCALE);
+      if (openingAmountNum <= 0) {
+        throw new ValidationError('القيمة المحاسبية للرصيد الافتتاحي يجب أن تكون أكبر من صفر');
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const journalService = await this.getJournalService();
+      const draftJe = await journalService.createDraftEntry(
         companyId,
         {
-          warehouseId: input.destWarehouseId,
-          itemId: input.itemId,
-          qty: input.qty,
-          unitCost: issueResult.unitCost,
-          sourceType: 'WAREHOUSE_TRANSFER',
-          sourceId: input.sourceId,
-          sourceLineId: input.sourceLineId,
-          movementType: 'TRANSFER_IN',
+          entryDate: today,
+          memo: `تقييم رصيد مخزني افتتاحي — ${opening.reason || openingId}`,
+          lines: [
+            {
+              accountId: inventoryAccountId,
+              debit: openingAmountNum,
+              credit: 0,
+              lineMemo: 'رصيد مخزون أول المدة',
+            },
+            {
+              accountId: openingEquityAccountId,
+              debit: 0,
+              credit: openingAmountNum,
+              lineMemo: 'مقابل رصيد أول المدة للمخزون',
+            },
+          ],
         },
-        userId,
-        client
+        actorId,
+        isPlatformAdmin,
+        tx
       );
+      const postedJe = await journalService.postEntry(companyId, draftJe.id, actorId, isPlatformAdmin, tx);
+
+      // Sync stock balance only if stock was 0; if pre-existing unvalued stock equaled qtyUnits, keep stock qty as-is
+      if (curStockQtyUnits === 0n) {
+        await this.stockRepo.incrementBalance(
+          companyId,
+          opening.warehouseId,
+          opening.itemId,
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          tx
+        );
+        await this.stockRepo.createMovement(
+          companyId,
+          opening.warehouseId,
+          opening.itemId,
+          'opening',
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          opening.reason || 'اعتماد الرصيد الافتتاحي المقيّم',
+          actorId,
+          undefined,
+          tx
+        );
+      }
+
+      if (method === 'FIFO') {
+        await this.valuationRepo.createCostLayer(
+          companyId,
+          {
+            warehouseId: opening.warehouseId,
+            itemId: opening.itemId,
+            originalQty: fromMinorUnits(qtyUnits, QTY_SCALE),
+            unitCost: fromMinorUnits(unitCostUnits, COST_SCALE),
+            totalCost: fromMinorUnits(totalCostUnits, COST_SCALE),
+            sourceType: 'OPENING_VALUATION',
+            sourceId: opening.id,
+            sourceLineId: null,
+            originSourceType: 'OPENING_VALUATION',
+            originSourceId: opening.id,
+            originSourceLineId: null,
+          },
+          tx
+        );
+      }
+
+      await this.valuationRepo.setValuationBalanceExact(
+        companyId,
+        opening.warehouseId,
+        opening.itemId,
+        fromMinorUnits(qtyUnits, QTY_SCALE),
+        fromMinorUnits(totalCostUnits, COST_SCALE),
+        fromMinorUnits(unitCostUnits, COST_SCALE),
+        tx
+      );
+
+      const movement = await this.valuationRepo.createValuationMovement(
+        companyId,
+        {
+          warehouseId: opening.warehouseId,
+          itemId: opening.itemId,
+          movementType: 'OPENING',
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          unitCost: fromMinorUnits(unitCostUnits, COST_SCALE),
+          totalCost: fromMinorUnits(totalCostUnits, COST_SCALE),
+          sourceType: 'OPENING_VALUATION',
+          sourceId: opening.id,
+          sourceLineId: null,
+          journalEntryId: postedJe.id,
+          reason: opening.reason ?? null,
+          costSource: 'OPENING_VALUATION_APPROVED',
+          costingMethod: method,
+          createdBy: actorId,
+        },
+        tx
+      );
+
+      const approved = await this.valuationRepo.markOpeningApproved(
+        companyId,
+        opening.id,
+        actorId,
+        postedJe.id,
+        movement.id,
+        tx
+      );
+
+      await this.auditService.record(
+        {
+          actorUserId: actorId,
+          companyId,
+          action: 'APPROVE_OPENING_VALUATION',
+          entityType: 'inv_opening_valuation',
+          entityId: opening.id,
+          metadata: {
+            warehouseId: opening.warehouseId,
+            itemId: opening.itemId,
+            journalEntryId: postedJe.id,
+            valuationMovementId: movement.id,
+            totalCost: approved.totalCost,
+          },
+        },
+        { executor: tx }
+      );
+
+      return approved;
+    });
+  }
+
+  async rejectOpeningValuation(
+    companyId: string,
+    openingId: string,
+    rejectionReason: string,
+    actorId: string
+  ): Promise<OpeningValuationRecord> {
+    if (!companyId || !openingId || !rejectionReason?.trim()) {
+      throw new ValidationError('سبب الرفض مطلوب لرفض التقييم الافتتاحي');
+    }
+
+    return await withTenantTransaction(companyId, async (tx) => {
+      const opening = await this.valuationRepo.findOpeningByIdForUpdate(companyId, openingId, tx);
+      if (!opening) throw new NotFoundError('سجل التقييم الافتتاحي غير موجود');
+      if (opening.status !== 'pending_setup') {
+        throw new ValidationError(`لا يمكن رفض سجل تقييم افتتاحي في حالة '${opening.status}'`);
+      }
+
+      const rejected = await this.valuationRepo.markOpeningRejected(
+        companyId,
+        openingId,
+        actorId,
+        rejectionReason.trim(),
+        tx
+      );
+
+      await this.auditService.record(
+        {
+          actorUserId: actorId,
+          companyId,
+          action: 'REJECT_OPENING_VALUATION',
+          entityType: 'inv_opening_valuation',
+          entityId: openingId,
+          metadata: { rejectionReason: rejectionReason.trim() },
+        },
+        { executor: tx }
+      );
+
+      return rejected;
+    });
+  }
+
+  // =========================================================================
+  // Inventory-to-GL Reconciliation (Auditable, zero automatic balancing JEs)
+  // =========================================================================
+
+  async listReconciliations(companyId: string): Promise<ValuationReconciliationRecord[]> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    return await this.valuationRepo.listReconciliations(companyId);
+  }
+
+  async runReconciliation(
+    companyId: string,
+    input: ValuationReconciliationInput,
+    actorId?: string
+  ): Promise<ValuationReconciliationRecord> {
+    if (!companyId) throw new ValidationError('companyId is required');
+
+    return await withTenantTransaction(companyId, async (tx) => {
+      const settings = await this.companySettingsRepo.getByCompanyId(companyId, tx);
+      const inventoryAccountId = settings?.inventoryAccountId || null;
+      if (!inventoryAccountId) {
+        throw new ValidationError('يجب تحديد حساب المخزون في إعدادات الشركة قبل تشغيل تسوية المخزون مع الأستاذ العام');
+      }
+
+      let periodEndDate: string | null = null;
+      if (input.periodId) {
+        const periodRes = await tx.query<{ end_date: string }>(
+          `SELECT end_date::text as end_date FROM accounting_periods WHERE company_id = $1 AND id = $2;`,
+          [companyId, input.periodId]
+        );
+        if (periodRes.rows.length === 0) {
+          throw new NotFoundError('الفترة المحاسبية المحددة غير موجودة');
+        }
+        periodEndDate = periodRes.rows[0].end_date;
+      }
+
+      // 1. Subledger Valuation Total (filtered cleanly by warehouse/item/costingMethod)
+      const subClauses = ['vb.company_id = $1'];
+      const subParams: any[] = [companyId];
+      if (input.warehouseId) {
+        subParams.push(input.warehouseId);
+        subClauses.push(`vb.warehouse_id = $${subParams.length}`);
+      }
+      if (input.itemId) {
+        subParams.push(input.itemId);
+        subClauses.push(`vb.item_id = $${subParams.length}`);
+      }
+      if (input.costingMethod) {
+        subParams.push(input.costingMethod);
+        subClauses.push(`cp.costing_method = $${subParams.length}`);
+      }
+      const subRes = await tx.query<{ total: string }>(
+        `SELECT COALESCE(SUM(vb.total_cost), 0)::text as total
+         FROM inv_valuation_balances vb
+         LEFT JOIN inv_item_costing_profiles icp ON icp.company_id = vb.company_id AND icp.item_id = vb.item_id
+         LEFT JOIN inv_costing_profiles cp ON cp.company_id = icp.company_id AND cp.id = icp.profile_id
+         WHERE ${subClauses.join(' AND ')};`,
+        subParams
+      );
+      const subledgerTotalUnits = parseExactUnits(subRes.rows[0]?.total || '0', COST_SCALE, 'subledgerTotal');
+
+      // 2. GL Control Account Net Posted Balance (Debit - Credit)
+      const glRes = await tx.query<{ netBalance: string }>(
+        `SELECT COALESCE(SUM(l.debit - l.credit), 0)::text as "netBalance"
+         FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.entry_id AND e.company_id = l.company_id
+         WHERE l.company_id = $1
+           AND l.account_id = $2
+           AND e.status = 'posted'
+           AND ($3::date IS NULL OR e.entry_date <= $3::date);`,
+        [companyId, inventoryAccountId, periodEndDate]
+      );
+      const glControlTotalUnits = parseExactUnits(glRes.rows[0]?.netBalance || '0', COST_SCALE, 'glControlTotal');
+      const varianceUnits = subledgerTotalUnits - glControlTotalUnits;
+
+      // 3. Unmatched non-transfer valuation movements (missing journal link)
+      const unmatchedRes = await tx.query<{ cnt: number }>(
+        `SELECT COUNT(*)::int as cnt
+         FROM inv_valuation_movements
+         WHERE company_id = $1
+           AND movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN')
+           AND journal_entry_id IS NULL;`,
+        [companyId]
+      );
+      const unmatchedMovementsCount = Number(unmatchedRes.rows[0]?.cnt || 0);
+
+      // 4. Unbalanced PPV/cost adjustments or missing journal link
+      const adjMismatchRes = await tx.query<{ cnt: number }>(
+        `SELECT COUNT(*)::int as cnt
+         FROM inv_cost_adjustments
+         WHERE company_id = $1
+           AND (
+             (remaining_allocation + consumed_allocation) <> adjustment_amount
+             OR (status = 'posted' AND journal_entry_id IS NULL)
+           );`,
+        [companyId]
+      );
+      const unbalancedAdjustmentsCount = Number(adjMismatchRes.rows[0]?.cnt || 0);
+
+      // 5. Duplicate journal links across distinct sources
+      const dupRes = await tx.query<{ cnt: number }>(
+        `SELECT (
+           (SELECT COUNT(*)::int FROM (
+             SELECT journal_entry_id
+             FROM inv_valuation_movements
+             WHERE company_id = $1 AND journal_entry_id IS NOT NULL
+             GROUP BY journal_entry_id
+             HAVING COUNT(DISTINCT source_id) > 1
+           ) x)
+           +
+           (SELECT COUNT(*)::int FROM (
+             SELECT journal_entry_id
+             FROM inv_cost_adjustments
+             WHERE company_id = $1 AND journal_entry_id IS NOT NULL
+             GROUP BY journal_entry_id
+             HAVING COUNT(DISTINCT invoice_id) > 1
+           ) y)
+         )::int as cnt;`,
+        [companyId]
+      );
+      const duplicateJournalLinksCount = Number(dupRes.rows[0]?.cnt || 0);
+
+      // 6. Qty vs Valuation Qty vs FIFO Layer Sum Mismatches
+      const qtyMismatchRes = await tx.query<{ cnt: number }>(
+        `SELECT COUNT(*)::int as cnt
+         FROM inv_stock_balances sb
+         FULL OUTER JOIN inv_valuation_balances vb
+           ON vb.company_id = sb.company_id AND vb.warehouse_id = sb.warehouse_id AND vb.item_id = sb.item_id
+         LEFT JOIN inv_item_costing_profiles icp
+           ON icp.company_id = COALESCE(sb.company_id, vb.company_id) AND icp.item_id = COALESCE(sb.item_id, vb.item_id)
+         LEFT JOIN inv_costing_profiles cp
+           ON cp.company_id = icp.company_id AND cp.id = icp.profile_id
+         LEFT JOIN (
+           SELECT company_id, warehouse_id, item_id, COALESCE(SUM(remaining_qty), 0) as layer_qty
+           FROM inv_cost_layers
+           WHERE company_id = $1 AND is_exhausted = false AND remaining_qty > 0
+           GROUP BY company_id, warehouse_id, item_id
+         ) cl
+           ON cl.company_id = COALESCE(sb.company_id, vb.company_id)
+          AND cl.warehouse_id = COALESCE(sb.warehouse_id, vb.warehouse_id)
+          AND cl.item_id = COALESCE(sb.item_id, vb.item_id)
+         WHERE COALESCE(sb.company_id, vb.company_id) = $1
+           AND (
+             COALESCE(sb.qty, 0) <> COALESCE(vb.quantity, 0)
+             OR (cp.costing_method = 'FIFO' AND COALESCE(vb.quantity, 0) <> COALESCE(cl.layer_qty, 0))
+           );`,
+        [companyId]
+      );
+      const qtyValuationMismatchesCount = Number(qtyMismatchRes.rows[0]?.cnt || 0);
+
+      // 7. Opening balance difference (approved opening total vs posted GL opening entries linked to openings)
+      const openingDiffRes = await tx.query<{ diff: string }>(
+        `WITH openings AS (
+           SELECT COALESCE(SUM(total_cost), 0) as sub_open,
+                  ARRAY_AGG(journal_entry_id) FILTER (WHERE journal_entry_id IS NOT NULL) as je_ids
+           FROM inv_opening_valuations
+           WHERE company_id = $1 AND status = 'approved'
+         ),
+         gl_open AS (
+           SELECT COALESCE(SUM(l.debit - l.credit), 0) as gl_open
+           FROM journal_lines l
+           JOIN openings o ON l.entry_id = ANY(o.je_ids)
+           WHERE l.company_id = $1 AND l.account_id = $2
+         )
+         SELECT (o.sub_open - g.gl_open)::text as diff FROM openings o, gl_open g;`,
+        [companyId, inventoryAccountId]
+      );
+      const openingDiffUnits = parseExactUnits(openingDiffRes.rows[0]?.diff || '0', COST_SCALE, 'openingDiff');
+
+      const hasScopedFilter = Boolean(input.warehouseId || input.itemId || input.costingMethod);
+      const isReconciled =
+        varianceUnits === 0n &&
+        unmatchedMovementsCount === 0 &&
+        unbalancedAdjustmentsCount === 0 &&
+        duplicateJournalLinksCount === 0 &&
+        qtyValuationMismatchesCount === 0 &&
+        openingDiffUnits === 0n;
+
+      const record = await this.valuationRepo.saveReconciliation(
+        companyId,
+        {
+          warehouseId: input.warehouseId ?? null,
+          itemId: input.itemId ?? null,
+          costingMethod: input.costingMethod ?? null,
+          periodId: input.periodId ?? null,
+          accountId: inventoryAccountId,
+          subledgerTotal: fromMinorUnits(subledgerTotalUnits, COST_SCALE),
+          glControlTotal: fromMinorUnits(glControlTotalUnits, COST_SCALE),
+          variance: fromMinorUnits(varianceUnits, COST_SCALE),
+          status: isReconciled ? 'reconciled' : 'discrepancy_detected',
+          unmatchedMovementsCount,
+          unbalancedAdjustmentsCount,
+          duplicateJournalLinksCount,
+          qtyValuationMismatchesCount,
+          openingDiff: fromMinorUnits(openingDiffUnits, COST_SCALE),
+          details: {
+            scopedFilterApplied: hasScopedFilter,
+            periodEndDate,
+          },
+          notes: input.notes ?? (hasScopedFilter ? 'تسوية مرشّحة لمستودع/صنف محدد مقارنة بإجمالي حساب المخزون' : null),
+          reconciledBy: actorId ?? null,
+        },
+        tx
+      );
+
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'RUN_INVENTORY_GL_RECONCILIATION',
+          entityType: 'inv_valuation_reconciliation',
+          entityId: record.id,
+          metadata: {
+            status: record.status,
+            subledgerTotal: record.subledgerTotal,
+            glControlTotal: record.glControlTotal,
+            variance: record.variance,
+            qtyValuationMismatchesCount,
+            unmatchedMovementsCount,
+          },
+        },
+        { executor: tx }
+      );
+
+      return record;
     });
   }
 }

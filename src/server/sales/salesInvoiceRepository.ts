@@ -125,6 +125,8 @@ function mapHeaderRow(row: any): SalesInvoice {
     totalAmount,
     netAmount: subtotal,
     grossAmount,
+    cogsAmount: row.cogs_amount !== undefined && row.cogs_amount !== null ? toMoney(row.cogs_amount) : undefined,
+    cogsPostedAt: row.cogs_posted_at ? (row.cogs_posted_at instanceof Date ? row.cogs_posted_at.toISOString() : String(row.cogs_posted_at)) : null,
     memo: row.memo || null,
     journalEntryId: row.journal_entry_id || null,
     journalEntryNo: row.journal_entry_no || null,
@@ -156,6 +158,7 @@ function mapLineRow(row: any): SalesInvoiceLine {
     taxAmount: toMoney(fromMinorUnits(taxAmountUnits, MONEY_SCALE)),
     lineTotal: toMoney(fromMinorUnits(lineTotalUnits, MONEY_SCALE)),
     netAmount: toMoney(fromMinorUnits(netUnits, MONEY_SCALE)),
+    cogsCost: row.cogs_cost !== undefined && row.cogs_cost !== null ? toMoney(row.cogs_cost) : undefined,
     lineNo: parseInt(row.line_no, 10) || 1,
   };
 }
@@ -166,7 +169,7 @@ export class SalesInvoiceRepository {
       const sql = `
         SELECT 
           i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date, i.due_date,
-          i.status, i.subtotal, i.tax_amount, i.total_amount, i.memo, i.journal_entry_id,
+          i.status, i.subtotal, i.tax_amount, i.total_amount, i.cogs_amount, i.cogs_posted_at, i.memo, i.journal_entry_id,
           i.posted_at, i.posted_by, i.created_by, i.created_at, i.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           d.delivery_no as delivery_no,
@@ -191,7 +194,7 @@ export class SalesInvoiceRepository {
       const headerSql = `
         SELECT 
           i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date, i.due_date,
-          i.status, i.subtotal, i.tax_amount, i.total_amount, i.memo, i.journal_entry_id,
+          i.status, i.subtotal, i.tax_amount, i.total_amount, i.cogs_amount, i.cogs_posted_at, i.memo, i.journal_entry_id,
           i.posted_at, i.posted_by, i.created_by, i.created_at, i.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           d.delivery_no as delivery_no,
@@ -210,7 +213,7 @@ export class SalesInvoiceRepository {
       const linesSql = `
         SELECT 
           l.id, l.invoice_id, l.company_id, l.item_id, l.delivery_line_id, l.qty, l.unit_price,
-          l.tax_rate, l.tax_amount, l.line_total, l.line_no,
+          l.tax_rate, l.tax_amount, l.line_total, l.cogs_cost, l.line_no,
           i.code as item_code, i.name_ar as item_name_ar, i.uom as item_uom
         FROM sales_invoice_lines l
         INNER JOIN inv_items i ON i.id = l.item_id AND i.company_id = l.company_id

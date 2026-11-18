@@ -7,6 +7,8 @@ import { SalesDeliveryNote, CreateDeliveryInput } from './salesTypes.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
+import { defaultInventoryValuationService } from '../inventory/inventoryValuationService.js';
+import { toDecimal } from '../lib/numeric.js';
 
 export class SalesDeliveryService {
   constructor(
@@ -109,22 +111,26 @@ export class SalesDeliveryService {
 
       const deliveryNo = await this.journalRepo.allocateSequenceNumber(companyId, 'sales_delivery', 'DLV', tx);
 
-      // Verify stock balances under lock and decrement
+      // Coordinated atomic stock decrement + stock movement + valuation issue + immutable cost snapshot
       for (const line of note.lines) {
-        const balance = await this.stockRepo.getBalanceForUpdate(companyId, note.warehouseId, line.itemId, tx);
-        const availableQty = balance ? balance.qty : 0;
-
-        if (availableQty < line.qty) {
+        const curStock = await this.stockRepo.getBalanceForUpdate(companyId, note.warehouseId, line.itemId, tx);
+        const currentQty = toDecimal(curStock?.qty ?? 0, 4);
+        const reqQty = toDecimal(line.qty, 4);
+        if (currentQty < reqQty) {
           throw new ValidationError(
-            `الكمية المطلوبة للصرف للبند '${line.itemNameAr || line.itemId}' (${line.qty}) تتجاوز الرصيد المتاح بالمستودع (${availableQty})`
+            `رصيد غير كافٍ في المستودع للصنف (${line.itemNameAr || line.itemId}). المتاح: ${currentQty}، المطلوب للتسليم: ${reqQty}.`
           );
         }
 
-        const decremented = await this.stockRepo.decrementBalance(companyId, note.warehouseId, line.itemId, line.qty, tx);
+        const decremented = await this.stockRepo.decrementBalance(
+          companyId,
+          note.warehouseId,
+          line.itemId,
+          reqQty,
+          tx
+        );
         if (!decremented) {
-          throw new ValidationError(
-            `الرصيد بالمستودع غير كافٍ للصرف للبند '${line.itemNameAr || line.itemId}'`
-          );
+          throw new ValidationError('رصيد غير كافٍ في المستودع لإتمام عملية التسليم');
         }
 
         await this.stockRepo.createMovement(
@@ -132,11 +138,42 @@ export class SalesDeliveryService {
           note.warehouseId,
           line.itemId,
           'issue',
-          line.qty,
-          `صرف مبيعات إذن تسليم رقم ${deliveryNo} (عميل: ${note.customerNameAr || note.customerId})`,
+          reqQty,
+          `تسليم مبيعات إذن رقم ${deliveryNo}`,
           actorUserId,
           undefined,
           tx
+        );
+
+        const issueResult = await defaultInventoryValuationService.processIssue(
+          companyId,
+          {
+            warehouseId: note.warehouseId,
+            itemId: line.itemId,
+            qty: reqQty,
+            sourceType: 'SALES_DELIVERY',
+            sourceId: id,
+            sourceLineId: line.id,
+            movementType: 'ISSUE',
+            reason: `تسليم مبيعات إذن رقم ${deliveryNo}`,
+            costSource: 'SYSTEM_VALUATION',
+            stockSyncMode: 'external_verified',
+            expectedPreStockQty: currentQty,
+          },
+          actorUserId,
+          tx
+        );
+
+        const valMovId = (issueResult as any)?.movement?.id ?? null;
+        const frozenTotalCost = toDecimal(issueResult?.totalCost ?? 0, 4);
+        const frozenUnitCost = toDecimal(issueResult?.unitCost ?? 0, 4);
+
+        // Store immutable server-frozen cost snapshot and valuation movement reference
+        await tx.query(
+          `UPDATE sales_delivery_lines
+           SET unit_cost = $1, frozen_total_cost = $2, valuation_movement_id = $3
+           WHERE company_id = $4 AND id = $5`,
+          [frozenUnitCost, frozenTotalCost, valMovId, companyId, line.id]
         );
       }
 

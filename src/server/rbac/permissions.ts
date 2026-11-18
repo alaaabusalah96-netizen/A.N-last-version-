@@ -36,10 +36,15 @@ export const PERMISSIONS = {
   COMPANY_SETTINGS_READ: 'company:settings:read',
   COMPANY_SETTINGS_WRITE: 'company:settings:write',
 
-  // Inventory Core permissions
+  // Inventory Core & Valuation permissions
   INVENTORY_READ: 'inventory:read',
   INVENTORY_WRITE: 'inventory:write',
   INVENTORY_MOVEMENT: 'inventory:movement',
+  INVENTORY_COSTING_PROFILE_WRITE: 'inventory:costing_profile:write',
+  INVENTORY_COSTING_ASSIGN: 'inventory:costing:assign',
+  INVENTORY_OPENING_APPROVE: 'inventory:opening:approve',
+  INVENTORY_VALUATION_ADJUST: 'inventory:valuation:adjust',
+  INVENTORY_VALUATION_RECONCILE: 'inventory:valuation:reconcile',
 
   // Purchasing Core permissions
   PURCHASING_READ: 'purchasing:read',
@@ -97,10 +102,15 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.ACCOUNTING_JOURNALS_WRITE, labelAr: 'إنشاء وتعديل مسودات القيود', group: 'المحاسبة' },
   { code: PERMISSIONS.ACCOUNTING_JOURNALS_POST, labelAr: 'ترحيل القيود المحاسبية', group: 'المحاسبة' },
 
-  // المخزون
+  // المخزون والتقييم
   { code: PERMISSIONS.INVENTORY_READ, labelAr: 'عرض المستودعات والأصناف والأرصدة', group: 'المخزون' },
   { code: PERMISSIONS.INVENTORY_WRITE, labelAr: 'إنشاء وتعديل المستودعات والأصناف', group: 'المخزون' },
   { code: PERMISSIONS.INVENTORY_MOVEMENT, labelAr: 'تنفيذ حركات المخزون (استلام/صرف/تحويل)', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_COSTING_PROFILE_WRITE, labelAr: 'إدارة ملفات طرق تقييم المخزون', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_COSTING_ASSIGN, labelAr: 'تعيين طريقة تقييم التكلفة للأصناف', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_OPENING_APPROVE, labelAr: 'اعتماد ورفض الأرصدة الافتتاحية المقيّمة', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_VALUATION_ADJUST, labelAr: 'إجراء التسويات المخزنية المالية والإتلاف', group: 'المخزون' },
+  { code: PERMISSIONS.INVENTORY_VALUATION_RECONCILE, labelAr: 'تنفيذ مطابقة تقييم المخزون مع الأستاذ العام', group: 'المخزون' },
 
   // المشتريات
   { code: PERMISSIONS.PURCHASING_READ, labelAr: 'عرض الموردين وسندات الاستلام (GRN)', group: 'المشتريات' },

@@ -63,9 +63,13 @@ function mapInvoiceLine(row: any): SupplierInvoiceLine {
 
 export interface LockedGrnLineSummary {
   grnLineId: string;
+  grnId: string;
   grnQty: string;
+  grnUnitCost: string;
   grnStatus: string;
   grnSupplierId: string;
+  warehouseId: string;
+  itemId: string;
   postedQty: string;
 }
 
@@ -240,9 +244,13 @@ export class InvoiceRepository {
     const lockSql = `
       SELECT
         gl.id as "grnLineId",
+        gl.grn_id as "grnId",
         gl.qty::text as "grnQty",
+        COALESCE(gl.unit_cost, 0)::text as "grnUnitCost",
         g.status as "grnStatus",
-        g.supplier_id as "grnSupplierId"
+        g.supplier_id as "grnSupplierId",
+        g.warehouse_id as "warehouseId",
+        gl.item_id as "itemId"
       FROM purch_grn_lines gl
       INNER JOIN purch_grn g ON g.id = gl.grn_id AND g.company_id = gl.company_id
       WHERE gl.company_id = $1 AND gl.id = ANY($2::uuid[])
@@ -251,9 +259,13 @@ export class InvoiceRepository {
     `;
     const lockedRes = await tx.query<{
       grnLineId: string;
+      grnId: string;
       grnQty: string;
+      grnUnitCost: string;
       grnStatus: string;
       grnSupplierId: string;
+      warehouseId: string;
+      itemId: string;
     }>(lockSql, [companyId, uniqueSortedIds]);
 
     const postedSql = `
@@ -281,9 +293,13 @@ export class InvoiceRepository {
     for (const row of lockedRes.rows) {
       result.set(row.grnLineId, {
         grnLineId: row.grnLineId,
+        grnId: row.grnId,
         grnQty: row.grnQty,
+        grnUnitCost: row.grnUnitCost,
         grnStatus: row.grnStatus,
         grnSupplierId: row.grnSupplierId,
+        warehouseId: row.warehouseId,
+        itemId: row.itemId,
         postedQty: postedByLine.get(row.grnLineId) || '0',
       });
     }

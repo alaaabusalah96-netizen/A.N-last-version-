@@ -48,7 +48,18 @@ export interface StockBalance {
   updatedAt: string;
 }
 
-export type MovementType = 'receive' | 'issue' | 'transfer_out' | 'transfer_in' | 'transfer' | 'purchase_return';
+export type MovementType =
+  | 'receive'
+  | 'issue'
+  | 'transfer_out'
+  | 'transfer_in'
+  | 'transfer'
+  | 'purchase_return'
+  | 'adjustment'
+  | 'write_off'
+  | 'damage'
+  | 'internal_consumption'
+  | 'opening';
 
 export interface StockMovement {
   id: string;
@@ -71,7 +82,29 @@ export interface RecordMovementInput {
   warehouseId: string;
   itemId: string;
   qty: number;
+  unitCost?: number;
+  costSource?: string;
+  reason?: string;
   memo?: string;
+  entryDate?: string;
+  expenseAccountId?: string;
+}
+
+export type StockAdjustmentKind = 'adjustment' | 'write_off' | 'damage' | 'internal_consumption';
+export type StockAdjustmentDirection = 'increase' | 'decrease';
+
+export interface StockAdjustmentInput {
+  warehouseId: string;
+  itemId: string;
+  adjustmentType: StockAdjustmentKind;
+  direction: StockAdjustmentDirection;
+  qty: number;
+  unitCost?: number;
+  costSource?: string;
+  reason: string;
+  memo?: string;
+  entryDate?: string;
+  expenseAccountId?: string;
 }
 
 export interface TransferInput {

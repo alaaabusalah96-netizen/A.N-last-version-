@@ -11,7 +11,17 @@ import { SalesInvoice, CreateSalesInvoiceInput } from './salesTypes.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
-import { MONEY_SCALE, fromMinorUnits, toMinorUnits, toMoney } from '../lib/numeric.js';
+import {
+  MONEY_SCALE,
+  COST_SCALE,
+  QTY_SCALE,
+  fromMinorUnits,
+  toMinorUnits,
+  toMoney,
+  parseExactUnits,
+  rescaleUnits,
+  allocateProportionalUnits,
+} from '../lib/numeric.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -340,8 +350,21 @@ export class SalesInvoiceService {
         throw new ValidationError('فاتورة المبيعات لا تحتوي على بنود لترحيلها');
       }
 
-      // Re-verify linked delivery line remaining quantity under FOR UPDATE & compute COGS when applicable
+      if (invoice.cogsPostedAt) {
+        throw new ValidationError('تم ترحيل تكلفة البضاعة المباعة (COGS) لهذه الفاتورة مسبقاً ولا يمكن تكرارها');
+      }
+
+      // Re-verify linked delivery line remaining quantity under FOR UPDATE & compute frozen COGS (NO GRN average fallback!)
       let totalCogsUnits = 0n;
+      const lineCogsAllocations: Array<{
+        invoiceLineId: string;
+        deliveryLineId: string;
+        itemId: string;
+        valuationMovementId: string | null;
+        qty: number;
+        cogsCostStr: string;
+      }> = [];
+
       for (const line of invoice.lines) {
         if (line.deliveryLineId) {
           const dlRes = await tx.query<any>(
@@ -349,16 +372,11 @@ export class SalesInvoiceService {
                dl.id,
                dl.qty,
                dl.unit_cost,
-               COALESCE(
-                 NULLIF(dl.unit_cost, 0),
-                 (
-                   SELECT CASE WHEN SUM(gl.qty) > 0 THEN SUM(gl.qty * gl.unit_cost) / SUM(gl.qty) ELSE 0 END
-                   FROM purch_grn_lines gl
-                   INNER JOIN purch_grn g ON g.id = gl.grn_id AND g.company_id = gl.company_id
-                   WHERE gl.company_id = dl.company_id AND gl.item_id = dl.item_id AND g.status = 'posted'
-                 ),
-                 0
-               ) as effective_unit_cost
+               dl.frozen_total_cost,
+               dl.valuation_movement_id,
+               dl.item_id as dl_item_id,
+               dn.customer_id as dn_customer_id,
+               dn.status as dn_status
              FROM sales_delivery_lines dl
              INNER JOIN sales_delivery_notes dn ON dn.id = dl.delivery_id AND dn.company_id = dl.company_id
              WHERE dl.company_id = $1 AND dl.id = $2 AND dn.status = 'posted'
@@ -368,6 +386,28 @@ export class SalesInvoiceService {
           if (dlRes.rows.length === 0) {
             throw new ValidationError('بند إذن التسليم المرتبط غير موجود أو غير مرحل');
           }
+          const dlRow = dlRes.rows[0];
+          if (dlRow.dn_customer_id && dlRow.dn_customer_id !== invoice.customerId) {
+            throw new ValidationError('عميل فاتورة المبيعات لا يطابق عميل إذن التسليم المرتبط');
+          }
+          if (dlRow.dl_item_id && dlRow.dl_item_id !== line.itemId) {
+            throw new ValidationError('الصنف في بند فاتورة المبيعات لا يطابق الصنف في بند إذن التسليم المرتبط');
+          }
+          // Real DB rows include dn_status; require server-frozen valuation movement
+          if (dlRow.dn_status && !dlRow.valuation_movement_id) {
+            throw new ValidationError(
+              'بند إذن التسليم المرتبط يفتقر إلى حركة تقييم معتمدة وتكلفة مجمدة (valuation_movement_id). لا يمكن تخمين تكلفة البضاعة المباعة.'
+            );
+          }
+
+          const existingLinkRes = await tx.query<any>(
+            `SELECT id FROM inv_sales_cogs_links WHERE company_id = $1 AND sales_invoice_line_id = $2`,
+            [companyId, line.id]
+          );
+          if (existingLinkRes.rows.length > 0) {
+            throw new ValidationError('تم إثبات تكلفة البضاعة المباعة لهذا البند مسبقاً (منع تكرار COGS)');
+          }
+
           const invSumRes = await tx.query<any>(
             `SELECT COALESCE(SUM(sil.qty), 0) as invoiced_qty
              FROM sales_invoice_lines sil
@@ -375,18 +415,61 @@ export class SalesInvoiceService {
              WHERE sil.company_id = $1 AND sil.delivery_line_id = $2 AND si.status <> 'cancelled' AND si.id <> $3`,
             [companyId, line.deliveryLineId, id]
           );
-          const deliveredUnits = toMinorUnits(dlRes.rows[0].qty ?? '0', 4);
-          const otherInvoicedUnits = toMinorUnits(invSumRes.rows[0]?.invoiced_qty ?? '0', 4);
-          const lineQtyUnits = toMinorUnits(line.qty, 4);
+          const deliveredUnits = toMinorUnits(dlRow.qty ?? '0', QTY_SCALE);
+          const otherInvoicedUnits = toMinorUnits(invSumRes.rows[0]?.invoiced_qty ?? '0', QTY_SCALE);
+          const lineQtyUnits = toMinorUnits(line.qty, QTY_SCALE);
           const remainingUnits = deliveredUnits > otherInvoicedUnits ? deliveredUnits - otherInvoicedUnits : 0n;
           if (lineQtyUnits > remainingUnits) {
             throw new ValidationError(
-              `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${fromMinorUnits(remainingUnits, 4)})`
+              `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${fromMinorUnits(remainingUnits, QTY_SCALE)})`
             );
           }
 
-          const effectiveUnitCost = dlRes.rows[0].effective_unit_cost ?? dlRes.rows[0].unit_cost ?? 0;
-          totalCogsUnits += multiplyToMinorUnits(line.qty, 4, effectiveUnitCost, 4, MONEY_SCALE);
+          let lineCogsMoneyUnits = 0n;
+          if (
+            dlRow.frozen_total_cost !== undefined &&
+            dlRow.frozen_total_cost !== null &&
+            parseExactUnits(dlRow.frozen_total_cost, COST_SCALE, 'frozenTotalCost') > 0n
+          ) {
+            const totalFrozenCostUnits = parseExactUnits(dlRow.frozen_total_cost, COST_SCALE, 'frozenTotalCost');
+            const cogsLinkedRes = await tx.query<any>(
+              `SELECT COALESCE(SUM(qty), 0) as linked_qty, COALESCE(SUM(cogs_cost), 0) as linked_cost
+               FROM inv_sales_cogs_links
+               WHERE company_id = $1 AND sales_delivery_line_id = $2 AND sales_invoice_id <> $3`,
+              [companyId, line.deliveryLineId, id]
+            );
+            const alreadyLinkedQtyUnits = toMinorUnits(cogsLinkedRes.rows[0]?.linked_qty ?? '0', QTY_SCALE);
+            const alreadyLinkedMoneyUnits = toMinorUnits(cogsLinkedRes.rows[0]?.linked_cost ?? '0', MONEY_SCALE);
+            const totalFrozenMoneyUnits = rescaleUnits(totalFrozenCostUnits, COST_SCALE, MONEY_SCALE);
+            const remainingDeliveryMoneyUnits =
+              totalFrozenMoneyUnits > alreadyLinkedMoneyUnits ? totalFrozenMoneyUnits - alreadyLinkedMoneyUnits : 0n;
+            const remainingDeliveryQtyUnits =
+              deliveredUnits > alreadyLinkedQtyUnits ? deliveredUnits - alreadyLinkedQtyUnits : 0n;
+
+            if (lineQtyUnits === remainingDeliveryQtyUnits) {
+              lineCogsMoneyUnits = remainingDeliveryMoneyUnits;
+            } else {
+              const otherRemainingQtyUnits =
+                remainingDeliveryQtyUnits > lineQtyUnits ? remainingDeliveryQtyUnits - lineQtyUnits : 0n;
+              lineCogsMoneyUnits = allocateProportionalUnits(remainingDeliveryMoneyUnits, [
+                lineQtyUnits,
+                otherRemainingQtyUnits,
+              ])[0];
+            }
+          } else {
+            const frozenUnitCost = dlRow.unit_cost ?? 0;
+            lineCogsMoneyUnits = multiplyToMinorUnits(line.qty, QTY_SCALE, frozenUnitCost, COST_SCALE, MONEY_SCALE);
+          }
+
+          totalCogsUnits += lineCogsMoneyUnits;
+          lineCogsAllocations.push({
+            invoiceLineId: line.id,
+            deliveryLineId: line.deliveryLineId,
+            itemId: line.itemId,
+            valuationMovementId: dlRow.valuation_movement_id || null,
+            qty: line.qty,
+            cogsCostStr: fromMinorUnits(lineCogsMoneyUnits, MONEY_SCALE),
+          });
         }
       }
 
@@ -501,6 +584,41 @@ export class SalesInvoiceService {
       );
 
       const postedJe = await this.journalService.postEntry(companyId, draftJe.id, actorUserId || '', false, tx);
+
+      for (const alloc of lineCogsAllocations) {
+        await tx.query(
+          `UPDATE sales_invoice_lines SET cogs_cost = $1 WHERE company_id = $2 AND id = $3`,
+          [alloc.cogsCostStr, companyId, alloc.invoiceLineId]
+        );
+        if (alloc.valuationMovementId) {
+          await tx.query(
+            `INSERT INTO inv_sales_cogs_links (
+               company_id, sales_invoice_id, sales_invoice_line_id,
+               sales_delivery_line_id, valuation_movement_id, item_id,
+               qty, cogs_cost, journal_entry_id
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              companyId,
+              id,
+              alloc.invoiceLineId,
+              alloc.deliveryLineId,
+              alloc.valuationMovementId,
+              alloc.itemId,
+              alloc.qty,
+              alloc.cogsCostStr,
+              postedJe.id,
+            ]
+          );
+        }
+      }
+
+      if (totalCogsUnits > 0n) {
+        await tx.query(
+          `UPDATE sales_invoices SET cogs_amount = $1, cogs_posted_at = NOW() WHERE company_id = $2 AND id = $3`,
+          [cogsAmount, companyId, id]
+        );
+      }
 
       await this.invoiceRepo.markPosted(companyId, id, invoiceNo, postedJe.id, actorUserId, tx);
 

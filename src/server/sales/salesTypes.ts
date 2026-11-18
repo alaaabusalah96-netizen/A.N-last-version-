@@ -52,6 +52,8 @@ export interface SalesDeliveryLine {
   qty: number;
   unitPrice: number;
   unitCost: number;
+  frozenTotalCost?: number;
+  valuationMovementId?: string | null;
   lineNo: number;
 }
 
@@ -108,6 +110,7 @@ export interface SalesInvoiceLine {
   taxAmount: number;
   lineTotal: number;
   netAmount?: number;
+  cogsCost?: number;
   lineNo: number;
 }
 
@@ -129,6 +132,7 @@ export interface SalesInvoice {
   netAmount?: number;
   grossAmount?: number;
   cogsAmount?: number;
+  cogsPostedAt?: string | null;
   memo?: string | null;
   journalEntryId?: string | null;
   journalEntryNo?: string | null;

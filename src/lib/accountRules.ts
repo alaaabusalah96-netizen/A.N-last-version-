@@ -44,6 +44,18 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     allowedTypes: ['liability'],
     requirePostable: true,
   },
+  inventory_adjustment_account_id: {
+    field: 'inventory_adjustment_account_id',
+    labelAr: 'حساب تسويات وفروق المخزون',
+    allowedTypes: ['expense', 'revenue', 'asset', 'equity'],
+    requirePostable: true,
+  },
+  opening_balance_equity_account_id: {
+    field: 'opening_balance_equity_account_id',
+    labelAr: 'حساب رصيد أول المدة للمخزون',
+    allowedTypes: ['equity', 'liability', 'asset'],
+    requirePostable: true,
+  },
   cash_register_gl_account: {
     field: 'cash_register_gl_account',
     labelAr: 'حساب النقدية',

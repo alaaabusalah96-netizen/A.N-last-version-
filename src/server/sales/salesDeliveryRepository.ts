@@ -2,6 +2,8 @@ import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { SalesDeliveryNote, SalesDeliveryLine, CreateDeliveryInput } from './salesTypes.js';
 
+import { toDecimal } from '../lib/numeric.js';
+
 function mapHeaderRow(row: any): SalesDeliveryNote {
   return {
     id: row.id,
@@ -33,9 +35,11 @@ function mapLineRow(row: any): SalesDeliveryLine {
     itemCode: row.item_code,
     itemNameAr: row.item_name_ar,
     itemUom: row.item_uom,
-    qty: parseFloat(row.qty || '0'),
-    unitPrice: parseFloat(row.unit_price || '0'),
-    unitCost: parseFloat(row.unit_cost || '0'),
+    qty: toDecimal(row.qty ?? 0, 4),
+    unitPrice: toDecimal(row.unit_price ?? 0, 4),
+    unitCost: toDecimal(row.unit_cost ?? 0, 4),
+    frozenTotalCost: toDecimal(row.frozen_total_cost ?? 0, 4),
+    valuationMovementId: row.valuation_movement_id || null,
     lineNo: parseInt(row.line_no, 10) || 1,
   };
 }
@@ -83,7 +87,8 @@ export class SalesDeliveryRepository {
 
       const linesSql = `
         SELECT 
-          l.id, l.delivery_id, l.company_id, l.item_id, l.qty, l.unit_price, l.unit_cost, l.line_no,
+          l.id, l.delivery_id, l.company_id, l.item_id, l.qty, l.unit_price, l.unit_cost,
+          l.frozen_total_cost, l.valuation_movement_id, l.line_no,
           i.code as item_code, i.name_ar as item_name_ar, i.uom as item_uom
         FROM sales_delivery_lines l
         INNER JOIN inv_items i ON i.id = l.item_id AND i.company_id = l.company_id
@@ -144,7 +149,8 @@ export class SalesDeliveryRepository {
           line.itemId,
           line.qty,
           line.unitPrice ?? 0,
-          line.unitCost ?? 0,
+          // Never trust client-supplied unitCost; server valuation freezes cost upon posting
+          0,
           i + 1,
         ]);
       }

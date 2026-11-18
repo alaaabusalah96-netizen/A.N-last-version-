@@ -206,10 +206,20 @@ inventoryRoutes.post(
 
     await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
 
-    const { warehouseId, itemId, qty, memo } = req.body;
+    const { warehouseId, itemId, qty, unitCost, costSource, reason, memo, entryDate, expenseAccountId } = req.body;
     const result = await defaultStockService.receiveStock(
       companyId,
-      { warehouseId, itemId, qty: Number(qty), memo },
+      {
+        warehouseId,
+        itemId,
+        qty: Number(qty),
+        unitCost: unitCost !== undefined && unitCost !== null && unitCost !== '' ? Number(unitCost) : undefined,
+        costSource,
+        reason,
+        memo,
+        entryDate,
+        expenseAccountId,
+      },
       user.id
     );
 
@@ -226,10 +236,42 @@ inventoryRoutes.post(
 
     await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
 
-    const { warehouseId, itemId, qty, memo } = req.body;
+    const { warehouseId, itemId, qty, reason, memo, entryDate, expenseAccountId } = req.body;
     const result = await defaultStockService.issueStock(
       companyId,
-      { warehouseId, itemId, qty: Number(qty), memo },
+      { warehouseId, itemId, qty: Number(qty), reason, memo, entryDate, expenseAccountId },
+      user.id
+    );
+
+    return res.status(201).json({ status: 'ok', ...result });
+  })
+);
+
+inventoryRoutes.post(
+  '/adjustments',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_VALUATION_ADJUST, companyId);
+
+    const { warehouseId, itemId, adjustmentType, direction, qty, unitCost, costSource, reason, memo, entryDate, expenseAccountId } = req.body;
+    const result = await defaultStockService.adjustStock(
+      companyId,
+      {
+        warehouseId,
+        itemId,
+        adjustmentType,
+        direction,
+        qty: Number(qty),
+        unitCost: unitCost !== undefined && unitCost !== null && unitCost !== '' ? Number(unitCost) : undefined,
+        costSource,
+        reason,
+        memo,
+        entryDate,
+        expenseAccountId,
+      },
       user.id
     );
 

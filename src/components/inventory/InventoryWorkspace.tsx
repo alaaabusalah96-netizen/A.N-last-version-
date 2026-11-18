@@ -65,11 +65,31 @@ interface StockMovement {
   warehouseNameAr?: string;
   itemCode?: string;
   itemNameAr?: string;
-  movementType: 'receive' | 'issue' | 'transfer_out' | 'transfer_in' | 'transfer';
+  movementType:
+    | 'receive'
+    | 'issue'
+    | 'transfer_out'
+    | 'transfer_in'
+    | 'transfer'
+    | 'opening'
+    | 'purchase_return'
+    | 'sales_delivery'
+    | 'adjustment'
+    | 'write_off'
+    | 'damage'
+    | 'internal_consumption';
   qty: number;
   memo?: string;
   transferId?: string;
   createdAt: string;
+}
+
+interface AccountRef {
+  id: string;
+  code: string;
+  nameAr: string;
+  isActive?: boolean;
+  isPostable?: boolean;
 }
 
 interface InventoryWorkspaceProps {
@@ -97,6 +117,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [showItemModal, setShowItemModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
 
   // Form states
@@ -110,10 +131,27 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [itemCustomValues, setItemCustomValues] = useState<DynamicFieldValuesMap>({});
   const [itemCustomErrors, setItemCustomErrors] = useState<Record<string, string>>({});
 
+  const [accounts, setAccounts] = useState<AccountRef[]>([]);
   const [movementWarehouseId, setMovementWarehouseId] = useState('');
   const [movementItemId, setMovementItemId] = useState('');
   const [movementQty, setMovementQty] = useState('');
+  const [movementUnitCost, setMovementUnitCost] = useState('');
+  const [movementCostSource, setMovementCostSource] = useState('APPROVED_VALUATION');
+  const [movementReason, setMovementReason] = useState('');
+  const [movementExpenseAccountId, setMovementExpenseAccountId] = useState('');
   const [movementMemo, setMovementMemo] = useState('');
+
+  // Controlled adjustment form state
+  const [adjWarehouseId, setAdjWarehouseId] = useState('');
+  const [adjItemId, setAdjItemId] = useState('');
+  const [adjType, setAdjType] = useState<'adjustment' | 'write_off' | 'damage' | 'internal_consumption'>('adjustment');
+  const [adjDirection, setAdjDirection] = useState<'decrease' | 'increase'>('decrease');
+  const [adjQty, setAdjQty] = useState('');
+  const [adjUnitCost, setAdjUnitCost] = useState('');
+  const [adjCostSource, setAdjCostSource] = useState('COUNT_SURPLUS_VALUATION');
+  const [adjReason, setAdjReason] = useState('');
+  const [adjExpenseAccountId, setAdjExpenseAccountId] = useState('');
+  const [adjMemo, setAdjMemo] = useState('');
 
   // Transfer form state
   const [transferSourceWhId, setTransferSourceWhId] = useState('');
@@ -150,17 +188,22 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
     setLoading(true);
     setError(null);
     try {
-      const [whRes, itemRes, balRes, movRes] = await Promise.all([
+      const [whRes, itemRes, balRes, movRes, acctRes] = await Promise.all([
         apiFetch(`/api/inventory/warehouses?companyId=${selectedCompanyId}`),
         apiFetch(`/api/inventory/items?companyId=${selectedCompanyId}`),
         apiFetch(`/api/inventory/balances?companyId=${selectedCompanyId}`),
         apiFetch(`/api/inventory/movements?companyId=${selectedCompanyId}`),
+        apiFetch(`/api/accounting/accounts?companyId=${selectedCompanyId}`),
       ]);
 
       if (whRes.ok) setWarehouses((await whRes.json()).warehouses || []);
       if (itemRes.ok) setItems((await itemRes.json()).items || []);
       if (balRes.ok) setBalances((await balRes.json()).balances || []);
       if (movRes.ok) setMovements((await movRes.json()).movements || []);
+      if (acctRes.ok) {
+        const accts: AccountRef[] = (await acctRes.json()).accounts || [];
+        setAccounts(accts.filter((a) => a.isActive !== false && a.isPostable !== false));
+      }
 
       try {
         const cfRes = await apiFetch(`/api/companies/${selectedCompanyId}/custom-fields?entityType=item`);
@@ -274,24 +317,32 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
     setSuccess(null);
     try {
       const endpoint = type === 'receive' ? '/api/inventory/receive' : '/api/inventory/issue';
+      const payload: Record<string, unknown> = {
+        companyId: selectedCompanyId,
+        warehouseId: movementWarehouseId,
+        itemId: movementItemId,
+        qty: Number(movementQty),
+        reason: movementReason,
+        memo: movementMemo,
+        expenseAccountId: movementExpenseAccountId || undefined,
+      };
+      if (type === 'receive') {
+        payload.unitCost = Number(movementUnitCost);
+        payload.costSource = movementCostSource;
+      }
+
       const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyId: selectedCompanyId,
-          warehouseId: movementWarehouseId,
-          itemId: movementItemId,
-          qty: Number(movementQty),
-          memo: movementMemo,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || (type === 'receive' ? 'فشل استلام البضاعة' : 'فشل صرف البضاعة'));
 
       setSuccess(
         type === 'receive'
-          ? `تم استلام كمية (${movementQty}) بنجاح وتحديث الرصيد`
-          : `تم صرف كمية (${movementQty}) بنجاح وتحديث الرصيد`
+          ? `تم استلام كمية (${movementQty}) وتقييمها محاسبياً بنجاح`
+          : `تم صرف كمية (${movementQty}) بالتكلفة الفعلية بنجاح`
       );
 
       if (type === 'receive') setShowReceiveModal(false);
@@ -300,10 +351,62 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
       setMovementWarehouseId('');
       setMovementItemId('');
       setMovementQty('');
+      setMovementUnitCost('');
+      setMovementReason('');
+      setMovementExpenseAccountId('');
       setMovementMemo('');
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء تسجيل الحركة المخزنية');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canWrite) return;
+    setActionLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const direction = adjType === 'adjustment' ? adjDirection : 'decrease';
+      const payload: Record<string, unknown> = {
+        companyId: selectedCompanyId,
+        warehouseId: adjWarehouseId,
+        itemId: adjItemId,
+        adjustmentType: adjType,
+        direction,
+        qty: Number(adjQty),
+        reason: adjReason,
+        memo: adjMemo || undefined,
+        expenseAccountId: adjExpenseAccountId || undefined,
+      };
+      if (direction === 'increase') {
+        payload.unitCost = Number(adjUnitCost);
+        payload.costSource = adjCostSource;
+      }
+
+      const res = await apiFetch('/api/inventory/adjustments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'فشل تسجيل التسوية المخزنية');
+
+      setSuccess(`تم تنفيذ التسوية المخزنية (${adjType}) وترحيل القيد المحاسبي بنجاح`);
+      setShowAdjustmentModal(false);
+      setAdjWarehouseId('');
+      setAdjItemId('');
+      setAdjQty('');
+      setAdjUnitCost('');
+      setAdjReason('');
+      setAdjExpenseAccountId('');
+      setAdjMemo('');
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'خطأ أثناء تسجيل التسوية المخزنية');
     } finally {
       setActionLoading(false);
     }
@@ -414,7 +517,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
           </button>
 
           {canWrite && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setShowReceiveModal(true)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition cursor-pointer"
@@ -429,6 +532,14 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
               >
                 <TrendingDown className="w-3.5 h-3.5" />
                 <span>إذن صرف</span>
+              </button>
+
+              <button
+                onClick={() => setShowAdjustmentModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/20 transition cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>تسوية / إتلاف</span>
               </button>
 
               <button
@@ -722,15 +833,26 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                       {new Date(m.createdAt).toLocaleString('ar-EG')}
                     </td>
                     <td className="py-3.5 px-4">
-                      {m.movementType === 'receive' ? (
+                      {m.movementType === 'receive' || m.movementType === 'opening' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/80 text-emerald-400">
                           <TrendingUp className="w-3 h-3" />
-                          <span>إستلام (+)</span>
+                          <span>{m.movementType === 'opening' ? 'رصيد افتتاحي (+)' : 'استلام (+)'}</span>
                         </span>
-                      ) : m.movementType === 'issue' ? (
+                      ) : m.movementType === 'issue' || m.movementType === 'sales_delivery' || m.movementType === 'purchase_return' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-950/60 border border-rose-800/80 text-rose-400">
                           <TrendingDown className="w-3 h-3" />
-                          <span>صرف (-)</span>
+                          <span>
+                            {m.movementType === 'sales_delivery'
+                              ? 'تسليم مبيعات (-)'
+                              : m.movementType === 'purchase_return'
+                                ? 'مرتجع مشتريات (-)'
+                                : 'صرف (-)'}
+                          </span>
+                        </span>
+                      ) : m.movementType === 'adjustment' || m.movementType === 'write_off' || m.movementType === 'damage' || m.movementType === 'internal_consumption' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-purple-950/60 border border-purple-800/80 text-purple-300">
+                          <Layers className="w-3 h-3" />
+                          <span>{m.movementType}</span>
                         </span>
                       ) : m.movementType === 'transfer_out' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-950/60 border border-amber-800/80 text-amber-400">
@@ -1039,6 +1161,66 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                 />
               </div>
 
+              {showReceiveModal && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">تكلفة الوحدة المعتمدة *</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0.0001"
+                      required
+                      placeholder="مثال: 100.00"
+                      value={movementUnitCost}
+                      onChange={(e) => setMovementUnitCost(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">مصدر التكلفة (Cost Source) *</label>
+                    <select
+                      required
+                      value={movementCostSource}
+                      onChange={(e) => setMovementCostSource(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="APPROVED_VALUATION">تقييم معتمد (APPROVED_VALUATION)</option>
+                      <option value="SUPPLIER_QUOTE">عرض سعر مورد (SUPPLIER_QUOTE)</option>
+                      <option value="PURCHASE_ORDER">أمر شراء (PURCHASE_ORDER)</option>
+                      <option value="PHYSICAL_COUNT">جرد فعلي معتمد (PHYSICAL_COUNT)</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">سبب الحركة (إلزامي) *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: استلام رصيد تكميلي معتمد / صرف للتشغيل"
+                  value={movementReason}
+                  onChange={(e) => setMovementReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">الحساب المقابل (اختياري — افتراضي حساب التسويات)</label>
+                <select
+                  value={movementExpenseAccountId}
+                  onChange={(e) => setMovementExpenseAccountId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">-- استخدام حساب تسويات المخزون الافتراضي --</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} - {a.nameAr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">ملاحظات / بيان الحركة</label>
                 <input
@@ -1069,6 +1251,153 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
                   }`}
                 >
                   {actionLoading ? 'جاري التنفيذ...' : showReceiveModal ? 'تأكيد الاستلام' : 'تأكيد الصرف'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Controlled Stock Adjustment Modal */}
+      {showAdjustmentModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-bold text-white text-sm">إذن تسوية مخزنية / إتلاف / صرف داخلي</h4>
+              <button onClick={() => setShowAdjustmentModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleAdjustment} className="flex flex-col gap-3">
+              <select
+                required
+                value={adjWarehouseId}
+                onChange={(e) => setAdjWarehouseId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+              >
+                <option value="">-- اختر المستودع * --</option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.nameAr} ({w.code})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                required
+                value={adjItemId}
+                onChange={(e) => setAdjItemId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+              >
+                <option value="">-- اختر الصنف * --</option>
+                {items.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.nameAr} ({i.code})
+                  </option>
+                ))}
+              </select>
+
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={adjType}
+                  onChange={(e) => {
+                    const nextType = e.target.value as any;
+                    setAdjType(nextType);
+                    if (nextType !== 'adjustment') setAdjDirection('decrease');
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                >
+                  <option value="adjustment">تسوية جردية (adjustment)</option>
+                  <option value="write_off">إعدام / شطب (write_off)</option>
+                  <option value="damage">تلف مخزني (damage)</option>
+                  <option value="internal_consumption">صرف داخلي (internal_consumption)</option>
+                </select>
+
+                <select
+                  value={adjType === 'adjustment' ? adjDirection : 'decrease'}
+                  disabled={adjType !== 'adjustment'}
+                  onChange={(e) => setAdjDirection(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white disabled:opacity-50"
+                >
+                  <option value="decrease">عجز / تخفيض (-)</option>
+                  <option value="increase">زيادة / إضافة (+)</option>
+                </select>
+              </div>
+
+              <input
+                type="number"
+                step="0.0001"
+                min="0.0001"
+                required
+                placeholder="الكمية *"
+                value={adjQty}
+                onChange={(e) => setAdjQty(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono"
+              />
+
+              {adjType === 'adjustment' && adjDirection === 'increase' && (
+                <>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0.0001"
+                    required
+                    placeholder="تكلفة الوحدة المعتمدة للزيادة *"
+                    value={adjUnitCost}
+                    onChange={(e) => setAdjUnitCost(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono"
+                  />
+                  <select
+                    value={adjCostSource}
+                    onChange={(e) => setAdjCostSource(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                  >
+                    <option value="COUNT_SURPLUS_VALUATION">تقييم زيادة جردية (COUNT_SURPLUS_VALUATION)</option>
+                    <option value="APPROVED_VALUATION">تقييم معتمد (APPROVED_VALUATION)</option>
+                  </select>
+                </>
+              )}
+
+              <input
+                type="text"
+                required
+                placeholder="سبب التسوية (إلزامي) *"
+                value={adjReason}
+                onChange={(e) => setAdjReason(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+              />
+
+              <select
+                value={adjExpenseAccountId}
+                onChange={(e) => setAdjExpenseAccountId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+              >
+                <option value="">-- حساب المصروف / التسوية (اختياري) --</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code} - {a.nameAr}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="text"
+                placeholder="ملاحظات إضافية"
+                value={adjMemo}
+                onChange={(e) => setAdjMemo(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+              />
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustmentModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  إلغاء
+                </button>
+                <button type="submit" disabled={actionLoading} className="px-5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold">
+                  {actionLoading ? 'جاري الترحيل...' : 'اعتماد التسوية'}
                 </button>
               </div>
             </form>
