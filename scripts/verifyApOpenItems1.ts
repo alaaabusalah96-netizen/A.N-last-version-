@@ -21,6 +21,7 @@ import {
   computeApOpenAmounts,
   defaultApOpenItemsService,
 } from '../src/server/purchasing/apOpenItemsService.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-INT-PURCH-1 WP-C: AP Open Items (Posted-Only)       ===');
@@ -190,6 +191,7 @@ async function run() {
       { code: `ITM-${unique}`.slice(0, 20), nameAr: 'صنف مستحقات', uom: 'وحدة' },
       userId
     );
+    await ensureTestCostingProfile(companyAId, [item.id], userId);
 
     // A1: Posted GRN WITHOUT invoice -> must NOT appear in AP open items
     const grn = await defaultGrnService.createGrn(

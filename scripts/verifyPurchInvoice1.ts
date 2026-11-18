@@ -16,6 +16,7 @@ import { defaultAccountService } from '../src/server/accounting/accountService.j
 import { defaultPeriodService } from '../src/server/accounting/periodService.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-PURCH-INVOICE-1 (Supplier Purchase Invoices Cycle) ===');
@@ -170,6 +171,7 @@ async function run() {
       { code: `ITM-${unique}`.slice(0, 20), nameAr: 'صنف حديد تسليح', uom: 'طن' },
       userId
     );
+    await ensureTestCostingProfile(companyAId, [item.id], userId);
 
     // I1: PO -> GRN Link & Post
     console.log('[Test I1] Creating PO and posting GRN...');

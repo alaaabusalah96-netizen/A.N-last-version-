@@ -16,6 +16,7 @@ import { defaultAccountService } from '../src/server/accounting/accountService.j
 import { defaultPeriodService } from '../src/server/accounting/periodService.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-PURCH-PO-CI-18 (Procurement PO-GRN CI Cycle Proof)   ===');
@@ -175,6 +176,7 @@ async function run() {
       { code: `ITM-CIA-2-${unique}`, nameAr: 'صنف CI ثان', uom: 'صندوق' },
       userA.id
     );
+    await ensureTestCostingProfile(compA.id, [item1.id, item2.id], userA.id);
 
     // C1: Create PO (draft with 2 lines) -> Approve
     const poDraft = await defaultPurchaseOrderService.createPurchaseOrder(

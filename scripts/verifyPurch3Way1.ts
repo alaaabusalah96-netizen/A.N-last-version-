@@ -21,6 +21,7 @@ import {
   evaluateThreeWayLineMatch,
 } from '../src/server/purchasing/threeWayMatchService.js';
 import { ValidationError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-INT-PURCH-1 WP-A: 3-Way Match & Tolerance Policy    ===');
@@ -304,6 +305,7 @@ async function run() {
       { code: `ITM-${unique}`.slice(0, 20), nameAr: 'صنف مطابقة', uom: 'وحدة' },
       userId
     );
+    await ensureTestCostingProfile(companyAId, [item.id], userId);
 
     // Helper: create PO -> approve -> create GRN linked to PO -> post GRN
     const createPoLinkedGrn = async (qty: number, unitCost: number) => {

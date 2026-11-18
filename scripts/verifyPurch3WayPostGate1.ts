@@ -16,6 +16,7 @@ import { defaultGrnService } from '../src/server/purchasing/grnService.js';
 import { defaultInvoiceService } from '../src/server/purchasing/invoiceService.js';
 import { withTenantTransaction } from '../src/server/db/transactionManager.js';
 import { ValidationError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-FIX-THREEWAY-POST-GATE-1: Three-Way Match Post Gate ===');
@@ -181,6 +182,7 @@ async function run() {
       { code: `ITM-${unique}`.slice(0, 20), nameAr: 'صنف مطابقة', uom: 'قطعة' },
       userId
     );
+    await ensureTestCostingProfile(companyAId, [item.id], userId);
 
     // Post GRN with unitCost = 100
     const grn = await defaultGrnService.createGrn(

@@ -12,6 +12,7 @@ import { AuditService, AuditRecordOptions } from '../src/server/audit/auditServi
 import { defaultAuditRepository, AuditLogInput } from '../src/server/audit/auditRepository.js';
 import { closeAllExecutors } from '../src/server/db/index.js';
 import { DbExecutor, QueryResult } from '../src/server/db/types.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 function isIPAllowed(ip: string): boolean {
   if (!ip) return false;
@@ -848,7 +849,31 @@ async function runVerification() {
     itemId = itemRes.rows[0].id;
     registry.registerItem(itemId);
 
+    const invAccRes = await appClient1.query<{ id: string }>(
+      "INSERT INTO accounts (company_id, code, name_ar, account_type, is_postable, is_active) VALUES ($1, '1400', 'المخزون السلعي', 'asset', true, true) RETURNING id;",
+      [compId]
+    );
+    const adjAccRes = await appClient1.query<{ id: string }>(
+      "INSERT INTO accounts (company_id, code, name_ar, account_type, is_postable, is_active) VALUES ($1, '5200', 'تسويات المخزون', 'expense', true, true) RETURNING id;",
+      [compId]
+    );
+    await appClient1.query(
+      `INSERT INTO company_settings (company_id, inventory_account_id, inventory_adjustment_account_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (company_id) DO UPDATE SET
+         inventory_account_id = EXCLUDED.inventory_account_id,
+         inventory_adjustment_account_id = EXCLUDED.inventory_adjustment_account_id;`,
+      [compId, invAccRes.rows[0].id, adjAccRes.rows[0].id]
+    );
+    const nowY = new Date().getUTCFullYear();
+    await appClient1.query(
+      "INSERT INTO accounting_periods (company_id, code, start_date, end_date, is_closed) VALUES ($1, $2, $3, $4, false);",
+      [compId, `FY-${nowY}`, `${nowY}-01-01`, `${nowY}-12-31`]
+    );
+
     await appClient1.query('COMMIT;');
+
+    await ensureTestCostingProfile(compId, [itemId]);
 
     await appClient2.query('BEGIN;');
     await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
@@ -1041,7 +1066,15 @@ async function runVerification() {
 
     // --- T9.1 - T9.5b: STOCK SERVICE CORE INTEGRATION ---
     console.log('\nRunning T9.1 - T9.5b: StockService Core Methods...');
-    const svcReceive = await defaultStockService.receiveStock(compId, { warehouseId: whC, itemId, qty: 50, memo: 'Svc Receive 50' });
+    const svcReceive = await defaultStockService.receiveStock(compId, {
+      warehouseId: whC,
+      itemId,
+      qty: 50,
+      unitCost: 10,
+      costSource: 'MANUAL_RECEIPT',
+      reason: 'Svc Receive 50',
+      memo: 'Svc Receive 50',
+    });
     registry.registerMovement(svcReceive.movement.id);
     registry.registerBalance(compId, whC, itemId);
     assert(svcReceive.balance.qty === 50, `T9.1 & T9.5: StockService.receiveStock created balance 50 with audit log`);
@@ -1121,7 +1154,10 @@ async function runVerification() {
       warehouseId: whFaultSrc,
       itemId,
       qty: 20,
-      memo: 'T9.7 seed receive'
+      unitCost: 10,
+      costSource: 'MANUAL_RECEIPT',
+      reason: 'T9.7 seed receive',
+      memo: 'T9.7 seed receive',
     });
     registry.registerMovement(seedRes.movement.id);
     registry.registerBalance(compId, whFaultSrc, itemId);

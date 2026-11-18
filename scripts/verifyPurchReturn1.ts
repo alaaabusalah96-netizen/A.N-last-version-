@@ -18,6 +18,7 @@ import { defaultPurchReturnService } from '../src/server/purchasing/purchReturnS
 import { defaultStockRepository } from '../src/server/inventory/stockRepository.js';
 import { withTenantTransaction } from '../src/server/db/transactionManager.js';
 import { ValidationError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-INT-PURCH-1 WP-B: Purchase Return Rules & GL/Stock  ===');
@@ -162,6 +163,7 @@ async function run() {
       { code: `ITM-${unique}`.slice(0, 20), nameAr: 'صنف مرتجع', uom: 'قطعة' },
       userId
     );
+    await ensureTestCostingProfile(companyAId, [item.id], userId);
 
     // Post GRN 1 (qty=10, unitCost=50 -> stock=10) & GRN 2 (qty=3, unitCost=50)
     const grn1 = await defaultGrnService.createGrn(

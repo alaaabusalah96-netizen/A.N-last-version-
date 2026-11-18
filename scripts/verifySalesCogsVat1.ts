@@ -28,6 +28,7 @@ import { defaultGrnService } from '../src/server/purchasing/grnService.js';
 import { defaultCustomerService } from '../src/server/sales/customerService.js';
 import { defaultSalesDeliveryService } from '../src/server/sales/salesDeliveryService.js';
 import { defaultSalesInvoiceService } from '../src/server/sales/salesInvoiceService.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('============================================================================');
 console.log('=== VERIFYING AN-INT-SALES-1: SALES COGS + VAT SPLIT + MONEY PRECISION    ===');
@@ -191,7 +192,20 @@ async function run() {
 
     const fakeTx = createFakeExecutor((sql, params) => {
       if (sql.includes('FROM sales_delivery_lines dl')) {
-        return [{ id: DEL_LINE_ID, qty: String(opts.invoice.lines[0]?.qty ?? 5), unit_cost: String(opts.dlUnitCost ?? 0), effective_unit_cost: String(opts.dlUnitCost ?? 0) }];
+        const qty = opts.invoice.lines[0]?.qty ?? 5;
+        const unitCost = opts.dlUnitCost ?? 0;
+        const frozenTotalCost = Number(qty) * Number(unitCost);
+        return [{
+          id: DEL_LINE_ID,
+          qty: String(qty),
+          unit_cost: String(unitCost),
+          effective_unit_cost: String(unitCost),
+          frozen_total_cost: String(frozenTotalCost),
+          valuation_movement_id: (opts as any).valuationMovementId ?? 'mov-1111-1111-1111-1111',
+          dl_item_id: opts.invoice.lines[0]?.itemId ?? ITEM_ID,
+          dn_customer_id: opts.invoice.customerId ?? CUST_ID,
+          dn_status: 'posted',
+        }];
       }
       if (sql.includes('SUM(sil.qty)')) {
         return [{ invoiced_qty: '0' }];
@@ -491,6 +505,7 @@ async function run() {
     const supplier = await defaultSupplierService.createSupplier(companyId, { code: `SUP-${unique}`.slice(0, 20), nameAr: 'مورد الاختبار' }, user.id);
     const warehouse = await defaultWarehouseService.createWarehouse(companyId, { code: `WH-${unique}`.slice(0, 20), nameAr: 'مستودع رئيسي' }, user.id);
     const item = await defaultItemService.createItem(companyId, { code: `ITM-${unique}`.slice(0, 20), nameAr: 'صنف اختبار', uom: 'قطعة' }, user.id);
+    await ensureTestCostingProfile(companyId, [item.id], user.id);
     const customer = await defaultCustomerService.createCustomer(companyId, { code: `CUST-${unique}`.slice(0, 20), nameAr: 'عميل الاختبار' }, user.id);
 
     // Receive qty 10 @ 60 -> Stock = 10, Inv GL += 600

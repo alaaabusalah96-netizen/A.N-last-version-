@@ -15,6 +15,7 @@ import { defaultAccountService } from '../src/server/accounting/accountService.j
 import { defaultPeriodService } from '../src/server/accounting/periodService.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-FIX-INVOICE-P0-1 (Qty & Concurrency Race Proof)     ===');
@@ -194,6 +195,7 @@ async function run() {
       { code: `ITM-R-${unique}`.slice(0, 20), nameAr: 'صنف سباق', uom: 'حبة' },
       userId
     );
+    await ensureTestCostingProfile(companyId, [item.id], userId);
 
     const grn = await defaultGrnService.createGrn(
       companyId,

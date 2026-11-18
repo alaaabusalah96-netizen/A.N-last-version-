@@ -16,6 +16,7 @@ import { defaultJournalService } from '../src/server/accounting/journalService.j
 import { defaultStockService } from '../src/server/inventory/stockService.js';
 import { ValidationError } from '../src/server/http/errors.js';
 import { toMinorUnits, fromMinorUnits, toDecimal, toMoney } from '../src/server/lib/numeric.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-FIX-P2P-CYCLE-16 (End-to-End P2P Integration Proof) ===');
@@ -113,6 +114,7 @@ async function run() {
       { code: `ITM2-${suffix}`, nameAr: 'إسمنت بورتلاندي', nameEn: 'Portland Cement', uom: 'bag' },
       actorId
     );
+    await ensureTestCostingProfile(compAId, [item1.id, item2.id], actorId);
     const invAccountA = await defaultAccountService.createAccount(
       compAId,
       {

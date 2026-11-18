@@ -16,6 +16,7 @@ import { defaultAccountService } from '../src/server/accounting/accountService.j
 import { defaultPeriodService } from '../src/server/accounting/periodService.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
+import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
 
 console.log('========================================================================');
 console.log('=== VERIFYING AN-PURCH-GRN-PO-LINK-16 (GRN to PO E2E Integration)     ===');
@@ -178,6 +179,7 @@ async function run() {
       { code: `ITM-LKD-${unique}`, nameAr: 'صنف مختلف لاختبار G9', uom: 'قطعة' },
       userA.id
     );
+    await ensureTestCostingProfile(compA.id, [itemA.id, itemDiff.id], userA.id);
 
     // Create and approve PO with qty 10
     const poDraft = await defaultPurchaseOrderService.createPurchaseOrder(
