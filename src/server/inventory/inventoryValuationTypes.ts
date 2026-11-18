@@ -219,6 +219,37 @@ export interface ValuationReconciliationInput {
   notes?: string;
 }
 
+export type ReconciliationComparisonScope = 'COMPANY_GL' | 'SUBLEDGER_ONLY' | 'HISTORICAL_GL';
+
+export interface MaSourceBalance {
+  id: string;
+  companyId: string;
+  itemId: string;
+  warehouseId: string;
+  grnId: string;
+  grnLineId: string;
+  receivedQty: number;
+  remainingQty: number;
+  consumedQty: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaSourceEvent {
+  id: string;
+  companyId: string;
+  itemId: string;
+  warehouseId: string;
+  grnId: string;
+  grnLineId: string;
+  eventType: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'PURCHASE_RETURN' | 'PPV';
+  quantity: number;
+  referenceMovementId?: string | null;
+  sourceId: string;
+  sourceLineId?: string | null;
+  createdAt: string;
+}
+
 export interface ValuationReconciliationRecord {
   id: string;
   companyId: string;
@@ -230,10 +261,12 @@ export interface ValuationReconciliationRecord {
   periodId?: string | null;
   periodCode?: string | null;
   accountId?: string | null;
+  comparisonScope: ReconciliationComparisonScope;
+  isGlComparable: boolean;
   subledgerTotal: number;
   glControlTotal: number;
   variance: number;
-  status: 'reconciled' | 'discrepancy_detected';
+  status: 'reconciled' | 'discrepancy_detected' | 'subledger_only' | 'historical_unavailable';
   unmatchedMovementsCount: number;
   unbalancedAdjustmentsCount: number;
   duplicateJournalLinksCount: number;

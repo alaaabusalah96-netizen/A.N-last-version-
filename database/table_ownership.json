@@ -308,6 +308,21 @@
     "table": "inv_sales_cogs_links",
     "scope": "tenant",
     "reason": "Per-company immutable linkage between sales invoice lines, delivery valuation movements, and posted COGS"
+  },
+  {
+    "table": "inv_ma_source_balances",
+    "scope": "tenant",
+    "reason": "Per-company Moving Average GRN line source attribution balances"
+  },
+  {
+    "table": "inv_ma_source_events",
+    "scope": "tenant",
+    "reason": "Per-company Moving Average source attribution append-only event ledger"
+  },
+  {
+    "table": "inv_sales_cogs_reversals",
+    "scope": "tenant",
+    "reason": "Per-company audited forward-only sales COGS reversals"
   }
 ]
 

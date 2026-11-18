@@ -14,7 +14,7 @@ vi.mock('../../db/transactionManager.js', () => ({
 
 vi.mock('../../inventory/inventoryValuationService.js', () => ({
   defaultInventoryValuationService: {
-    processIssue: vi.fn().mockResolvedValue({ unitCost: 12, totalCost: 60, allocatedLayers: [] }),
+    processIssue: vi.fn().mockResolvedValue({ movement: { id: 'mov-1' }, unitCost: 12, totalCost: 60, allocatedLayers: [] }),
     processReceipt: vi.fn().mockResolvedValue({}),
   },
 }));

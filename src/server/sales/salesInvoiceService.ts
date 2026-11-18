@@ -20,6 +20,7 @@ import {
   toMoney,
   parseExactUnits,
   rescaleUnits,
+  divExactUnits,
   allocateProportionalUnits,
 } from '../lib/numeric.js';
 
@@ -354,12 +355,11 @@ export class SalesInvoiceService {
         throw new ValidationError('تم ترحيل تكلفة البضاعة المباعة (COGS) لهذه الفاتورة مسبقاً ولا يمكن تكرارها');
       }
 
-      // Re-verify linked delivery line remaining quantity under FOR UPDATE & compute frozen COGS (NO GRN average fallback!)
+      // Re-verify linked delivery line remaining quantity under FOR UPDATE & compute frozen COGS (exact cumulative target formula)
       let totalCogsUnits = 0n;
       const lineCogsAllocations: Array<{
         invoiceLineId: string;
         deliveryLineId: string;
-        itemId: string;
         valuationMovementId: string | null;
         qty: number;
         cogsCostStr: string;
@@ -393,32 +393,36 @@ export class SalesInvoiceService {
           if (dlRow.dl_item_id && dlRow.dl_item_id !== line.itemId) {
             throw new ValidationError('الصنف في بند فاتورة المبيعات لا يطابق الصنف في بند إذن التسليم المرتبط');
           }
-          // Real DB rows include dn_status; require server-frozen valuation movement
-          if (dlRow.dn_status && !dlRow.valuation_movement_id) {
+          if (!dlRow.valuation_movement_id) {
             throw new ValidationError(
-              'بند إذن التسليم المرتبط يفتقر إلى حركة تقييم معتمدة وتكلفة مجمدة (valuation_movement_id). لا يمكن تخمين تكلفة البضاعة المباعة.'
+              'بند إذن التسليم المرتبط يفتقر إلى حركة تقييم معتمدة وتكلفة مجمدة (valuation_movement_id). لا يمكن إثبات تكلفة البضاعة المباعة.'
             );
           }
 
           const existingLinkRes = await tx.query<any>(
-            `SELECT id FROM inv_sales_cogs_links WHERE company_id = $1 AND sales_invoice_line_id = $2`,
+            `SELECT id FROM inv_sales_cogs_links WHERE company_id = $1 AND invoice_line_id = $2`,
             [companyId, line.id]
           );
           if (existingLinkRes.rows.length > 0) {
             throw new ValidationError('تم إثبات تكلفة البضاعة المباعة لهذا البند مسبقاً (منع تكرار COGS)');
           }
 
+          // Lock existing links for this delivery line FOR UPDATE
+          await tx.query(
+            `SELECT id FROM inv_sales_cogs_links WHERE company_id = $1 AND delivery_line_id = $2 FOR UPDATE`,
+            [companyId, line.deliveryLineId]
+          );
+
           const invSumRes = await tx.query<any>(
-            `SELECT COALESCE(SUM(sil.qty), 0) as invoiced_qty
-             FROM sales_invoice_lines sil
-             INNER JOIN sales_invoices si ON si.id = sil.invoice_id AND si.company_id = sil.company_id
-             WHERE sil.company_id = $1 AND sil.delivery_line_id = $2 AND si.status <> 'cancelled' AND si.id <> $3`,
+            `SELECT COALESCE(SUM(invoiced_qty), 0) as invoiced_qty
+             FROM inv_sales_cogs_links
+             WHERE company_id = $1 AND delivery_line_id = $2 AND invoice_id <> $3`,
             [companyId, line.deliveryLineId, id]
           );
           const deliveredUnits = toMinorUnits(dlRow.qty ?? '0', QTY_SCALE);
-          const otherInvoicedUnits = toMinorUnits(invSumRes.rows[0]?.invoiced_qty ?? '0', QTY_SCALE);
+          const alreadyLinkedQtyUnits = toMinorUnits(invSumRes.rows[0]?.invoiced_qty ?? '0', QTY_SCALE);
           const lineQtyUnits = toMinorUnits(line.qty, QTY_SCALE);
-          const remainingUnits = deliveredUnits > otherInvoicedUnits ? deliveredUnits - otherInvoicedUnits : 0n;
+          const remainingUnits = deliveredUnits > alreadyLinkedQtyUnits ? deliveredUnits - alreadyLinkedQtyUnits : 0n;
           if (lineQtyUnits > remainingUnits) {
             throw new ValidationError(
               `كمية الفاتورة (${line.qty}) تتجاوز الكمية المتبقية غير المفوترة من إذن التسليم (${fromMinorUnits(remainingUnits, QTY_SCALE)})`
@@ -426,46 +430,32 @@ export class SalesInvoiceService {
           }
 
           let lineCogsMoneyUnits = 0n;
-          if (
-            dlRow.frozen_total_cost !== undefined &&
-            dlRow.frozen_total_cost !== null &&
-            parseExactUnits(dlRow.frozen_total_cost, COST_SCALE, 'frozenTotalCost') > 0n
-          ) {
-            const totalFrozenCostUnits = parseExactUnits(dlRow.frozen_total_cost, COST_SCALE, 'frozenTotalCost');
-            const cogsLinkedRes = await tx.query<any>(
-              `SELECT COALESCE(SUM(qty), 0) as linked_qty, COALESCE(SUM(cogs_cost), 0) as linked_cost
-               FROM inv_sales_cogs_links
-               WHERE company_id = $1 AND sales_delivery_line_id = $2 AND sales_invoice_id <> $3`,
-              [companyId, line.deliveryLineId, id]
-            );
-            const alreadyLinkedQtyUnits = toMinorUnits(cogsLinkedRes.rows[0]?.linked_qty ?? '0', QTY_SCALE);
-            const alreadyLinkedMoneyUnits = toMinorUnits(cogsLinkedRes.rows[0]?.linked_cost ?? '0', MONEY_SCALE);
-            const totalFrozenMoneyUnits = rescaleUnits(totalFrozenCostUnits, COST_SCALE, MONEY_SCALE);
-            const remainingDeliveryMoneyUnits =
-              totalFrozenMoneyUnits > alreadyLinkedMoneyUnits ? totalFrozenMoneyUnits - alreadyLinkedMoneyUnits : 0n;
-            const remainingDeliveryQtyUnits =
-              deliveredUnits > alreadyLinkedQtyUnits ? deliveredUnits - alreadyLinkedQtyUnits : 0n;
+          const totalFrozenCostUnits = parseExactUnits(dlRow.frozen_total_cost ?? '0', COST_SCALE, 'frozenTotalCost');
+          const cumulativeQtyUnits = alreadyLinkedQtyUnits + lineQtyUnits;
 
-            if (lineQtyUnits === remainingDeliveryQtyUnits) {
-              lineCogsMoneyUnits = remainingDeliveryMoneyUnits;
-            } else {
-              const otherRemainingQtyUnits =
-                remainingDeliveryQtyUnits > lineQtyUnits ? remainingDeliveryQtyUnits - lineQtyUnits : 0n;
-              lineCogsMoneyUnits = allocateProportionalUnits(remainingDeliveryMoneyUnits, [
-                lineQtyUnits,
-                otherRemainingQtyUnits,
-              ])[0];
-            }
+          const cogsLinkedRes = await tx.query<any>(
+            `SELECT COALESCE(SUM(cogs_amount), 0) as linked_cost
+             FROM inv_sales_cogs_links
+             WHERE company_id = $1 AND delivery_line_id = $2 AND invoice_id <> $3`,
+            [companyId, line.deliveryLineId, id]
+          );
+          const alreadyLinkedMoneyUnits = toMinorUnits(cogsLinkedRes.rows[0]?.linked_cost ?? '0', MONEY_SCALE);
+
+          let targetMoneyUnits: bigint;
+          if (cumulativeQtyUnits >= deliveredUnits || deliveredUnits === 0n) {
+            targetMoneyUnits = rescaleUnits(totalFrozenCostUnits, COST_SCALE, MONEY_SCALE);
           } else {
-            const frozenUnitCost = dlRow.unit_cost ?? 0;
-            lineCogsMoneyUnits = multiplyToMinorUnits(line.qty, QTY_SCALE, frozenUnitCost, COST_SCALE, MONEY_SCALE);
+            const product = totalFrozenCostUnits * cumulativeQtyUnits;
+            const targetCostUnits = divExactUnits(product, COST_SCALE + QTY_SCALE, deliveredUnits, QTY_SCALE, COST_SCALE);
+            targetMoneyUnits = rescaleUnits(targetCostUnits, COST_SCALE, MONEY_SCALE);
           }
+
+          lineCogsMoneyUnits = targetMoneyUnits > alreadyLinkedMoneyUnits ? targetMoneyUnits - alreadyLinkedMoneyUnits : 0n;
 
           totalCogsUnits += lineCogsMoneyUnits;
           lineCogsAllocations.push({
             invoiceLineId: line.id,
             deliveryLineId: line.deliveryLineId,
-            itemId: line.itemId,
             valuationMovementId: dlRow.valuation_movement_id || null,
             qty: line.qty,
             cogsCostStr: fromMinorUnits(lineCogsMoneyUnits, MONEY_SCALE),
@@ -517,11 +507,6 @@ export class SalesInvoiceService {
       const taxAmount = toMoney(fromMinorUnits(taxUnits, MONEY_SCALE));
       const cogsAmount = toMoney(fromMinorUnits(totalCogsUnits, MONEY_SCALE));
 
-      // Construct balanced journal entry:
-      // 1) Dr AR (gross = net + tax)
-      // 2) Cr Sales Revenue (net)
-      // 3) Cr VAT Payable (tax, if > 0)
-      // 4) Dr COGS / Cr Inventory (if totalCogs > 0)
       const lines: Array<{
         accountId: string;
         debit: number;
@@ -593,18 +578,17 @@ export class SalesInvoiceService {
         if (alloc.valuationMovementId) {
           await tx.query(
             `INSERT INTO inv_sales_cogs_links (
-               company_id, sales_invoice_id, sales_invoice_line_id,
-               sales_delivery_line_id, valuation_movement_id, item_id,
-               qty, cogs_cost, journal_entry_id
+               company_id, invoice_id, invoice_line_id,
+               delivery_line_id, valuation_movement_id,
+               invoiced_qty, cogs_amount, journal_entry_id
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [
               companyId,
               id,
               alloc.invoiceLineId,
               alloc.deliveryLineId,
               alloc.valuationMovementId,
-              alloc.itemId,
               alloc.qty,
               alloc.cogsCostStr,
               postedJe.id,
@@ -646,6 +630,85 @@ export class SalesInvoiceService {
         posted.cogsAmount = cogsAmount;
       }
       return posted!;
+    });
+  }
+
+  async reversePostedInvoiceCogs(
+    companyId: string,
+    invoiceId: string,
+    reason: string,
+    actorUserId?: string
+  ): Promise<void> {
+    if (!companyId || !invoiceId) throw new ValidationError('companyId and invoiceId are required');
+    await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const linksRes = await tx.query<any>(
+        `SELECT id, invoice_id, invoice_line_id, delivery_line_id, invoiced_qty, cogs_amount, journal_entry_id
+         FROM inv_sales_cogs_links
+         WHERE company_id = $1 AND invoice_id = $2
+         FOR UPDATE`,
+        [companyId, invoiceId]
+      );
+      if (linksRes.rows.length === 0) return;
+
+      for (const link of linksRes.rows) {
+        const existingRev = await tx.query<any>(
+          `SELECT id FROM inv_sales_cogs_reversals WHERE company_id = $1 AND original_cogs_link_id = $2`,
+          [companyId, link.id]
+        );
+        if (existingRev.rows.length > 0) continue;
+
+        const cogsAccounts = await this.resolveCogsAndInventoryAccounts(companyId, tx);
+        const amountNum = toMoney(link.cogs_amount);
+        if (amountNum <= 0) continue;
+
+        const today = new Date().toISOString().slice(0, 10);
+        const draftJe = await this.journalService.createDraftEntry(
+          companyId,
+          {
+            entryDate: today,
+            memo: `عكس تكلفة البضاعة المباعة (COGS) للفاتورة ${invoiceId} — ${reason}`,
+            lines: [
+              {
+                accountId: cogsAccounts.inventoryAccountId,
+                debit: amountNum,
+                credit: 0,
+                lineMemo: 'إعادة المخزون المعكوس',
+              },
+              {
+                accountId: cogsAccounts.cogsAccountId,
+                debit: 0,
+                credit: amountNum,
+                lineMemo: 'عكس تكلفة البضاعة المباعة',
+              },
+            ],
+          },
+          actorUserId || '',
+          false,
+          tx
+        );
+        const postedJe = await this.journalService.postEntry(companyId, draftJe.id, actorUserId || '', false, tx);
+
+        await tx.query(
+          `INSERT INTO inv_sales_cogs_reversals (
+             company_id, original_cogs_link_id, invoice_id, invoice_line_id,
+             delivery_line_id, reversed_qty, reversed_cogs_amount, reason,
+             reversal_journal_entry_id, created_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            companyId,
+            link.id,
+            link.invoice_id,
+            link.invoice_line_id,
+            link.delivery_line_id,
+            link.invoiced_qty,
+            link.cogs_amount,
+            reason,
+            postedJe.id,
+            actorUserId || null,
+          ]
+        );
+      }
     });
   }
 

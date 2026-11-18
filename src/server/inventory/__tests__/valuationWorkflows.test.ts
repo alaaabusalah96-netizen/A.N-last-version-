@@ -308,6 +308,8 @@ function buildStatefulErpHarness() {
         costingMethod: input.costingMethod,
         periodId: input.periodId,
         accountId: input.accountId,
+        comparisonScope: input.comparisonScope || 'COMPANY_GL',
+        isGlComparable: input.isGlComparable !== undefined ? input.isGlComparable : true,
         subledgerTotal: Number(input.subledgerTotal),
         glControlTotal: Number(input.glControlTotal),
         variance: Number(input.variance),

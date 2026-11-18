@@ -165,6 +165,9 @@ export class SalesDeliveryService {
         );
 
         const valMovId = (issueResult as any)?.movement?.id ?? null;
+        if (!valMovId) {
+          throw new ValidationError('فشل إنشاء حركة تقييم البضاعة المباعة لإذن التسليم');
+        }
         const frozenTotalCost = toDecimal(issueResult?.totalCost ?? 0, 4);
         const frozenUnitCost = toDecimal(issueResult?.unitCost ?? 0, 4);
 
