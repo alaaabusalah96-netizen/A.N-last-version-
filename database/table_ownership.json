@@ -333,6 +333,11 @@
     "table": "sales_return_lines",
     "scope": "tenant",
     "reason": "Per-company sales return lines linked to original invoice and delivery lines"
+  },
+  {
+    "table": "purch_price_variance_exceptions",
+    "scope": "tenant",
+    "reason": "Per-company purchasing price variance exception requests and approvals"
   }
 ]
 

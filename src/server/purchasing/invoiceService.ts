@@ -29,6 +29,7 @@ import {
   defaultInventoryValuationService,
   InventoryValuationService,
 } from '../inventory/inventoryValuationService.js';
+import { defaultPriceVarianceExceptionRepository } from './priceVarianceExceptionRepository.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -389,9 +390,52 @@ export class InvoiceService {
         tx
       );
       if (matchReport.overallStatus === 'variance_exceeded') {
-        throw new ValidationError(
-          'لا يمكن ترحيل فاتورة المورد: نتيجة المطابقة الثلاثية تتجاوز السياسة المعتمدة (كمية/سعر). راجع تقرير المطابقة.'
+        for (const lineRes of matchReport.lines) {
+          const exceedsQty = lineRes.invoiceQty > lineRes.grnQty || (typeof lineRes.poQty === 'number' && lineRes.invoiceQty > lineRes.poQty);
+          if (exceedsQty) {
+            throw new ValidationError(
+              `لا يمكن ترحيل فاتورة المورد: تجاوزت الكمية المفوترة الكمية المتاحة/المستلمة للبند. مخالفات الكمية لا تقبل الاستثناء.`
+            );
+          }
+        }
+
+        const activeExc = await defaultPriceVarianceExceptionRepository.findActiveApprovedByInvoice(companyId, invoiceId, tx);
+        if (!activeExc) {
+          throw new ValidationError(
+            'تتجاوز أسعار بنود الفاتورة الحد المسموح لتسامح السعر (5%) ولا يوجد طلب استثناء تباين معتمد لهذه الفاتورة.'
+          );
+        }
+
+        const lockedExc = await defaultPriceVarianceExceptionRepository.findByIdForUpdate(companyId, activeExc.id, tx);
+        if (!lockedExc || lockedExc.status !== 'approved') {
+          throw new ValidationError('استثناء تباين الأسعار لم يعد معتمداً أو تم إلغاؤه.');
+        }
+
+        const currentFingerprint = defaultPriceVarianceExceptionRepository.computeFingerprint(
+          companyId,
+          invoiceId,
+          invoice.supplierId,
+          invoice.lines.map((l) => {
+            const matchLine = matchReport.lines.find((m) => m.grnLineId === l.grnLineId);
+            const refUnitCost = (matchLine?.poLineId && matchLine.poUnitCost !== null && matchLine.poUnitCost !== undefined)
+              ? matchLine.poUnitCost
+              : (matchLine?.grnUnitCost ?? 0);
+            return {
+              invoiceLineId: l.id,
+              itemId: l.itemId,
+              grnLineId: l.grnLineId,
+              qty: l.qty,
+              unitCost: l.unitCost,
+              refUnitCost,
+            };
+          })
         );
+
+        if (currentFingerprint !== lockedExc.fingerprint) {
+          throw new ValidationError(
+            'تغيرت بنود أو أسعار فاتورة المورد بعد اعتماد الاستثناء؛ يلزم طلب اعتماد استثناء جديد.'
+          );
+        }
       }
 
       const gl = await this.resolveGlMapping(companyId);

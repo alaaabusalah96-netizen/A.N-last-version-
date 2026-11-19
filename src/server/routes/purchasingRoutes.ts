@@ -5,6 +5,7 @@ import { defaultSupplierService } from '../purchasing/supplierService.js';
 import { defaultGrnService } from '../purchasing/grnService.js';
 import { defaultPurchaseOrderService } from '../purchasing/purchaseOrderService.js';
 import { defaultInvoiceService } from '../purchasing/invoiceService.js';
+import { defaultPriceVarianceExceptionService } from '../purchasing/priceVarianceExceptionService.js';
 import { defaultThreeWayMatchService } from '../purchasing/threeWayMatchService.js';
 import { defaultPurchReturnService } from '../purchasing/purchReturnService.js';
 import { defaultApOpenItemsService } from '../purchasing/apOpenItemsService.js';
@@ -376,6 +377,73 @@ purchasingRoutes.delete(
 
     await defaultInvoiceService.deleteInvoice(companyId, invoiceId, user.id);
     return res.status(200).json({ status: 'ok', deleted: true });
+  })
+);
+
+purchasingRoutes.post(
+  '/supplier-invoices/:id/price-exceptions',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const invoiceId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_VARIANCE_REQUEST, companyId);
+    if (!isUuid(invoiceId)) {
+      throw new ValidationError('Invalid invoice ID format');
+    }
+    const { reason } = req.body || {};
+    const exception = await defaultPriceVarianceExceptionService.requestException(companyId, invoiceId, reason, user.id);
+    return res.status(201).json({ status: 'ok', exception });
+  })
+);
+
+purchasingRoutes.get(
+  '/supplier-invoices/:id/price-exceptions',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const invoiceId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_READ, companyId);
+    if (!isUuid(invoiceId)) {
+      throw new ValidationError('Invalid invoice ID format');
+    }
+    const exceptions = await defaultPriceVarianceExceptionService.listExceptions(companyId, invoiceId);
+    return res.status(200).json({ status: 'ok', exceptions });
+  })
+);
+
+purchasingRoutes.post(
+  '/price-exceptions/:id/approve',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const exceptionId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_VARIANCE_APPROVE, companyId);
+    if (!isUuid(exceptionId)) {
+      throw new ValidationError('Invalid exception ID format');
+    }
+    const { decisionReason } = req.body || {};
+    const exception = await defaultPriceVarianceExceptionService.approveException(companyId, exceptionId, decisionReason, user.id);
+    return res.status(200).json({ status: 'ok', exception });
+  })
+);
+
+purchasingRoutes.post(
+  '/price-exceptions/:id/reject',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const exceptionId = req.params.id;
+    await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_VARIANCE_APPROVE, companyId);
+    if (!isUuid(exceptionId)) {
+      throw new ValidationError('Invalid exception ID format');
+    }
+    const { decisionReason } = req.body || {};
+    const exception = await defaultPriceVarianceExceptionService.rejectException(companyId, exceptionId, decisionReason, user.id);
+    return res.status(200).json({ status: 'ok', exception });
   })
 );
 

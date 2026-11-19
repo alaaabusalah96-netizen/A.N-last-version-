@@ -33,12 +33,16 @@ export interface LineMatchResult {
   priceVariancePct: number;
   status: MatchStatus;
   messageAr: string;
+  qtyExceeded?: boolean;
+  priceExceeded?: boolean;
 }
 
 export interface InvoiceThreeWayMatchReport {
   invoiceId: string;
   supplierInvoiceNo: string;
   overallStatus: MatchStatus;
+  hasQtyExceeded?: boolean;
+  hasPriceExceeded?: boolean;
   lines: LineMatchResult[];
   policy: ThreeWayMatchPolicy;
 }
@@ -140,6 +144,8 @@ export function evaluateThreeWayLineMatch(
     priceVariancePct: Number(priceVariancePct.toFixed(2)),
     status,
     messageAr,
+    qtyExceeded,
+    priceExceeded,
   };
 }
 
@@ -228,6 +234,8 @@ export class ThreeWayMatchService {
         invoiceId,
         supplierInvoiceNo: invRow.supplier_invoice_no,
         overallStatus: worstStatus,
+        hasQtyExceeded: results.some((r) => Boolean(r.qtyExceeded)),
+        hasPriceExceeded: results.some((r) => Boolean(r.priceExceeded)),
         lines: results,
         policy: DEFAULT_THREE_WAY_POLICY,
       };

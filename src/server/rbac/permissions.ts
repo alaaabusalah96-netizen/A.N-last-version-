@@ -50,6 +50,8 @@ export const PERMISSIONS = {
   PURCHASING_READ: 'purchasing:read',
   PURCHASING_WRITE: 'purchasing:write',
   PURCHASING_POST: 'purchasing:post',
+  PURCHASING_VARIANCE_REQUEST: 'purchasing:variance:request',
+  PURCHASING_VARIANCE_APPROVE: 'purchasing:variance:approve',
 
   // Dynamic Roles & Permissions management
   ROLES_READ: 'roles.read',
@@ -116,6 +118,8 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.PURCHASING_READ, labelAr: 'عرض الموردين وسندات الاستلام (GRN)', group: 'المشتريات' },
   { code: PERMISSIONS.PURCHASING_WRITE, labelAr: 'إنشاء الموردين ومسودات استلام البضائع', group: 'المشتريات' },
   { code: PERMISSIONS.PURCHASING_POST, labelAr: 'ترحيل سندات استلام البضائع (GRN)', group: 'المشتريات' },
+  { code: PERMISSIONS.PURCHASING_VARIANCE_REQUEST, labelAr: 'طلب استثناء تباين أسعار المشتريات', group: 'المشتريات' },
+  { code: PERMISSIONS.PURCHASING_VARIANCE_APPROVE, labelAr: 'اعتماد/رفض استثناء تباين أسعار المشتريات', group: 'المشتريات' },
 
   // المنظمة
   { code: PERMISSIONS.ORG_UNITS_READ, labelAr: 'عرض الوحدات التنظيمية', group: 'المنظمة' },

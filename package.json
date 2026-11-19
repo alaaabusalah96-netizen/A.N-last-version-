@@ -140,6 +140,7 @@
     "test:sales-cycle-1": "tsx scripts/verifySalesCycle1.ts",
     "test:sales-cogs-vat-1": "tsx scripts/verifySalesCogsVat1.ts",
     "test:valuation-7b-1": "tsx scripts/verifyValuation7b1.ts",
+    "test:purch-price-exception-1": "tsx scripts/verifyPurchPriceException1.ts",
     "test:stock-movement-sign-1": "tsx scripts/verifyStockMovementSign1.ts",
     "test:bank-reconcile-1": "tsx scripts/verifyBankReconcile1.ts",
     "test:year-close-1": "tsx scripts/verifyYearClose1.ts",

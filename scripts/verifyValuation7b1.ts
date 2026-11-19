@@ -18,6 +18,7 @@ import { defaultInventoryValuationRepository } from '../src/server/inventory/inv
 import { defaultInventoryValuationService } from '../src/server/inventory/inventoryValuationService.js';
 import { defaultGrnService } from '../src/server/purchasing/grnService.js';
 import { defaultInvoiceService as defaultPurchInvoiceService } from '../src/server/purchasing/invoiceService.js';
+import { defaultPriceVarianceExceptionService } from '../src/server/purchasing/priceVarianceExceptionService.js';
 import { defaultPurchReturnService } from '../src/server/purchasing/purchReturnService.js';
 import { defaultCustomerService } from '../src/server/sales/customerService.js';
 import { defaultSalesDeliveryService } from '../src/server/sales/salesDeliveryService.js';
@@ -269,6 +270,35 @@ async function run() {
       },
       user.id
     );
+
+    let exceptionBlocked = false;
+    try {
+      await defaultPurchInvoiceService.postInvoice(companyId, pInv.id, user.id);
+    } catch (err) {
+      if (err instanceof ValidationError) exceptionBlocked = true;
+    }
+
+    const reqExc = await defaultPriceVarianceExceptionService.requestException(
+      companyId,
+      pInv.id,
+      'طلب استثناء ارتفاع السعر 30%',
+      user.id
+    );
+
+    const approverUser = await userRepo.createUser({
+      username: `v7b_appr_${unique}`,
+      passwordHash: 'dummy_hash_appr',
+      role: 'platform_admin',
+    });
+    userIds.push(approverUser.id);
+
+    const approvedExc = await defaultPriceVarianceExceptionService.approveException(
+      companyId,
+      reqExc.id,
+      'معتمد للإصدار',
+      approverUser.id
+    );
+
     await defaultPurchInvoiceService.postInvoice(companyId, pInv.id, user.id);
 
     const wh1BalAfterPpv = await defaultInventoryValuationRepository.getValuationBalance(companyId, wh1.id, maItem.id);
@@ -461,6 +491,7 @@ async function run() {
         await client.query('DELETE FROM inv_cost_adjustments WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_return_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_returns WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM purch_price_variance_exceptions WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_supplier_invoice_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_supplier_invoices WHERE company_id = ANY($1::uuid[])', [companyIds]);
 
