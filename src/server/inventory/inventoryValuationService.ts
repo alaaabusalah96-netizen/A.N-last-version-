@@ -24,6 +24,7 @@ import {
   ValuationReconciliationInput,
   ValuationReconciliationRecord,
   StockSyncMode,
+  MaSourceEventType,
 } from './inventoryValuationTypes.js';
 import {
   QTY_SCALE,
@@ -51,6 +52,17 @@ export interface AllocatedLayerSlice {
   originSourceId?: string | null;
   originSourceLineId?: string | null;
   effectiveDate?: string | null;
+}
+
+export interface AllocatedMaSourceSlice {
+  sourceBalanceId: string;
+  qty: number;
+  cost: number;
+  originSourceType: string;
+  originSourceId: string;
+  originSourceLineId?: string | null;
+  grnId?: string | null;
+  grnLineId?: string | null;
 }
 
 export interface ProcessReceiptInput {
@@ -500,6 +512,66 @@ export class InventoryValuationService {
         client
       );
 
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        const originSourceType = input.originSourceType ?? input.sourceType;
+        const originSourceId = input.originSourceId ?? input.sourceId;
+        const originSourceLineId = input.originSourceLineId ?? input.sourceLineId ?? null;
+        const grnId = originSourceType === 'GRN' ? originSourceId : null;
+        const grnLineId = originSourceType === 'GRN' ? originSourceLineId : null;
+        const qtyStr = fromMinorUnits(qtyUnits, QTY_SCALE);
+        const totalCostStr = fromMinorUnits(totalCostUnits, COST_SCALE);
+        const maEventType: MaSourceEventType =
+          movementType === 'OPENING'
+            ? 'OPENING'
+            : movementType === 'TRANSFER_IN'
+              ? 'TRANSFER_IN'
+              : 'RECEIPT';
+
+        await this.valuationRepo.upsertMaSourceBalance(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: input.sourceType,
+            sourceId: input.sourceId,
+            sourceLineId: input.sourceLineId ?? null,
+            originSourceType,
+            originSourceId,
+            originSourceLineId,
+            grnId,
+            grnLineId,
+            receivedQty: qtyStr,
+            remainingQty: qtyStr,
+            consumedQty: '0.0000',
+            originalValue: totalCostStr,
+            remainingValue: totalCostStr,
+            consumedValue: '0.0000',
+          },
+          client
+        );
+
+        await this.valuationRepo.createMaSourceEvent(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: input.sourceType,
+            sourceId: input.sourceId,
+            sourceLineId: input.sourceLineId ?? null,
+            originSourceType,
+            originSourceId,
+            originSourceLineId,
+            grnId,
+            grnLineId,
+            eventType: maEventType,
+            quantity: qtyStr,
+            valueDelta: totalCostStr,
+            referenceMovementId: movement.id,
+          },
+          client
+        );
+      }
+
       return { balance, movement, layer: createdLayer };
     };
 
@@ -524,6 +596,7 @@ export class InventoryValuationService {
     unitCost: number;
     totalCost: number;
     allocatedLayers: AllocatedLayerSlice[];
+    allocatedMaSources?: AllocatedMaSourceSlice[];
   }> {
     const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
     if (qtyUnits <= 0n) {
@@ -704,6 +777,183 @@ export class InventoryValuationService {
         totalIssuedCostUnits = prevTotalUnits;
       }
 
+      // Deterministic Moving Average source balance attribution (before movement creation so balances lock & update)
+      const internalMaSlices: Array<{
+        sourceBalanceId: string;
+        qtyUnits: bigint;
+        costUnits: bigint;
+        originSourceType: string;
+        originSourceId: string;
+        originSourceLineId: string | null;
+        grnId: string | null;
+        grnLineId: string | null;
+      }> = [];
+
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        const maBalances = await this.valuationRepo.listMaSourceBalancesForUpdate(
+          companyId,
+          input.warehouseId,
+          input.itemId,
+          client
+        );
+
+        if (maBalances.length > 0) {
+          const parsedBalances = maBalances.map((b) => ({
+            row: b,
+            remQtyUnits: parseExactUnits(b.remainingQty, QTY_SCALE, 'maRemQty'),
+            consumedQtyUnits: parseExactUnits(b.consumedQty, QTY_SCALE, 'maConsumedQty'),
+            remValUnits: parseExactUnits(b.remainingValue, COST_SCALE, 'maRemVal'),
+            consumedValUnits: parseExactUnits(b.consumedValue, COST_SCALE, 'maConsumedVal'),
+          }));
+
+          const maTotalRemQtyUnits = parsedBalances.reduce((s, x) => s + x.remQtyUnits, 0n);
+          const maTotalRemValUnits = parsedBalances.reduce((s, x) => s + x.remValUnits, 0n);
+
+          if (maTotalRemQtyUnits > 0n) {
+            const attrQtyUnits = qtyUnits <= maTotalRemQtyUnits ? qtyUnits : maTotalRemQtyUnits;
+            let attrCostUnits =
+              attrQtyUnits === qtyUnits
+                ? totalIssuedCostUnits
+                : mulExactUnits(
+                    attrQtyUnits,
+                    QTY_SCALE,
+                    divExactUnits(maTotalRemValUnits, COST_SCALE, maTotalRemQtyUnits, QTY_SCALE, COST_SCALE),
+                    COST_SCALE,
+                    COST_SCALE
+                  );
+            if (attrCostUnits > maTotalRemValUnits) {
+              attrCostUnits = maTotalRemValUnits;
+            }
+
+            const takeQtyArr = new Array<bigint>(parsedBalances.length).fill(0n);
+            const takeValArr = new Array<bigint>(parsedBalances.length).fill(0n);
+
+            if (attrQtyUnits === maTotalRemQtyUnits) {
+              for (let i = 0; i < parsedBalances.length; i++) {
+                takeQtyArr[i] = parsedBalances[i].remQtyUnits;
+                takeValArr[i] = parsedBalances[i].remValUnits;
+              }
+            } else {
+              const allocatedQty = allocateProportionalUnits(
+                attrQtyUnits,
+                parsedBalances.map((x) => x.remQtyUnits)
+              );
+              for (let i = 0; i < parsedBalances.length; i++) {
+                takeQtyArr[i] = allocatedQty[i];
+              }
+
+              // Safeguard: ensure active slices with takeQty > 0 have combined remainingValue >= attrCostUnits
+              let sumActiveRemVal = parsedBalances.reduce(
+                (s, x, idx) => s + (takeQtyArr[idx] > 0n ? x.remValUnits : 0n),
+                0n
+              );
+              while (sumActiveRemVal < attrCostUnits) {
+                const candidateZeroIdx = parsedBalances
+                  .map((x, idx) => ({ idx, remVal: x.remValUnits }))
+                  .filter((c) => takeQtyArr[c.idx] === 0n && parsedBalances[c.idx].remQtyUnits > 0n && c.remVal > 0n)
+                  .sort((a, b) => (b.remVal > a.remVal ? 1 : b.remVal < a.remVal ? -1 : a.idx - b.idx))[0]?.idx;
+                const donorIdx = parsedBalances
+                  .map((_, idx) => idx)
+                  .filter((idx) => takeQtyArr[idx] > 1n)
+                  .sort((a, b) => (takeQtyArr[b] > takeQtyArr[a] ? 1 : takeQtyArr[b] < takeQtyArr[a] ? -1 : a - b))[0];
+                if (candidateZeroIdx === undefined || donorIdx === undefined) break;
+                takeQtyArr[donorIdx] -= 1n;
+                takeQtyArr[candidateZeroIdx] += 1n;
+                sumActiveRemVal = parsedBalances.reduce(
+                  (s, x, idx) => s + (takeQtyArr[idx] > 0n ? x.remValUnits : 0n),
+                  0n
+                );
+              }
+
+              const activeIndices = parsedBalances
+                .map((_, idx) => idx)
+                .filter((idx) => takeQtyArr[idx] > 0n);
+
+              const exhaustedActive = activeIndices.filter(
+                (idx) => takeQtyArr[idx] === parsedBalances[idx].remQtyUnits
+              );
+              const nonExhaustedActive = activeIndices.filter(
+                (idx) => takeQtyArr[idx] < parsedBalances[idx].remQtyUnits
+              );
+
+              const exhaustedValSum = exhaustedActive.reduce(
+                (s, idx) => s + parsedBalances[idx].remValUnits,
+                0n
+              );
+              const nonExhaustedValSum = nonExhaustedActive.reduce(
+                (s, idx) => s + parsedBalances[idx].remValUnits,
+                0n
+              );
+
+              if (
+                exhaustedActive.length > 0 &&
+                exhaustedValSum <= attrCostUnits &&
+                (nonExhaustedActive.length === 0
+                  ? exhaustedValSum === attrCostUnits
+                  : attrCostUnits - exhaustedValSum <= nonExhaustedValSum)
+              ) {
+                for (const idx of exhaustedActive) {
+                  takeValArr[idx] = parsedBalances[idx].remValUnits;
+                }
+                if (nonExhaustedActive.length > 0) {
+                  const remCost = attrCostUnits - exhaustedValSum;
+                  const allocRem = allocateProportionalUnits(
+                    remCost,
+                    nonExhaustedActive.map((idx) => parsedBalances[idx].remValUnits)
+                  );
+                  nonExhaustedActive.forEach((idx, pos) => {
+                    takeValArr[idx] = allocRem[pos];
+                  });
+                }
+              } else {
+                const allocAll = allocateProportionalUnits(
+                  attrCostUnits,
+                  activeIndices.map((idx) => parsedBalances[idx].remValUnits)
+                );
+                activeIndices.forEach((idx, pos) => {
+                  takeValArr[idx] = allocAll[pos];
+                });
+              }
+            }
+
+            for (let i = 0; i < parsedBalances.length; i++) {
+              const tq = takeQtyArr[i];
+              const tv = takeValArr[i];
+              if (tq <= 0n && tv <= 0n) continue;
+
+              const p = parsedBalances[i];
+              const newRemQty = p.remQtyUnits - tq;
+              const newConsumedQty = p.consumedQtyUnits + tq;
+              const newRemVal = p.remValUnits - tv;
+              const newConsumedVal = p.consumedValUnits + tv;
+
+              await this.valuationRepo.updateMaSourceBalanceQuantities(
+                companyId,
+                p.row.id,
+                fromMinorUnits(newRemQty, QTY_SCALE),
+                fromMinorUnits(newConsumedQty, QTY_SCALE),
+                client,
+                fromMinorUnits(newRemVal, COST_SCALE),
+                fromMinorUnits(newConsumedVal, COST_SCALE)
+              );
+
+              if (tq > 0n) {
+                internalMaSlices.push({
+                  sourceBalanceId: p.row.id,
+                  qtyUnits: tq,
+                  costUnits: tv,
+                  originSourceType: p.row.originSourceType,
+                  originSourceId: p.row.originSourceId,
+                  originSourceLineId: p.row.originSourceLineId ?? null,
+                  grnId: p.row.grnId ?? null,
+                  grnLineId: p.row.grnLineId ?? null,
+                });
+              }
+            }
+          }
+        }
+      }
+
       const newQtyUnits = prevQtyUnits - qtyUnits;
       const newTotalUnits = newQtyUnits === 0n ? 0n : prevTotalUnits - totalIssuedCostUnits;
       const newUnitCostUnits =
@@ -769,6 +1019,70 @@ export class InventoryValuationService {
         );
       }
 
+      if (method === 'PERPETUAL_MOVING_AVERAGE' && internalMaSlices.length > 0) {
+        const maEventType: MaSourceEventType =
+          movementType === 'TRANSFER_OUT'
+            ? 'TRANSFER_OUT'
+            : movementType === 'RETURN'
+              ? 'PURCHASE_RETURN'
+              : 'ISSUE';
+
+        const groupedByOrigin = new Map<
+          string,
+          {
+            originSourceType: string;
+            originSourceId: string;
+            originSourceLineId: string | null;
+            grnId: string | null;
+            grnLineId: string | null;
+            qtyUnits: bigint;
+            costUnits: bigint;
+          }
+        >();
+
+        for (const s of internalMaSlices) {
+          const originKey = `${s.originSourceType}::${s.originSourceId}::${s.originSourceLineId ?? ''}`;
+          const cur = groupedByOrigin.get(originKey);
+          if (cur) {
+            cur.qtyUnits += s.qtyUnits;
+            cur.costUnits += s.costUnits;
+          } else {
+            groupedByOrigin.set(originKey, {
+              originSourceType: s.originSourceType,
+              originSourceId: s.originSourceId,
+              originSourceLineId: s.originSourceLineId,
+              grnId: s.grnId,
+              grnLineId: s.grnLineId,
+              qtyUnits: s.qtyUnits,
+              costUnits: s.costUnits,
+            });
+          }
+        }
+
+        for (const g of groupedByOrigin.values()) {
+          await this.valuationRepo.createMaSourceEvent(
+            companyId,
+            {
+              warehouseId: input.warehouseId,
+              itemId: input.itemId,
+              sourceType: input.sourceType,
+              sourceId: input.sourceId,
+              sourceLineId: input.sourceLineId ?? null,
+              originSourceType: g.originSourceType,
+              originSourceId: g.originSourceId,
+              originSourceLineId: g.originSourceLineId,
+              grnId: g.grnId,
+              grnLineId: g.grnLineId,
+              eventType: maEventType,
+              quantity: fromMinorUnits(g.qtyUnits, QTY_SCALE),
+              valueDelta: fromMinorUnits(-g.costUnits, COST_SCALE),
+              referenceMovementId: movement.id,
+            },
+            client
+          );
+        }
+      }
+
       const allocatedLayers: AllocatedLayerSlice[] = internalAllocations.map((a) => ({
         layerId: a.layerId,
         qty: unitsToSafeNumber(a.qtyUnits, QTY_SCALE),
@@ -784,12 +1098,24 @@ export class InventoryValuationService {
         effectiveDate: a.effectiveDate ?? null,
       }));
 
+      const allocatedMaSources: AllocatedMaSourceSlice[] = internalMaSlices.map((s) => ({
+        sourceBalanceId: s.sourceBalanceId,
+        qty: unitsToSafeNumber(s.qtyUnits, QTY_SCALE),
+        cost: unitsToSafeNumber(s.costUnits, COST_SCALE),
+        originSourceType: s.originSourceType,
+        originSourceId: s.originSourceId,
+        originSourceLineId: s.originSourceLineId,
+        grnId: s.grnId,
+        grnLineId: s.grnLineId,
+      }));
+
       return {
         balance,
         movement,
         unitCost: unitsToSafeNumber(effectiveIssueUnitCostUnits, COST_SCALE),
         totalCost: unitsToSafeNumber(totalIssuedCostUnits, COST_SCALE),
         allocatedLayers,
+        allocatedMaSources,
       };
     };
 
@@ -999,6 +1325,92 @@ export class InventoryValuationService {
         },
         client
       );
+
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        const groupedDestOrigins = new Map<
+          string,
+          {
+            originSourceType: string;
+            originSourceId: string;
+            originSourceLineId: string | null;
+            grnId: string | null;
+            grnLineId: string | null;
+            qtyUnits: bigint;
+            costUnits: bigint;
+          }
+        >();
+
+        for (const s of issueResult.allocatedMaSources || []) {
+          const sQtyUnits = parseExactUnits(s.qty, QTY_SCALE, 'transferMaSliceQty');
+          const sCostUnits = parseExactUnits(s.cost, COST_SCALE, 'transferMaSliceCost');
+          if (sQtyUnits <= 0n) continue;
+          const originKey = `${s.originSourceType}::${s.originSourceId}::${s.originSourceLineId ?? ''}`;
+          const cur = groupedDestOrigins.get(originKey);
+          if (cur) {
+            cur.qtyUnits += sQtyUnits;
+            cur.costUnits += sCostUnits;
+          } else {
+            groupedDestOrigins.set(originKey, {
+              originSourceType: s.originSourceType,
+              originSourceId: s.originSourceId,
+              originSourceLineId: s.originSourceLineId ?? null,
+              grnId: s.grnId ?? null,
+              grnLineId: s.grnLineId ?? null,
+              qtyUnits: sQtyUnits,
+              costUnits: sCostUnits,
+            });
+          }
+        }
+
+        for (const destSlice of groupedDestOrigins.values()) {
+          const sliceQtyStr = fromMinorUnits(destSlice.qtyUnits, QTY_SCALE);
+          const sliceValStr = fromMinorUnits(destSlice.costUnits, COST_SCALE);
+
+          await this.valuationRepo.upsertMaSourceBalance(
+            companyId,
+            {
+              warehouseId: input.destWarehouseId,
+              itemId: input.itemId,
+              sourceType: 'WAREHOUSE_TRANSFER',
+              sourceId: input.sourceId,
+              sourceLineId: input.sourceLineId ?? null,
+              originSourceType: destSlice.originSourceType,
+              originSourceId: destSlice.originSourceId,
+              originSourceLineId: destSlice.originSourceLineId,
+              grnId: destSlice.grnId,
+              grnLineId: destSlice.grnLineId,
+              receivedQty: sliceQtyStr,
+              remainingQty: sliceQtyStr,
+              consumedQty: '0.0000',
+              originalValue: sliceValStr,
+              remainingValue: sliceValStr,
+              consumedValue: '0.0000',
+            },
+            client
+          );
+
+          await this.valuationRepo.createMaSourceEvent(
+            companyId,
+            {
+              warehouseId: input.destWarehouseId,
+              itemId: input.itemId,
+              sourceType: 'WAREHOUSE_TRANSFER',
+              sourceId: input.sourceId,
+              sourceLineId: input.sourceLineId ?? null,
+              originSourceType: destSlice.originSourceType,
+              originSourceId: destSlice.originSourceId,
+              originSourceLineId: destSlice.originSourceLineId,
+              grnId: destSlice.grnId,
+              grnLineId: destSlice.grnLineId,
+              eventType: 'TRANSFER_IN',
+              quantity: sliceQtyStr,
+              valueDelta: sliceValStr,
+              referenceMovementId: movementIn.id,
+            },
+            client
+          );
+        }
+      }
 
       return {
         movementOut: issueResult.movement,
@@ -2128,6 +2540,55 @@ export class InventoryValuationService {
         },
         tx
       );
+
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        const openQtyStr = fromMinorUnits(qtyUnits, QTY_SCALE);
+        const openValStr = fromMinorUnits(totalCostUnits, COST_SCALE);
+
+        await this.valuationRepo.upsertMaSourceBalance(
+          companyId,
+          {
+            warehouseId: opening.warehouseId,
+            itemId: opening.itemId,
+            sourceType: 'OPENING_VALUATION',
+            sourceId: opening.id,
+            sourceLineId: null,
+            originSourceType: 'OPENING_VALUATION',
+            originSourceId: opening.id,
+            originSourceLineId: null,
+            grnId: null,
+            grnLineId: null,
+            receivedQty: openQtyStr,
+            remainingQty: openQtyStr,
+            consumedQty: '0.0000',
+            originalValue: openValStr,
+            remainingValue: openValStr,
+            consumedValue: '0.0000',
+          },
+          tx
+        );
+
+        await this.valuationRepo.createMaSourceEvent(
+          companyId,
+          {
+            warehouseId: opening.warehouseId,
+            itemId: opening.itemId,
+            sourceType: 'OPENING_VALUATION',
+            sourceId: opening.id,
+            sourceLineId: null,
+            originSourceType: 'OPENING_VALUATION',
+            originSourceId: opening.id,
+            originSourceLineId: null,
+            grnId: null,
+            grnLineId: null,
+            eventType: 'OPENING',
+            quantity: openQtyStr,
+            valueDelta: openValStr,
+            referenceMovementId: movement.id,
+          },
+          tx
+        );
+      }
 
       const approved = await this.valuationRepo.markOpeningApproved(
         companyId,

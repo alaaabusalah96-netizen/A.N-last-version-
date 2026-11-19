@@ -524,6 +524,7 @@ async function run() {
       { code: `ITMB-${suffix}`, nameAr: 'صنف الشركة ب', uom: 'pcs' },
       actorId
     );
+    await ensureTestCostingProfile(compBId, [itemB.id], actorId);
     const invAccB = await defaultAccountService.createAccount(
       compBId,
       { code: '1400', nameAr: 'مخزون ب', accountType: 'asset', isPostable: true },
@@ -628,6 +629,23 @@ async function run() {
           await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
 
           if (companyIds.length > 0) {
+            await client.query(
+              `DELETE FROM inv_cost_allocations
+               WHERE company_id = ANY($1::uuid[])
+                 AND (
+                   cost_layer_id IN (SELECT id FROM inv_cost_layers WHERE company_id = ANY($1::uuid[]))
+                   OR valuation_movement_id IN (SELECT id FROM inv_valuation_movements WHERE company_id = ANY($1::uuid[]))
+                 )`,
+              [companyIds]
+            );
+            await client.query(`DELETE FROM inv_cost_adjustments WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_ma_source_events WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_ma_source_balances WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_cost_layers WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_valuation_movements WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_valuation_balances WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_item_costing_profiles WHERE company_id = ANY($1::uuid[])`, [companyIds]);
+            await client.query(`DELETE FROM inv_costing_profiles WHERE company_id = ANY($1::uuid[])`, [companyIds]);
             await client.query(`DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])`, [companyIds]);
             await client.query(`DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])`, [companyIds]);
             await client.query(`DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])`, [companyIds]);
@@ -676,6 +694,15 @@ async function run() {
       let remaining = 0;
       if (ownerPool && companyIds.length > 0) {
         const companyScopedTables = [
+          'inv_cost_allocations',
+          'inv_cost_adjustments',
+          'inv_ma_source_events',
+          'inv_ma_source_balances',
+          'inv_cost_layers',
+          'inv_valuation_movements',
+          'inv_valuation_balances',
+          'inv_item_costing_profiles',
+          'inv_costing_profiles',
           'purch_grn_lines',
           'purch_grn',
           'journal_lines',

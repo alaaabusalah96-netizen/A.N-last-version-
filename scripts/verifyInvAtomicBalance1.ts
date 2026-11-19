@@ -811,11 +811,17 @@ async function runVerification() {
     comp2Id = comp2Res.rows[0].id;
     registry.registerCompany(comp2Id);
 
+    const actorRes = await appClient1.query<{ id: string }>(
+      "INSERT INTO platform_users (username, password_hash, role) VALUES ($1, $2, 'platform_admin') RETURNING id;",
+      [`inv_atomic_actor_${suffix}`, 'dummy_inv_atomic_hash']
+    );
+    const actorId = actorRes.rows[0].id;
+
     // Seed a deterministic test-owned audit record for compId so clean/empty DBs
     // always have test-owned audit history independent of previous runs or subsequent tests.
     await appClient1.query(
-      "INSERT INTO audit_logs (company_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, $3, $4, $5);",
-      [compId, 'INV_ATOMIC_TEST_SEED', 'companies', compId, JSON.stringify({ suffix, cleanDbSeed: true })]
+      "INSERT INTO audit_logs (company_id, actor_user_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, $3, $4, $5, $6);",
+      [compId, actorId, 'INV_ATOMIC_TEST_SEED', 'companies', compId, JSON.stringify({ suffix, cleanDbSeed: true })]
     );
 
     await appClient1.query('BEGIN;');
@@ -873,7 +879,7 @@ async function runVerification() {
 
     await appClient1.query('COMMIT;');
 
-    await ensureTestCostingProfile(compId, [itemId]);
+    await ensureTestCostingProfile(compId, [itemId], actorId);
 
     await appClient2.query('BEGIN;');
     await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
@@ -1066,32 +1072,36 @@ async function runVerification() {
 
     // --- T9.1 - T9.5b: STOCK SERVICE CORE INTEGRATION ---
     console.log('\nRunning T9.1 - T9.5b: StockService Core Methods...');
-    const svcReceive = await defaultStockService.receiveStock(compId, {
-      warehouseId: whC,
-      itemId,
-      qty: 50,
-      unitCost: 10,
-      costSource: 'MANUAL_RECEIPT',
-      reason: 'Svc Receive 50',
-      memo: 'Svc Receive 50',
-    });
+    const svcReceive = await defaultStockService.receiveStock(
+      compId,
+      {
+        warehouseId: whC,
+        itemId,
+        qty: 50,
+        unitCost: 10,
+        costSource: 'MANUAL_RECEIPT',
+        reason: 'Svc Receive 50',
+        memo: 'Svc Receive 50',
+      },
+      actorId
+    );
     registry.registerMovement(svcReceive.movement.id);
     registry.registerBalance(compId, whC, itemId);
     assert(svcReceive.balance.qty === 50, `T9.1 & T9.5: StockService.receiveStock created balance 50 with audit log`);
 
-    const svcIssue = await defaultStockService.issueStock(compId, { warehouseId: whC, itemId, qty: 20, memo: 'Svc Issue 20' });
+    const svcIssue = await defaultStockService.issueStock(compId, { warehouseId: whC, itemId, qty: 20, memo: 'Svc Issue 20' }, actorId);
     registry.registerMovement(svcIssue.movement.id);
     assert(svcIssue.balance.qty === 30, `T9.2 & T9.5a: StockService.issueStock decremented balance to 30 with audit log`);
 
     let t93Error = false;
     try {
-      await defaultStockService.issueStock(compId, { warehouseId: whC, itemId, qty: 100, memo: 'Svc Issue Over' });
+      await defaultStockService.issueStock(compId, { warehouseId: whC, itemId, qty: 100, memo: 'Svc Issue Over' }, actorId);
     } catch {
       t93Error = true;
     }
     assert(t93Error, `T9.3: StockService.issueStock threw error when issuing 100 against balance 30`);
 
-    const svcTransfer = await defaultStockService.transfer(compId, { sourceWarehouseId: whC, destWarehouseId: whA, itemId, qty: 10, memo: 'Svc Transfer 10' });
+    const svcTransfer = await defaultStockService.transfer(compId, { sourceWarehouseId: whC, destWarehouseId: whA, itemId, qty: 10, memo: 'Svc Transfer 10' }, actorId);
     registry.registerMovement(svcTransfer.movementOut.id);
     registry.registerMovement(svcTransfer.movementIn.id);
     registry.registerTransfer(svcTransfer.transferId);
@@ -1108,7 +1118,8 @@ async function runVerification() {
 
     const transferRes = await defaultStockService.transfer(
       compId,
-      { sourceWarehouseId: whA, destWarehouseId: whB, itemId, qty: 10, memo: 'Service Integration Transfer' }
+      { sourceWarehouseId: whA, destWarehouseId: whB, itemId, qty: 10, memo: 'Service Integration Transfer' },
+      actorId
     );
 
     registry.registerMovement(transferRes.movementOut.id);
@@ -1150,15 +1161,19 @@ async function runVerification() {
     await appClient1.query('COMMIT;');
 
     // 2) Seed balance via defaultStockService.receiveStock with qty >= 5 (with movement, no raw balance UPDATE alone)
-    const seedRes = await defaultStockService.receiveStock(compId, {
-      warehouseId: whFaultSrc,
-      itemId,
-      qty: 20,
-      unitCost: 10,
-      costSource: 'MANUAL_RECEIPT',
-      reason: 'T9.7 seed receive',
-      memo: 'T9.7 seed receive',
-    });
+    const seedRes = await defaultStockService.receiveStock(
+      compId,
+      {
+        warehouseId: whFaultSrc,
+        itemId,
+        qty: 20,
+        unitCost: 10,
+        costSource: 'MANUAL_RECEIPT',
+        reason: 'T9.7 seed receive',
+        memo: 'T9.7 seed receive',
+      },
+      actorId
+    );
     registry.registerMovement(seedRes.movement.id);
     registry.registerBalance(compId, whFaultSrc, itemId);
 
@@ -1193,7 +1208,8 @@ async function runVerification() {
     try {
       await faultingStockService.transfer(
         compId,
-        { sourceWarehouseId: whFaultSrc, destWarehouseId: whFaultDst, itemId, qty: 5, memo: 'Faulting Transfer' }
+        { sourceWarehouseId: whFaultSrc, destWarehouseId: whFaultDst, itemId, qty: 5, memo: 'Faulting Transfer' },
+        actorId
       );
     } catch (err: any) {
       faultingErrMsg = err.message || '';
@@ -1299,6 +1315,64 @@ async function runVerification() {
           await guardedExecutor.query(
             "DELETE FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
             [bal.companyId, bal.warehouseId, bal.itemId]
+          );
+        }
+
+        // Clean test-owned valuation rows referencing registered items/warehouses in strict FK dependency order
+        const ownedCompanies = [compId, comp2Id].filter((id): id is string => Boolean(id));
+        if (ownedCompanies.length > 0 && (registeredItems.length > 0 || registeredWarehouses.length > 0)) {
+          await guardedExecutor.query(
+            `DELETE FROM inv_cost_allocations
+             WHERE company_id = ANY($1::uuid[])
+               AND (
+                 cost_layer_id IN (
+                   SELECT id FROM inv_cost_layers
+                   WHERE company_id = ANY($1::uuid[])
+                     AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]))
+                 )
+                 OR valuation_movement_id IN (
+                   SELECT id FROM inv_valuation_movements
+                   WHERE company_id = ANY($1::uuid[])
+                     AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]))
+                 )
+               );`,
+            [ownedCompanies, registeredItems, registeredWarehouses]
+          );
+          await guardedExecutor.query(
+            `DELETE FROM inv_ma_source_events
+             WHERE company_id = ANY($1::uuid[])
+               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+            [ownedCompanies, registeredItems, registeredWarehouses]
+          );
+          await guardedExecutor.query(
+            `DELETE FROM inv_ma_source_balances
+             WHERE company_id = ANY($1::uuid[])
+               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+            [ownedCompanies, registeredItems, registeredWarehouses]
+          );
+          await guardedExecutor.query(
+            `DELETE FROM inv_cost_layers
+             WHERE company_id = ANY($1::uuid[])
+               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+            [ownedCompanies, registeredItems, registeredWarehouses]
+          );
+          await guardedExecutor.query(
+            `DELETE FROM inv_valuation_movements
+             WHERE company_id = ANY($1::uuid[])
+               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+            [ownedCompanies, registeredItems, registeredWarehouses]
+          );
+          await guardedExecutor.query(
+            `DELETE FROM inv_valuation_balances
+             WHERE company_id = ANY($1::uuid[])
+               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+            [ownedCompanies, registeredItems, registeredWarehouses]
+          );
+          await guardedExecutor.query(
+            `DELETE FROM inv_item_costing_profiles
+             WHERE company_id = ANY($1::uuid[])
+               AND item_id = ANY($2::uuid[]);`,
+            [ownedCompanies, registeredItems]
           );
         }
 

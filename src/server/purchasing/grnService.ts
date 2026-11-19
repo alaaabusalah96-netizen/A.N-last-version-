@@ -19,6 +19,7 @@ import {
   parseExactUnits,
   mulExactUnits,
   rescaleUnits,
+  fromMinorUnits,
   unitsToSafeNumber,
 } from '../lib/numeric.js';
 import { CompanySettings } from '../org/companySettingsTypes.js';
@@ -425,8 +426,10 @@ export class GrnService {
 
       // WRITE phase — Single coordinated transaction: stock balance + stock movement + valuation layer/pool + movement
       for (const line of grn.lines) {
-        const lineQty = toDecimal(line.qty, 4);
-        const lineUnitCost = toDecimal(line.unitCost ?? 0, 4);
+        const lineQtyUnits = parseExactUnits(line.qty, QTY_SCALE, 'qty');
+        const lineUnitCostUnits = parseExactUnits(line.unitCost ?? 0, COST_SCALE, 'unitCost');
+        const lineTotalCostUnits = mulExactUnits(lineQtyUnits, QTY_SCALE, lineUnitCostUnits, COST_SCALE, COST_SCALE);
+        const lineQty = unitsToSafeNumber(lineQtyUnits, QTY_SCALE);
         const preStock = await this.stockRepo.getBalanceForUpdate(companyId, grn.warehouseId, line.itemId, tx);
         const updatedStock = await this.stockRepo.incrementBalance(
           companyId,
@@ -453,8 +456,9 @@ export class GrnService {
           {
             warehouseId: grn.warehouseId,
             itemId: line.itemId,
-            qty: lineQty,
-            unitCost: lineUnitCost,
+            qty: fromMinorUnits(lineQtyUnits, QTY_SCALE),
+            unitCost: fromMinorUnits(lineUnitCostUnits, COST_SCALE),
+            totalCost: fromMinorUnits(lineTotalCostUnits, COST_SCALE),
             sourceType: 'GRN',
             sourceId: grnId,
             sourceLineId: line.id,

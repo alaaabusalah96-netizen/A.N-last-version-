@@ -221,16 +221,34 @@ export interface ValuationReconciliationInput {
 
 export type ReconciliationComparisonScope = 'COMPANY_GL' | 'SUBLEDGER_ONLY' | 'HISTORICAL_GL';
 
+export type MaSourceEventType =
+  | 'OPENING'
+  | 'RECEIPT'
+  | 'ISSUE'
+  | 'TRANSFER_OUT'
+  | 'TRANSFER_IN'
+  | 'PURCHASE_RETURN'
+  | 'PPV';
+
 export interface MaSourceBalance {
   id: string;
   companyId: string;
   itemId: string;
   warehouseId: string;
-  grnId: string;
-  grnLineId: string;
+  sourceType: string;
+  sourceId: string;
+  sourceLineId?: string | null;
+  originSourceType: string;
+  originSourceId: string;
+  originSourceLineId?: string | null;
+  grnId?: string | null;
+  grnLineId?: string | null;
   receivedQty: number;
   remainingQty: number;
   consumedQty: number;
+  originalValue: number;
+  remainingValue: number;
+  consumedValue: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -240,13 +258,18 @@ export interface MaSourceEvent {
   companyId: string;
   itemId: string;
   warehouseId: string;
-  grnId: string;
-  grnLineId: string;
-  eventType: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'PURCHASE_RETURN' | 'PPV';
-  quantity: number;
-  referenceMovementId?: string | null;
+  sourceType: string;
   sourceId: string;
   sourceLineId?: string | null;
+  originSourceType: string;
+  originSourceId: string;
+  originSourceLineId?: string | null;
+  grnId?: string | null;
+  grnLineId?: string | null;
+  eventType: MaSourceEventType;
+  quantity: number;
+  valueDelta: number;
+  referenceMovementId?: string | null;
   createdAt: string;
 }
 

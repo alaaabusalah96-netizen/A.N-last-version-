@@ -602,14 +602,27 @@ async function run() {
       );
       const stockQty = Number(stockRes.rows[0]?.qty ?? 0);
 
+      const delMovRes = await checkClient.query<{ id: string; valuation_movement_id: string | null; linked_mov_id: string | null }>(
+        `SELECT sdl.id, sdl.valuation_movement_id, ivm.id as linked_mov_id
+         FROM sales_delivery_lines sdl
+         INNER JOIN sales_delivery_notes sdn ON sdn.id = sdl.delivery_note_id AND sdn.company_id = sdl.company_id
+         LEFT JOIN inv_valuation_movements ivm ON ivm.id = sdl.valuation_movement_id AND ivm.company_id = sdl.company_id
+         WHERE sdl.company_id = $1 AND sdn.status = 'posted'`,
+        [companyId]
+      );
+      const deliveryMovLinked =
+        delMovRes.rows.length > 0 &&
+        delMovRes.rows.every((r) => Boolean(r.valuation_movement_id) && Boolean(r.linked_mov_id));
+
       await check(
-        'L4: GL balances (AR=+890, REV=-800, VAT=-90, COGS=+240, INV=+360) and Stock (qty=6) match exactly',
+        'L4: GL balances (AR=+890, REV=-800, VAT=-90, COGS=+240, INV=+360), Stock (qty=6), and non-null sales_delivery_lines.valuation_movement_id match exactly',
         glMap.get('1200') === 890 &&
           glMap.get('4100') === -800 &&
           glMap.get('2150') === -90 &&
           glMap.get('5110') === 240 &&
           glMap.get('1130') === 360 &&
-          stockQty === 6
+          stockQty === 6 &&
+          deliveryMovLinked
       );
     } finally {
       await checkClient.end();
@@ -628,12 +641,31 @@ async function run() {
         await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
         await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
 
+        await client.query('DELETE FROM inv_sales_cogs_reversals WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_sales_cogs_links WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM sales_collections WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM sales_invoice_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM sales_invoices WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM sales_delivery_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM sales_delivery_notes WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM sales_customers WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query(
+          `DELETE FROM inv_cost_allocations
+           WHERE company_id = ANY($1::uuid[])
+             AND (
+               cost_layer_id IN (SELECT id FROM inv_cost_layers WHERE company_id = ANY($1::uuid[]))
+               OR valuation_movement_id IN (SELECT id FROM inv_valuation_movements WHERE company_id = ANY($1::uuid[]))
+             )`,
+          [companyIds]
+        );
+        await client.query('DELETE FROM inv_cost_adjustments WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_ma_source_events WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_ma_source_balances WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_cost_layers WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_valuation_movements WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_valuation_balances WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_item_costing_profiles WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM inv_costing_profiles WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_grn_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_grn WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM purch_suppliers WHERE company_id = ANY($1::uuid[])', [companyIds]);

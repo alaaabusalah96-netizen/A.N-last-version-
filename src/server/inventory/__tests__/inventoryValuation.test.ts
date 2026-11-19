@@ -7,6 +7,8 @@ import {
   ValuationMovement,
   CostAdjustmentRecord,
   CostAllocationRecord,
+  MaSourceBalance,
+  MaSourceEvent,
 } from '../inventoryValuationTypes.js';
 import {
   parseExactUnits,
@@ -31,6 +33,8 @@ function createInMemoryStores() {
   const movements: ValuationMovement[] = [];
   const allocations: CostAllocationRecord[] = [];
   const adjustments: CostAdjustmentRecord[] = [];
+  const maSourceBalances: MaSourceBalance[] = [];
+  const maSourceEvents: MaSourceEvent[] = [];
   let seq = 1;
   const nextId = (prefix: string) => `${prefix}-${seq++}`;
   const key = (c: string, w: string, i: string) => `${c}::${w}::${i}`;
@@ -227,6 +231,137 @@ function createInMemoryStores() {
       adjustments.push(a);
       return { ...a };
     }),
+    upsertMaSourceBalance: vi.fn(async (companyId: string, input: any) => {
+      const idx = maSourceBalances.findIndex(
+        (b) =>
+          b.companyId === companyId &&
+          b.warehouseId === input.warehouseId &&
+          b.itemId === input.itemId &&
+          b.sourceType === input.sourceType &&
+          b.sourceId === input.sourceId &&
+          (b.sourceLineId ?? null) === (input.sourceLineId ?? null) &&
+          b.originSourceType === input.originSourceType &&
+          b.originSourceId === input.originSourceId &&
+          (b.originSourceLineId ?? null) === (input.originSourceLineId ?? null)
+      );
+      const now = new Date().toISOString();
+      if (idx >= 0) {
+        const cur = maSourceBalances[idx];
+        cur.grnId = cur.grnId ?? input.grnId ?? null;
+        cur.grnLineId = cur.grnLineId ?? input.grnLineId ?? null;
+        cur.receivedQty = Number(input.receivedQty);
+        cur.remainingQty = Number(input.remainingQty);
+        cur.consumedQty = Number(input.consumedQty);
+        cur.originalValue = Number(input.originalValue);
+        cur.remainingValue = Number(input.remainingValue);
+        cur.consumedValue = Number(input.consumedValue);
+        cur.updatedAt = now;
+        return { ...cur };
+      }
+      const row: MaSourceBalance = {
+        id: nextId('masb'),
+        companyId,
+        warehouseId: input.warehouseId,
+        itemId: input.itemId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        sourceLineId: input.sourceLineId ?? null,
+        originSourceType: input.originSourceType,
+        originSourceId: input.originSourceId,
+        originSourceLineId: input.originSourceLineId ?? null,
+        grnId: input.grnId ?? null,
+        grnLineId: input.grnLineId ?? null,
+        receivedQty: Number(input.receivedQty),
+        remainingQty: Number(input.remainingQty),
+        consumedQty: Number(input.consumedQty),
+        originalValue: Number(input.originalValue),
+        remainingValue: Number(input.remainingValue),
+        consumedValue: Number(input.consumedValue),
+        createdAt: now,
+        updatedAt: now,
+      };
+      maSourceBalances.push(row);
+      return { ...row };
+    }),
+    listMaSourceBalancesForUpdate: vi.fn(async (companyId: string, warehouseId: string, itemId: string) =>
+      maSourceBalances
+        .filter((b) => b.companyId === companyId && b.warehouseId === warehouseId && b.itemId === itemId && b.remainingQty > 0)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+        .map((b) => ({ ...b }))
+    ),
+    findMaSourceBalancesByGrnLineForUpdate: vi.fn(async (companyId: string, grnLineId: string) =>
+      maSourceBalances
+        .filter((b) => b.companyId === companyId && (b.grnLineId === grnLineId || b.originSourceLineId === grnLineId))
+        .sort((a, b) => a.warehouseId.localeCompare(b.warehouseId) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+        .map((b) => ({ ...b }))
+    ),
+    updateMaSourceBalanceQuantities: vi.fn(
+      async (
+        companyId: string,
+        id: string,
+        remainingQty: string | number,
+        consumedQty: string | number,
+        _tx: any,
+        remainingValue?: string | number,
+        consumedValue?: string | number
+      ) => {
+        const b = maSourceBalances.find((x) => x.companyId === companyId && x.id === id);
+        if (!b) return;
+        const rQty = Number(remainingQty);
+        const cQty = Number(consumedQty);
+        if (rQty < 0 || cQty < 0) throw new Error('CHECK_VIOLATION: negative qty in ma_source_balance');
+        b.remainingQty = rQty;
+        b.consumedQty = cQty;
+        if (remainingValue !== undefined && consumedValue !== undefined) {
+          const rVal = Number(remainingValue);
+          const cVal = Number(consumedValue);
+          if (rVal < 0 || cVal < 0) throw new Error('CHECK_VIOLATION: negative value in ma_source_balance');
+          if (Math.abs(rVal + cVal - b.originalValue) > 0.0001) {
+            throw new Error(`CHECK_VIOLATION: remaining_value(${rVal}) + consumed_value(${cVal}) !== original_value(${b.originalValue})`);
+          }
+          b.remainingValue = rVal;
+          b.consumedValue = cVal;
+        }
+        b.updatedAt = new Date().toISOString();
+      }
+    ),
+    createMaSourceEvent: vi.fn(async (companyId: string, input: any) => {
+      const existing = maSourceEvents.find(
+        (e) =>
+          e.companyId === companyId &&
+          e.eventType === input.eventType &&
+          e.warehouseId === input.warehouseId &&
+          e.itemId === input.itemId &&
+          e.originSourceType === input.originSourceType &&
+          e.originSourceId === input.originSourceId &&
+          (e.originSourceLineId ?? null) === (input.originSourceLineId ?? null) &&
+          e.sourceType === input.sourceType &&
+          e.sourceId === input.sourceId &&
+          (e.sourceLineId ?? null) === (input.sourceLineId ?? null)
+      );
+      if (existing) return { ...existing };
+      const ev: MaSourceEvent = {
+        id: nextId('mase'),
+        companyId,
+        itemId: input.itemId,
+        warehouseId: input.warehouseId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        sourceLineId: input.sourceLineId ?? null,
+        originSourceType: input.originSourceType,
+        originSourceId: input.originSourceId,
+        originSourceLineId: input.originSourceLineId ?? null,
+        grnId: input.grnId ?? null,
+        grnLineId: input.grnLineId ?? null,
+        eventType: input.eventType,
+        quantity: Number(input.quantity),
+        valueDelta: Number(input.valueDelta),
+        referenceMovementId: input.referenceMovementId ?? null,
+        createdAt: new Date().toISOString(),
+      };
+      maSourceEvents.push(ev);
+      return { ...ev };
+    }),
   };
 
   const stockRepo: any = {
@@ -261,7 +396,7 @@ function createInMemoryStores() {
     }),
   };
 
-  return { profiles, assignments, valBalances, stockBalances, layers, movements, allocations, adjustments, valuationRepo, stockRepo };
+  return { profiles, assignments, valBalances, stockBalances, layers, movements, allocations, adjustments, maSourceBalances, maSourceEvents, valuationRepo, stockRepo };
 }
 
 describe('Phase 1 — Core Inventory Valuation Engine Invariants', () => {

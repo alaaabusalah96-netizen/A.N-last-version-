@@ -14,6 +14,7 @@ import {
   ReconciliationComparisonScope,
   MaSourceBalance,
   MaSourceEvent,
+  MaSourceEventType,
   CostingMethod,
 } from './inventoryValuationTypes.js';
 import { toDecimal } from '../lib/numeric.js';
@@ -930,7 +931,7 @@ export class InventoryValuationRepository {
          $10, $11, $12,
          $13::numeric, $14::numeric, $15::numeric, $16::numeric,
          $17::numeric, $18::numeric, $19::numeric,
-         $20, $21, $22, $23, CASE WHEN $23 IS NOT NULL THEN now() ELSE NULL END, $24
+         $20, $21, $22, $23::uuid, CASE WHEN $23::uuid IS NOT NULL THEN now() ELSE NULL END, $24
        )
        RETURNING id, company_id as "companyId", source_type as "sourceType", source_id as "sourceId",
                  source_line_id as "sourceLineId", grn_id as "grnId", grn_line_id as "grnLineId",
@@ -1261,60 +1262,144 @@ export class InventoryValuationRepository {
     return await withTenantTransaction(companyId, run);
   }
 
-  async upsertMaSourceBalance(
-    companyId: string,
-    input: {
-      warehouseId: string;
-      itemId: string;
-      grnId: string;
-      grnLineId: string;
-      receivedQty: string | number;
-      remainingQty: string | number;
-      consumedQty: string | number;
-    },
-    executor: DbExecutor
-  ): Promise<MaSourceBalance> {
-    const res = await executor.query<any>(
-      `INSERT INTO inv_ma_source_balances (
-         company_id, warehouse_id, item_id, grn_id, grn_line_id,
-         received_qty, remaining_qty, consumed_qty
-       )
-       VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric)
-       ON CONFLICT (company_id, warehouse_id, item_id, grn_line_id)
-       DO UPDATE SET
-         received_qty = EXCLUDED.received_qty,
-         remaining_qty = EXCLUDED.remaining_qty,
-         consumed_qty = EXCLUDED.consumed_qty,
-         updated_at = now()
-       RETURNING id, company_id as "companyId", item_id as "itemId", warehouse_id as "warehouseId",
-                 grn_id as "grnId", grn_line_id as "grnLineId",
-                 received_qty::text as "receivedQty", remaining_qty::text as "remainingQty",
-                 consumed_qty::text as "consumedQty", created_at as "createdAt", updated_at as "updatedAt";`,
-      [
-        companyId,
-        input.warehouseId,
-        input.itemId,
-        input.grnId,
-        input.grnLineId,
-        input.receivedQty,
-        input.remainingQty,
-        input.consumedQty,
-      ]
-    );
-    const r = res.rows[0];
+  private mapMaSourceBalance(r: any): MaSourceBalance {
     return {
       id: r.id,
       companyId: r.companyId,
       itemId: r.itemId,
       warehouseId: r.warehouseId,
-      grnId: r.grnId,
-      grnLineId: r.grnLineId,
+      sourceType: r.sourceType,
+      sourceId: r.sourceId,
+      sourceLineId: r.sourceLineId ?? null,
+      originSourceType: r.originSourceType,
+      originSourceId: r.originSourceId,
+      originSourceLineId: r.originSourceLineId ?? null,
+      grnId: r.grnId ?? null,
+      grnLineId: r.grnLineId ?? null,
       receivedQty: toDecimal(r.receivedQty, 4),
       remainingQty: toDecimal(r.remainingQty, 4),
       consumedQty: toDecimal(r.consumedQty, 4),
+      originalValue: toDecimal(r.originalValue, 4),
+      remainingValue: toDecimal(r.remainingValue, 4),
+      consumedValue: toDecimal(r.consumedValue, 4),
       createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
       updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : String(r.updatedAt),
     };
+  }
+
+  private mapMaSourceEvent(r: any): MaSourceEvent {
+    return {
+      id: r.id,
+      companyId: r.companyId,
+      itemId: r.itemId,
+      warehouseId: r.warehouseId,
+      sourceType: r.sourceType,
+      sourceId: r.sourceId,
+      sourceLineId: r.sourceLineId ?? null,
+      originSourceType: r.originSourceType,
+      originSourceId: r.originSourceId,
+      originSourceLineId: r.originSourceLineId ?? null,
+      grnId: r.grnId ?? null,
+      grnLineId: r.grnLineId ?? null,
+      eventType: r.eventType as MaSourceEventType,
+      quantity: toDecimal(r.quantity, 4),
+      valueDelta: toDecimal(r.valueDelta, 4),
+      referenceMovementId: r.referenceMovementId ?? null,
+      createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+    };
+  }
+
+  async upsertMaSourceBalance(
+    companyId: string,
+    input: {
+      warehouseId: string;
+      itemId: string;
+      sourceType: string;
+      sourceId: string;
+      sourceLineId?: string | null;
+      originSourceType: string;
+      originSourceId: string;
+      originSourceLineId?: string | null;
+      grnId?: string | null;
+      grnLineId?: string | null;
+      receivedQty: string | number;
+      remainingQty: string | number;
+      consumedQty: string | number;
+      originalValue: string | number;
+      remainingValue: string | number;
+      consumedValue: string | number;
+    },
+    executor: DbExecutor
+  ): Promise<MaSourceBalance> {
+    const res = await executor.query<any>(
+      `INSERT INTO inv_ma_source_balances (
+         company_id, warehouse_id, item_id,
+         source_type, source_id, source_line_id,
+         origin_source_type, origin_source_id, origin_source_line_id,
+         grn_id, grn_line_id,
+         received_qty, remaining_qty, consumed_qty,
+         original_value, remaining_value, consumed_value
+       )
+       VALUES (
+         $1, $2, $3,
+         $4, $5, $6,
+         $7, $8, $9,
+         $10, $11,
+         $12::numeric, $13::numeric, $14::numeric,
+         $15::numeric, $16::numeric, $17::numeric
+       )
+       ON CONFLICT (
+         company_id,
+         warehouse_id,
+         item_id,
+         source_type,
+         source_id,
+         COALESCE(source_line_id, '00000000-0000-0000-0000-000000000000'::uuid),
+         origin_source_type,
+         origin_source_id,
+         COALESCE(origin_source_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       )
+       DO UPDATE SET
+         grn_id = COALESCE(inv_ma_source_balances.grn_id, EXCLUDED.grn_id),
+         grn_line_id = COALESCE(inv_ma_source_balances.grn_line_id, EXCLUDED.grn_line_id),
+         received_qty = EXCLUDED.received_qty,
+         remaining_qty = EXCLUDED.remaining_qty,
+         consumed_qty = EXCLUDED.consumed_qty,
+         original_value = EXCLUDED.original_value,
+         remaining_value = EXCLUDED.remaining_value,
+         consumed_value = EXCLUDED.consumed_value,
+         updated_at = now()
+       RETURNING id, company_id as "companyId", item_id as "itemId", warehouse_id as "warehouseId",
+                 source_type as "sourceType", source_id as "sourceId", source_line_id as "sourceLineId",
+                 origin_source_type as "originSourceType", origin_source_id as "originSourceId",
+                 origin_source_line_id as "originSourceLineId",
+                 grn_id as "grnId", grn_line_id as "grnLineId",
+                 received_qty::text as "receivedQty", remaining_qty::text as "remainingQty",
+                 consumed_qty::text as "consumedQty",
+                 original_value::text as "originalValue", remaining_value::text as "remainingValue",
+                 consumed_value::text as "consumedValue",
+                 created_at as "createdAt", updated_at as "updatedAt";`,
+      [
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        input.sourceType,
+        input.sourceId,
+        input.sourceLineId || null,
+        input.originSourceType,
+        input.originSourceId,
+        input.originSourceLineId || null,
+        input.grnId || null,
+        input.grnLineId || null,
+        input.receivedQty,
+        input.remainingQty,
+        input.consumedQty,
+        input.originalValue,
+        input.remainingValue,
+        input.consumedValue,
+      ]
+    );
+    return this.mapMaSourceBalance(res.rows[0]);
   }
 
   async listMaSourceBalancesForUpdate(
@@ -1325,28 +1410,22 @@ export class InventoryValuationRepository {
   ): Promise<MaSourceBalance[]> {
     const res = await executor.query<any>(
       `SELECT id, company_id as "companyId", item_id as "itemId", warehouse_id as "warehouseId",
+              source_type as "sourceType", source_id as "sourceId", source_line_id as "sourceLineId",
+              origin_source_type as "originSourceType", origin_source_id as "originSourceId",
+              origin_source_line_id as "originSourceLineId",
               grn_id as "grnId", grn_line_id as "grnLineId",
               received_qty::text as "receivedQty", remaining_qty::text as "remainingQty",
-              consumed_qty::text as "consumedQty", created_at as "createdAt", updated_at as "updatedAt"
+              consumed_qty::text as "consumedQty",
+              original_value::text as "originalValue", remaining_value::text as "remainingValue",
+              consumed_value::text as "consumedValue",
+              created_at as "createdAt", updated_at as "updatedAt"
        FROM inv_ma_source_balances
        WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3 AND remaining_qty > 0
-       ORDER BY grn_line_id ASC
+       ORDER BY created_at ASC, id ASC
        FOR UPDATE;`,
       [companyId, warehouseId, itemId]
     );
-    return res.rows.map((r) => ({
-      id: r.id,
-      companyId: r.companyId,
-      itemId: r.itemId,
-      warehouseId: r.warehouseId,
-      grnId: r.grnId,
-      grnLineId: r.grnLineId,
-      receivedQty: toDecimal(r.receivedQty, 4),
-      remainingQty: toDecimal(r.remainingQty, 4),
-      consumedQty: toDecimal(r.consumedQty, 4),
-      createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
-      updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : String(r.updatedAt),
-    }));
+    return res.rows.map((r) => this.mapMaSourceBalance(r));
   }
 
   async findMaSourceBalancesByGrnLineForUpdate(
@@ -1356,28 +1435,23 @@ export class InventoryValuationRepository {
   ): Promise<MaSourceBalance[]> {
     const res = await executor.query<any>(
       `SELECT id, company_id as "companyId", item_id as "itemId", warehouse_id as "warehouseId",
+              source_type as "sourceType", source_id as "sourceId", source_line_id as "sourceLineId",
+              origin_source_type as "originSourceType", origin_source_id as "originSourceId",
+              origin_source_line_id as "originSourceLineId",
               grn_id as "grnId", grn_line_id as "grnLineId",
               received_qty::text as "receivedQty", remaining_qty::text as "remainingQty",
-              consumed_qty::text as "consumedQty", created_at as "createdAt", updated_at as "updatedAt"
+              consumed_qty::text as "consumedQty",
+              original_value::text as "originalValue", remaining_value::text as "remainingValue",
+              consumed_value::text as "consumedValue",
+              created_at as "createdAt", updated_at as "updatedAt"
        FROM inv_ma_source_balances
-       WHERE company_id = $1 AND grn_line_id = $2
-       ORDER BY warehouse_id ASC
+       WHERE company_id = $1
+         AND (grn_line_id = $2 OR origin_source_line_id = $2)
+       ORDER BY warehouse_id ASC, created_at ASC, id ASC
        FOR UPDATE;`,
       [companyId, grnLineId]
     );
-    return res.rows.map((r) => ({
-      id: r.id,
-      companyId: r.companyId,
-      itemId: r.itemId,
-      warehouseId: r.warehouseId,
-      grnId: r.grnId,
-      grnLineId: r.grnLineId,
-      receivedQty: toDecimal(r.receivedQty, 4),
-      remainingQty: toDecimal(r.remainingQty, 4),
-      consumedQty: toDecimal(r.consumedQty, 4),
-      createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
-      updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : String(r.updatedAt),
-    }));
+    return res.rows.map((r) => this.mapMaSourceBalance(r));
   }
 
   async updateMaSourceBalanceQuantities(
@@ -1385,8 +1459,23 @@ export class InventoryValuationRepository {
     id: string,
     remainingQty: string | number,
     consumedQty: string | number,
-    executor: DbExecutor
+    executor: DbExecutor,
+    remainingValue?: string | number,
+    consumedValue?: string | number
   ): Promise<void> {
+    if (remainingValue !== undefined && consumedValue !== undefined) {
+      await executor.query(
+        `UPDATE inv_ma_source_balances
+         SET remaining_qty = $3::numeric,
+             consumed_qty = $4::numeric,
+             remaining_value = $5::numeric,
+             consumed_value = $6::numeric,
+             updated_at = now()
+         WHERE company_id = $1 AND id = $2;`,
+        [companyId, id, remainingQty, consumedQty, remainingValue, consumedValue]
+      );
+      return;
+    }
     await executor.query(
       `UPDATE inv_ma_source_balances
        SET remaining_qty = $3::numeric, consumed_qty = $4::numeric, updated_at = now()
@@ -1400,82 +1489,111 @@ export class InventoryValuationRepository {
     input: {
       itemId: string;
       warehouseId: string;
-      grnId: string;
-      grnLineId: string;
-      eventType: string;
-      quantity: string | number;
-      referenceMovementId?: string | null;
+      sourceType: string;
       sourceId: string;
       sourceLineId?: string | null;
+      originSourceType: string;
+      originSourceId: string;
+      originSourceLineId?: string | null;
+      grnId?: string | null;
+      grnLineId?: string | null;
+      eventType: MaSourceEventType;
+      quantity: string | number;
+      valueDelta: string | number;
+      referenceMovementId?: string | null;
     },
     executor: DbExecutor
   ): Promise<MaSourceEvent> {
     const res = await executor.query<any>(
       `INSERT INTO inv_ma_source_events (
-         company_id, item_id, warehouse_id, grn_id, grn_line_id,
-         event_type, quantity, reference_movement_id, source_id, source_line_id
+         company_id, item_id, warehouse_id,
+         source_type, source_id, source_line_id,
+         origin_source_type, origin_source_id, origin_source_line_id,
+         grn_id, grn_line_id,
+         event_type, quantity, value_delta, reference_movement_id
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10)
-       ON CONFLICT (company_id, event_type, warehouse_id, item_id, grn_line_id, source_id, COALESCE(source_line_id, '00000000-0000-0000-0000-000000000000'::uuid))
+       VALUES (
+         $1, $2, $3,
+         $4, $5, $6,
+         $7, $8, $9,
+         $10, $11,
+         $12, $13::numeric, $14::numeric, $15
+       )
+       ON CONFLICT (
+         company_id,
+         event_type,
+         warehouse_id,
+         item_id,
+         origin_source_type,
+         origin_source_id,
+         COALESCE(origin_source_line_id, '00000000-0000-0000-0000-000000000000'::uuid),
+         source_type,
+         source_id,
+         COALESCE(source_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       )
        DO NOTHING
        RETURNING id, company_id as "companyId", item_id as "itemId", warehouse_id as "warehouseId",
-                 grn_id as "grnId", grn_line_id as "grnLineId", event_type as "eventType",
-                 quantity::text as "quantity", reference_movement_id as "referenceMovementId",
-                 source_id as "sourceId", source_line_id as "sourceLineId", created_at as "createdAt";`,
+                 source_type as "sourceType", source_id as "sourceId", source_line_id as "sourceLineId",
+                 origin_source_type as "originSourceType", origin_source_id as "originSourceId",
+                 origin_source_line_id as "originSourceLineId",
+                 grn_id as "grnId", grn_line_id as "grnLineId",
+                 event_type as "eventType", quantity::text as "quantity", value_delta::text as "valueDelta",
+                 reference_movement_id as "referenceMovementId", created_at as "createdAt";`,
       [
         companyId,
         input.itemId,
         input.warehouseId,
-        input.grnId,
-        input.grnLineId,
-        input.eventType,
-        input.quantity,
-        input.referenceMovementId || null,
+        input.sourceType,
         input.sourceId,
         input.sourceLineId || null,
+        input.originSourceType,
+        input.originSourceId,
+        input.originSourceLineId || null,
+        input.grnId || null,
+        input.grnLineId || null,
+        input.eventType,
+        input.quantity,
+        input.valueDelta,
+        input.referenceMovementId || null,
       ]
     );
     const r = res.rows[0];
     if (!r) {
       const existing = await executor.query<any>(
         `SELECT id, company_id as "companyId", item_id as "itemId", warehouse_id as "warehouseId",
-                grn_id as "grnId", grn_line_id as "grnLineId", event_type as "eventType",
-                quantity::text as "quantity", reference_movement_id as "referenceMovementId",
-                source_id as "sourceId", source_line_id as "sourceLineId", created_at as "createdAt"
+                source_type as "sourceType", source_id as "sourceId", source_line_id as "sourceLineId",
+                origin_source_type as "originSourceType", origin_source_id as "originSourceId",
+                origin_source_line_id as "originSourceLineId",
+                grn_id as "grnId", grn_line_id as "grnLineId",
+                event_type as "eventType", quantity::text as "quantity", value_delta::text as "valueDelta",
+                reference_movement_id as "referenceMovementId", created_at as "createdAt"
          FROM inv_ma_source_events
-         WHERE company_id = $1 AND event_type = $2 AND warehouse_id = $3 AND item_id = $4 AND grn_line_id = $5 AND source_id = $6 AND (source_line_id IS NOT DISTINCT FROM $7);`,
-        [companyId, input.eventType, input.warehouseId, input.itemId, input.grnLineId, input.sourceId, input.sourceLineId || null]
+         WHERE company_id = $1
+           AND event_type = $2
+           AND warehouse_id = $3
+           AND item_id = $4
+           AND origin_source_type = $5
+           AND origin_source_id = $6
+           AND (origin_source_line_id IS NOT DISTINCT FROM $7)
+           AND source_type = $8
+           AND source_id = $9
+           AND (source_line_id IS NOT DISTINCT FROM $10);`,
+        [
+          companyId,
+          input.eventType,
+          input.warehouseId,
+          input.itemId,
+          input.originSourceType,
+          input.originSourceId,
+          input.originSourceLineId || null,
+          input.sourceType,
+          input.sourceId,
+          input.sourceLineId || null,
+        ]
       );
-      const ex = existing.rows[0];
-      return {
-        id: ex.id,
-        companyId: ex.companyId,
-        itemId: ex.itemId,
-        warehouseId: ex.warehouseId,
-        grnId: ex.grnId,
-        grnLineId: ex.grnLineId,
-        eventType: ex.eventType,
-        quantity: toDecimal(ex.quantity, 4),
-        referenceMovementId: ex.referenceMovementId ?? null,
-        sourceId: ex.sourceId,
-        sourceLineId: ex.sourceLineId ?? null,
-        createdAt: ex.createdAt instanceof Date ? ex.createdAt.toISOString() : String(ex.createdAt),
-      };
+      return this.mapMaSourceEvent(existing.rows[0]);
     }
-    return {
-      id: r.id,
-      companyId: r.companyId,
-      itemId: r.itemId,
-      warehouseId: r.warehouseId,
-      grnId: r.grnId,
-      grnLineId: r.grnLineId,
-      eventType: r.eventType,
-      quantity: toDecimal(r.quantity, 4),
-      referenceMovementId: r.referenceMovementId ?? null,
-      sourceId: r.sourceId,
-      sourceLineId: r.sourceLineId ?? null,
-      createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
-    };
+    return this.mapMaSourceEvent(r);
   }
 }
 
