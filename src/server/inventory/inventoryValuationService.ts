@@ -154,6 +154,23 @@ export interface PurchaseReturnValuationInput {
   expectedPreStockQty?: number | string;
 }
 
+export interface SalesReturnValuationInput {
+  warehouseId: string;
+  itemId: string;
+  qty: number | string;
+  returnId: string;
+  returnLineId: string;
+  deliveryLineId?: string | null;
+  deliveryValuationMovementId?: string | null;
+  deliveryQty: number | string;
+  deliveryFrozenTotalCost: number | string;
+  journalEntryId?: string | null;
+  reason?: string | null;
+  stockSyncMode?: StockSyncMode;
+  expectedPreStockQty?: number | string;
+  expectedPostStockQty?: number | string;
+}
+
 export class InventoryValuationService {
   constructor(
     private valuationRepo: InventoryValuationRepository = defaultInventoryValuationRepository,
@@ -1696,121 +1713,216 @@ export class InventoryValuationService {
         adjustments.push(adj);
       }
     } else {
-      // PERPETUAL_MOVING_AVERAGE across primary GRN warehouse and any destination warehouses with remaining stock
-      const candidateRes = await tx.query<{ warehouseId: string }>(
-        `SELECT warehouse_id as "warehouseId"
-         FROM inv_valuation_balances
-         WHERE company_id = $1 AND item_id = $2 AND (quantity > 0 OR warehouse_id = $3)
-         ORDER BY CASE WHEN warehouse_id = $3 THEN 0 ELSE 1 END, warehouse_id ASC;`,
-        [companyId, input.itemId, input.warehouseId]
+      // PERPETUAL_MOVING_AVERAGE: allocate strictly via Moving Average Source Value Ledger (inv_ma_source_balances)
+      const sourceRows = await this.valuationRepo.findMaSourceBalancesByGrnLineForUpdate(
+        companyId,
+        input.grnLineId,
+        tx
       );
-      const whIds = candidateRes.rows.length > 0
-        ? Array.from(new Set(candidateRes.rows.map((r) => r.warehouseId)))
-        : [input.warehouseId];
-
-      // Deadlock-safe lock order: sort by warehouseId ASC
-      const sortedLocks = [...whIds].sort();
-      const lockedBalances = new Map<string, ValuationBalance>();
-      for (const whId of sortedLocks) {
-        const bal = await this.valuationRepo.lockValuationBalanceForUpdate(companyId, whId, input.itemId, tx);
-        if (bal) lockedBalances.set(whId, bal);
+      if (sourceRows.length === 0) {
+        throw new ValidationError(
+          `VALUATION_INTEGRITY_ERROR: لا توجد سجلات مصدر لمتوسط التكلفة مرتبطة بسطر إذن الاستلام (${input.grnLineId}).`
+        );
       }
 
-      // Compute remaining coverable qty (GRN warehouse priority, then transferred warehouses)
-      let remToCover = qtyBasisUnits;
-      const whCoverWeights: Array<{ whId: string; coverQtyUnits: bigint }> = [];
-      for (const whId of whIds) {
-        if (remToCover <= 0n) break;
-        const bal = lockedBalances.get(whId);
-        const whQtyUnits = bal ? parseExactUnits(bal.quantity, QTY_SCALE, 'whQty') : 0n;
-        if (whQtyUnits <= 0n) continue;
-        const take = whQtyUnits < remToCover ? whQtyUnits : remToCover;
-        whCoverWeights.push({ whId, coverQtyUnits: take });
-        remToCover -= take;
+      const parsedSources = sourceRows.map((r) => {
+        if (r.itemId !== input.itemId) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم تطابق الصنف في سجل مصدر متوسط التكلفة');
+        }
+        if (r.grnId && r.grnId !== input.grnId) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم تطابق إذن الاستلام في سجل مصدر متوسط التكلفة');
+        }
+        const recvQtyUnits = parseExactUnits(r.receivedQty, QTY_SCALE, 'srcRecvQty');
+        const remQtyUnits = parseExactUnits(r.remainingQty, QTY_SCALE, 'srcRemQty');
+        const consQtyUnits = parseExactUnits(r.consumedQty, QTY_SCALE, 'srcConsQty');
+        const origValUnits = parseExactUnits(r.originalValue, COST_SCALE, 'srcOrigVal');
+        const remValUnits = parseExactUnits(r.remainingValue, COST_SCALE, 'srcRemVal');
+        const consValUnits = parseExactUnits(r.consumedValue, COST_SCALE, 'srcConsVal');
+
+        if (remQtyUnits < 0n || consQtyUnits < 0n || remQtyUnits + consQtyUnits !== recvQtyUnits) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم توازن الكميات في سجل مصدر متوسط التكلفة');
+        }
+        if (origValUnits < 0n || remValUnits < 0n || consValUnits < 0n || remValUnits + consValUnits !== origValUnits) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم توازن القيم في سجل مصدر متوسط التكلفة');
+        }
+
+        return {
+          row: r,
+          recvQtyUnits,
+          remQtyUnits,
+          consQtyUnits,
+          origValUnits,
+          remValUnits,
+          consValUnits,
+        };
+      });
+
+      const rootSources = parsedSources.filter(
+        (s) =>
+          s.row.sourceType === 'GRN' ||
+          (s.row.originSourceType === 'GRN' && s.row.sourceId === input.grnId && s.row.sourceLineId === input.grnLineId)
+      );
+      if (rootSources.length === 0) {
+        throw new ValidationError('VALUATION_INTEGRITY_ERROR: سجل الاستلام الأصلي غير موجود في دفتر مصادر متوسط التكلفة');
       }
 
-      const coveredRemQtyUnits = qtyBasisUnits - remToCover;
-      const consumedQtyUnits = remToCover;
+      const rootReceivedQtyUnits = rootSources.reduce((acc, s) => acc + s.recvQtyUnits, 0n);
+      const totalRemainingQtyUnits = parsedSources.reduce((acc, s) => acc + s.remQtyUnits, 0n);
+
+      if (totalRemainingQtyUnits > rootReceivedQtyUnits) {
+        throw new ValidationError('VALUATION_INTEGRITY_ERROR: إجمالي الكمية المتبقية بالمصادر يتجاوز كمية الاستلام الأصلية');
+      }
+      if (qtyBasisUnits > rootReceivedQtyUnits) {
+        throw new ValidationError(
+          `VALUATION_INTEGRITY_ERROR: الكمية المفوترة (${fromMinorUnits(qtyBasisUnits, QTY_SCALE)}) تتجاوز كمية الاستلام المسجلة في دفتر المصادر (${fromMinorUnits(rootReceivedQtyUnits, QTY_SCALE)}).`
+        );
+      }
+
+      const activeSources = parsedSources.filter((s) => s.remQtyUnits > 0n);
+      const coveredRemQtyUnits = totalRemainingQtyUnits < qtyBasisUnits ? totalRemainingQtyUnits : qtyBasisUnits;
+      const consumedQtyUnits = qtyBasisUnits - coveredRemQtyUnits;
+
       const [plannedRemUnits, plannedConsUnits] = allocateProportionalUnits(totalVarianceUnits, [
         coveredRemQtyUnits,
         consumedQtyUnits,
       ]);
       consumedAllocationUnits = plannedConsUnits;
 
-      if (whCoverWeights.length > 0 && plannedRemUnits !== 0n) {
+      if (activeSources.length > 0 && plannedRemUnits !== 0n) {
+        // Deadlock-safe lock order for touched warehouse balances
+        const touchedWhs = Array.from(new Set(activeSources.map((s) => s.row.warehouseId))).sort();
+        const whPoolRemaining = new Map<string, bigint>();
+        const whCurQty = new Map<string, bigint>();
+        for (const whId of touchedWhs) {
+          const bal = await this.valuationRepo.lockValuationBalanceForUpdate(companyId, whId, input.itemId, tx);
+          whPoolRemaining.set(whId, bal ? parseExactUnits(bal.totalCost, COST_SCALE, 'whTotal') : 0n);
+          whCurQty.set(whId, bal ? parseExactUnits(bal.quantity, QTY_SCALE, 'whQty') : 0n);
+        }
+
         const shares = allocateProportionalUnits(
           plannedRemUnits,
-          whCoverWeights.map((w) => w.coverQtyUnits)
+          activeSources.map((s) => s.remQtyUnits)
         );
 
-        for (let i = 0; i < whCoverWeights.length; i++) {
-          const { whId, coverQtyUnits } = whCoverWeights[i];
-          const bal = lockedBalances.get(whId)!;
-          const curQtyUnits = parseExactUnits(bal.quantity, QTY_SCALE, 'curQty');
-          const curTotalUnits = parseExactUnits(bal.totalCost, COST_SCALE, 'curTotal');
+        const whDeltaMap = new Map<string, bigint>();
+        const whCoveredQtyMap = new Map<string, bigint>();
+        for (let i = 0; i < activeSources.length; i++) {
+          const src = activeSources[i];
+          const whId = src.row.warehouseId;
           let shareUnits = shares[i];
 
-          if (curTotalUnits + shareUnits < 0n) {
-            const clamped = -curTotalUnits;
-            const overflow = shareUnits - clamped;
-            shareUnits = clamped;
+          const minRowDelta = -src.remValUnits;
+          const curWhPool = whPoolRemaining.get(whId) ?? 0n;
+          const minWhDelta = -curWhPool;
+          const tightestFloor = minRowDelta > minWhDelta ? minRowDelta : minWhDelta;
+
+          if (shareUnits < tightestFloor) {
+            const overflow = shareUnits - tightestFloor;
+            shareUnits = tightestFloor;
             consumedAllocationUnits += overflow;
           }
 
-          const nextTotalUnits = curTotalUnits + shareUnits;
-          const nextUnitCostUnits =
-            curQtyUnits > 0n ? divExactUnits(nextTotalUnits, COST_SCALE, curQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
-          await this.valuationRepo.setValuationBalanceExact(
-            companyId,
-            whId,
-            input.itemId,
-            fromMinorUnits(curQtyUnits, QTY_SCALE),
-            fromMinorUnits(nextTotalUnits, COST_SCALE),
-            fromMinorUnits(nextUnitCostUnits, COST_SCALE),
-            tx
-          );
-          remainingAllocationUnits += shareUnits;
+          if (shareUnits !== 0n) {
+            await this.valuationRepo.applyPpvToMaSourceBalance(
+              companyId,
+              src.row.id,
+              fromMinorUnits(shareUnits, COST_SCALE),
+              tx
+            );
+          }
 
-          if (i > 0) {
-            const adj = await this.valuationRepo.createCostAdjustment(
+          whPoolRemaining.set(whId, curWhPool + shareUnits);
+          whDeltaMap.set(whId, (whDeltaMap.get(whId) ?? 0n) + shareUnits);
+          whCoveredQtyMap.set(whId, (whCoveredQtyMap.get(whId) ?? 0n) + src.remQtyUnits);
+          remainingAllocationUnits += shareUnits;
+        }
+
+        const orderedWhs = [...whDeltaMap.keys()].sort((a, b) => {
+          if (a === input.warehouseId) return -1;
+          if (b === input.warehouseId) return 1;
+          return a.localeCompare(b);
+        });
+
+        for (const whId of orderedWhs) {
+          const whDelta = whDeltaMap.get(whId) ?? 0n;
+          const curQtyUnits = whCurQty.get(whId) ?? 0n;
+          const nextTotalUnits = whPoolRemaining.get(whId) ?? 0n;
+          if (whDelta !== 0n) {
+            const nextUnitCostUnits =
+              curQtyUnits > 0n ? divExactUnits(nextTotalUnits, COST_SCALE, curQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+            await this.valuationRepo.setValuationBalanceExact(
+              companyId,
+              whId,
+              input.itemId,
+              fromMinorUnits(curQtyUnits, QTY_SCALE),
+              fromMinorUnits(nextTotalUnits, COST_SCALE),
+              fromMinorUnits(nextUnitCostUnits, COST_SCALE),
+              tx
+            );
+          }
+
+          const whEventQtyUnits = whCoveredQtyMap.get(whId) ?? qtyBasisUnits;
+          if (whDelta !== 0n || whId === orderedWhs[0]) {
+            await this.valuationRepo.createMaSourceEvent(
               companyId,
               {
+                warehouseId: whId,
+                itemId: input.itemId,
                 sourceType: 'SUPPLIER_INVOICE_PPV',
                 sourceId: input.invoiceId,
                 sourceLineId: input.invoiceLineId,
+                originSourceType: 'GRN',
+                originSourceId: input.grnId,
+                originSourceLineId: input.grnLineId,
                 grnId: input.grnId,
                 grnLineId: input.grnLineId,
-                invoiceId: input.invoiceId,
-                invoiceLineId: input.invoiceLineId,
-                costLayerId: null,
-                itemId: input.itemId,
-                warehouseId: whId,
-                costingMethod: method,
-                qtyBasis: fromMinorUnits(coverQtyUnits, QTY_SCALE),
-                originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
-                finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
-                unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
-                adjustmentAmount: fromMinorUnits(shareUnits, COST_SCALE),
-                remainingAllocation: fromMinorUnits(shareUnits, COST_SCALE),
-                consumedAllocation: '0.0000',
-                status: 'posted',
-                reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
-                journalEntryId: input.journalEntryId ?? null,
-                approvedBy: input.approvedBy ?? null,
-                createdBy: input.createdBy ?? null,
+                eventType: 'PPV',
+                quantity: fromMinorUnits(whEventQtyUnits > 0n ? whEventQtyUnits : qtyBasisUnits, QTY_SCALE),
+                valueDelta: fromMinorUnits(whDelta, COST_SCALE),
               },
               tx
             );
-            adjustments.push(adj);
           }
         }
 
-        const firstWh = whCoverWeights[0];
-        const otherRemSum = adjustments.reduce(
-          (acc, a) => acc + parseExactUnits(a.remainingAllocation, COST_SCALE, 'remAlloc'),
-          0n
-        );
-        const firstRem = remainingAllocationUnits - otherRemSum;
+        for (let i = 1; i < orderedWhs.length; i++) {
+          const whId = orderedWhs[i];
+          const whDelta = whDeltaMap.get(whId) ?? 0n;
+          const whQtyCovered = whCoveredQtyMap.get(whId) ?? 0n;
+          const adj = await this.valuationRepo.createCostAdjustment(
+            companyId,
+            {
+              sourceType: 'SUPPLIER_INVOICE_PPV',
+              sourceId: input.invoiceId,
+              sourceLineId: input.invoiceLineId,
+              grnId: input.grnId,
+              grnLineId: input.grnLineId,
+              invoiceId: input.invoiceId,
+              invoiceLineId: input.invoiceLineId,
+              costLayerId: null,
+              itemId: input.itemId,
+              warehouseId: whId,
+              costingMethod: method,
+              qtyBasis: fromMinorUnits(whQtyCovered > 0n ? whQtyCovered : qtyBasisUnits, QTY_SCALE),
+              originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
+              finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
+              unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
+              adjustmentAmount: fromMinorUnits(whDelta, COST_SCALE),
+              remainingAllocation: fromMinorUnits(whDelta, COST_SCALE),
+              consumedAllocation: '0.0000',
+              status: 'posted',
+              reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
+              journalEntryId: input.journalEntryId ?? null,
+              approvedBy: input.approvedBy ?? null,
+              createdBy: input.createdBy ?? null,
+            },
+            tx
+          );
+          adjustments.push(adj);
+        }
+
+        const primaryWh = orderedWhs[0];
+        const primaryRem = whDeltaMap.get(primaryWh) ?? 0n;
         const firstAdj = await this.valuationRepo.createCostAdjustment(
           companyId,
           {
@@ -1823,14 +1935,14 @@ export class InventoryValuationService {
             invoiceLineId: input.invoiceLineId,
             costLayerId: null,
             itemId: input.itemId,
-            warehouseId: firstWh.whId,
+            warehouseId: primaryWh,
             costingMethod: method,
             qtyBasis: fromMinorUnits(qtyBasisUnits, QTY_SCALE),
             originalUnitCost: fromMinorUnits(origUnitCostUnits, COST_SCALE),
             finalUnitCost: fromMinorUnits(finalUnitCostUnits, COST_SCALE),
             unitVariance: fromMinorUnits(unitVarianceUnits, COST_SCALE),
-            adjustmentAmount: fromMinorUnits(firstRem + consumedAllocationUnits, COST_SCALE),
-            remainingAllocation: fromMinorUnits(firstRem, COST_SCALE),
+            adjustmentAmount: fromMinorUnits(primaryRem + consumedAllocationUnits, COST_SCALE),
+            remainingAllocation: fromMinorUnits(primaryRem, COST_SCALE),
             consumedAllocation: fromMinorUnits(consumedAllocationUnits, COST_SCALE),
             status: 'posted',
             reason: input.reason || 'تسوية فرق سعر فاتورة المورد عن تكلفة الاستلام',
@@ -1874,6 +1986,26 @@ export class InventoryValuationService {
           tx
         );
         adjustments.push(adj);
+
+        await this.valuationRepo.createMaSourceEvent(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: 'SUPPLIER_INVOICE_PPV',
+            sourceId: input.invoiceId,
+            sourceLineId: input.invoiceLineId,
+            originSourceType: 'GRN',
+            originSourceId: input.grnId,
+            originSourceLineId: input.grnLineId,
+            grnId: input.grnId,
+            grnLineId: input.grnLineId,
+            eventType: 'PPV',
+            quantity: fromMinorUnits(qtyBasisUnits, QTY_SCALE),
+            valueDelta: '0.0000',
+          },
+          tx
+        );
       }
     }
 
@@ -2047,38 +2179,113 @@ export class InventoryValuationService {
           remToReturn -= takeQty;
         }
       } else {
-        // PERPETUAL_MOVING_AVERAGE: derive authoritative GRN source unit cost including posted PPV adjustments
-        const postedAdjs = await this.valuationRepo.findCostAdjustmentsByGrnLine(companyId, input.grnLineId, client);
-        let sourceUnitCostUnits = grnUnitCostUnits;
-        if (postedAdjs.length > 0) {
-          let totalRemainingAdjOnGrn = 0n;
-          for (const a of postedAdjs) {
-            totalRemainingAdjOnGrn += parseExactUnits(a.remainingAllocation, COST_SCALE, 'remAlloc');
-          }
-          const baseTotal = mulExactUnits(grnQtyUnits, QTY_SCALE, grnUnitCostUnits, COST_SCALE, COST_SCALE);
-          const adjustedTotal = baseTotal + totalRemainingAdjOnGrn;
-          if (adjustedTotal < 0n) {
-            throw new ValidationError('VALUATION_INTEGRITY_ERROR: تكلفة المصدر المعدلة للمرتجع سالبة');
-          }
-          sourceUnitCostUnits = divExactUnits(adjustedTotal, COST_SCALE, grnQtyUnits, QTY_SCALE, COST_SCALE);
+        // PERPETUAL_MOVING_AVERAGE: derive & validate provenance from locked MA source balances
+        const originSources = await this.valuationRepo.findMaSourceBalancesByGrnLineForUpdate(
+          companyId,
+          input.grnLineId,
+          client
+        );
+        if (originSources.length === 0) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: لا توجد سجلات مصدر لمتوسط التكلفة مرتبطة بسطر إذن الاستلام الأصلي (${input.grnLineId}).`
+          );
         }
 
-        returnTotalUnits = mulExactUnits(qtyUnits, QTY_SCALE, sourceUnitCostUnits, COST_SCALE, COST_SCALE);
-        if (qtyUnits === prevQtyUnits) {
-          // If returning the entire remaining pool and rounding differs by tiny epsilon, or protect non-negative pool
-          if (returnTotalUnits > prevTotalUnits) {
-            const diff = returnTotalUnits - prevTotalUnits;
-            if (diff <= 10n) {
+        const whSources = originSources.filter((s) => {
+          if (s.itemId !== input.itemId) {
+            throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم تطابق الصنف في سجل مصدر مرتجع المشتريات');
+          }
+          if (s.grnId && s.grnId !== input.grnId) {
+            throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم تطابق إذن الاستلام في سجل مصدر مرتجع المشتريات');
+          }
+          return s.warehouseId === input.warehouseId && parseExactUnits(s.remainingQty, QTY_SCALE, 'rem') > 0n;
+        });
+
+        const whSourceRemSum = whSources.reduce(
+          (sum, s) => sum + parseExactUnits(s.remainingQty, QTY_SCALE, 'rem'),
+          0n
+        );
+        if (whSourceRemSum < qtyUnits) {
+          const allWhRemSum = originSources.reduce(
+            (sum, s) => sum + parseExactUnits(s.remainingQty, QTY_SCALE, 'rem'),
+            0n
+          );
+          throw new ValidationError(
+            allWhRemSum >= qtyUnits
+              ? `الكمية المتاحة من أرصدة مصدر الاستلام الأصلي في هذا المستودع (${fromMinorUnits(whSourceRemSum, QTY_SCALE)}) أقل من كمية المرتجع (${fromMinorUnits(qtyUnits, QTY_SCALE)}) بسبب تحويل أو صرف جزء من البضاعة.`
+              : `VALUATION_INTEGRITY_ERROR: الكمية المتبقية في دفتر مصادر الاستلام (${fromMinorUnits(whSourceRemSum, QTY_SCALE)}) غير كافية لمرتجع (${fromMinorUnits(qtyUnits, QTY_SCALE)}).`
+          );
+        }
+
+        let remToReturn = qtyUnits;
+        const maUpdates: Array<{
+          id: string;
+          nextRemQty: bigint;
+          nextConsQty: bigint;
+          nextRemVal: bigint;
+          nextConsVal: bigint;
+          takeVal: bigint;
+        }> = [];
+
+        for (const src of whSources) {
+          if (remToReturn <= 0n) break;
+          const remQtyU = parseExactUnits(src.remainingQty, QTY_SCALE, 'remQty');
+          const consQtyU = parseExactUnits(src.consumedQty, QTY_SCALE, 'consQty');
+          const remValU = parseExactUnits(src.remainingValue, COST_SCALE, 'remVal');
+          const consValU = parseExactUnits(src.consumedValue, COST_SCALE, 'consVal');
+
+          const takeQty = remToReturn < remQtyU ? remToReturn : remQtyU;
+          let takeVal: bigint;
+          if (takeQty === remQtyU) {
+            takeVal = remValU;
+          } else {
+            const unitVal = divExactUnits(remValU, COST_SCALE, remQtyU, QTY_SCALE, COST_SCALE);
+            takeVal = mulExactUnits(takeQty, QTY_SCALE, unitVal, COST_SCALE, COST_SCALE);
+            if (takeVal > remValU) takeVal = remValU;
+          }
+
+          maUpdates.push({
+            id: src.id,
+            nextRemQty: remQtyU - takeQty,
+            nextConsQty: consQtyU + takeQty,
+            nextRemVal: remValU - takeVal,
+            nextConsVal: consValU + takeVal,
+            takeVal,
+          });
+          returnTotalUnits += takeVal;
+          remToReturn -= takeQty;
+        }
+
+        if (returnTotalUnits > prevTotalUnits) {
+          const diff = returnTotalUnits - prevTotalUnits;
+          if (qtyUnits === prevQtyUnits && diff <= 10n && maUpdates.length > 0) {
+            const last = maUpdates[maUpdates.length - 1];
+            if (last.takeVal >= diff) {
+              last.takeVal -= diff;
+              last.nextRemVal += diff;
+              last.nextConsVal -= diff;
               returnTotalUnits = prevTotalUnits;
             } else {
               throw new ValidationError(
                 `VALUATION_INTEGRITY_ERROR: القيمة الدفترية المتبقية بالمستودع (${fromMinorUnits(prevTotalUnits, COST_SCALE)}) لا تكفي لتغطية تكلفة المرتجع الأصلية (${fromMinorUnits(returnTotalUnits, COST_SCALE)}).`
               );
             }
+          } else {
+            throw new ValidationError(
+              `VALUATION_INTEGRITY_ERROR: القيمة الدفترية المتبقية بالمستودع (${fromMinorUnits(prevTotalUnits, COST_SCALE)}) لا تكفي لتغطية تكلفة المرتجع الأصلية (${fromMinorUnits(returnTotalUnits, COST_SCALE)}).`
+            );
           }
-        } else if (returnTotalUnits > prevTotalUnits) {
-          throw new ValidationError(
-            `VALUATION_INTEGRITY_ERROR: القيمة الدفترية المتبقية بالمستودع (${fromMinorUnits(prevTotalUnits, COST_SCALE)}) لا تكفي لتغطية تكلفة المرتجع الأصلية (${fromMinorUnits(returnTotalUnits, COST_SCALE)}).`
+        }
+
+        for (const u of maUpdates) {
+          await this.valuationRepo.updateMaSourceBalanceQuantities(
+            companyId,
+            u.id,
+            fromMinorUnits(u.nextRemQty, QTY_SCALE),
+            fromMinorUnits(u.nextConsQty, QTY_SCALE),
+            client,
+            fromMinorUnits(u.nextRemVal, COST_SCALE),
+            fromMinorUnits(u.nextConsVal, COST_SCALE)
           );
         }
 
@@ -2159,11 +2366,374 @@ export class InventoryValuationService {
         );
       }
 
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        await this.valuationRepo.createMaSourceEvent(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: 'PURCHASE_RETURN',
+            sourceId: input.returnId,
+            sourceLineId: input.returnLineId,
+            originSourceType: 'GRN',
+            originSourceId: input.grnId,
+            originSourceLineId: input.grnLineId,
+            grnId: input.grnId,
+            grnLineId: input.grnLineId,
+            eventType: 'PURCHASE_RETURN',
+            quantity: fromMinorUnits(qtyUnits, QTY_SCALE),
+            valueDelta: fromMinorUnits(-returnTotalUnits, COST_SCALE),
+            referenceMovementId: movement.id,
+          },
+          client
+        );
+      }
+
       return {
         balance,
         movement,
         unitCost: unitsToSafeNumber(effectiveReturnUnitCostUnits, COST_SCALE),
         totalCost: unitsToSafeNumber(returnTotalUnits, COST_SCALE),
+        costingMethod: method,
+      };
+    };
+
+    if (tx) {
+      return await execute(tx);
+    }
+    return await withTenantTransaction(companyId, execute);
+  }
+
+  /**
+   * Restores inventory valuation upon a posted Sales Return using ONLY the original frozen delivery
+   * cost layers (FIFO) or original frozen delivery cost (MA — never current pool average).
+   */
+  async restoreSalesReturnInventory(
+    companyId: string,
+    input: SalesReturnValuationInput,
+    userId?: string,
+    tx?: DbExecutor
+  ): Promise<{
+    balance: ValuationBalance;
+    movement: ValuationMovement;
+    unitCost: number;
+    totalCost: number;
+    costingMethod: CostingMethod;
+  }> {
+    const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
+    const delQtyUnits = parseExactUnits(input.deliveryQty, QTY_SCALE, 'deliveryQty');
+    const delFrozenTotalUnits = parseExactUnits(input.deliveryFrozenTotalCost, COST_SCALE, 'deliveryFrozenTotalCost');
+
+    if (qtyUnits <= 0n || delQtyUnits <= 0n || delFrozenTotalUnits < 0n) {
+      throw new ValidationError('كمية مرتجع المبيعات وبيانات التسليم الأصلية يجب أن تكون صالحة');
+    }
+
+    const stockSyncMode: StockSyncMode = input.stockSyncMode || 'internal';
+
+    const execute = async (client: DbExecutor) => {
+      const existingMov = await this.valuationRepo.findValuationMovementByIdempotency(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        'RETURN',
+        'SALES_RETURN',
+        input.returnId,
+        input.returnLineId,
+        client
+      );
+      if (existingMov) {
+        throw new ValidationError('IDEMPOTENT_DUPLICATE: تم تسجيل حركة التقييم لمرتجع المبيعات هذا مسبقاً');
+      }
+
+      const { method } = await this.getItemCostingMethod(companyId, input.itemId, client);
+
+      const currentBalance = await this.valuationRepo.lockValuationBalanceForUpdate(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        client
+      );
+      const prevQtyUnits = currentBalance ? parseExactUnits(currentBalance.quantity, QTY_SCALE, 'prevQty') : 0n;
+      const prevTotalUnits = currentBalance ? parseExactUnits(currentBalance.totalCost, COST_SCALE, 'prevTotalCost') : 0n;
+
+      if (stockSyncMode === 'internal') {
+        const stockBal = await this.stockRepo.getBalanceForUpdate(companyId, input.warehouseId, input.itemId, client);
+        const stockUnits = stockBal ? parseExactUnits(stockBal.qty, QTY_SCALE, 'stockQty') : 0n;
+        if (stockUnits !== prevQtyUnits) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: عدم تطابق الرصيد الكمي بالمستودع مع رصيد التقييم قبل مرتجع المبيعات');
+        }
+      } else {
+        if (input.expectedPreStockQty !== undefined) {
+          const preUnits = parseExactUnits(input.expectedPreStockQty, QTY_SCALE, 'expectedPreStockQty');
+          if (preUnits !== prevQtyUnits) {
+            throw new ValidationError(
+              `VALUATION_INTEGRITY_ERROR: رصيد المخزون قبل المرتجع (${fromMinorUnits(preUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+            );
+          }
+        }
+        if (input.expectedPostStockQty !== undefined) {
+          const postUnits = parseExactUnits(input.expectedPostStockQty, QTY_SCALE, 'expectedPostStockQty');
+          if (postUnits !== prevQtyUnits + qtyUnits) {
+            throw new ValidationError(
+              `VALUATION_INTEGRITY_ERROR: رصيد المخزون بعد المرتجع (${fromMinorUnits(postUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(prevQtyUnits + qtyUnits, QTY_SCALE)}).`
+            );
+          }
+        }
+      }
+
+      const priorReturnMovs = input.deliveryValuationMovementId
+        ? await this.valuationRepo.listSalesReturnMovementsByReference(
+            companyId,
+            input.deliveryValuationMovementId,
+            client
+          )
+        : [];
+
+      let alreadyReturnedQtyUnits = 0n;
+      let alreadyReturnedCostUnits = 0n;
+      for (const m of priorReturnMovs) {
+        alreadyReturnedQtyUnits += parseExactUnits(m.qty, QTY_SCALE, 'priorRetQty');
+        alreadyReturnedCostUnits += parseExactUnits(m.totalCost, COST_SCALE, 'priorRetCost');
+      }
+
+      const cumulativeReturnedQtyUnits = alreadyReturnedQtyUnits + qtyUnits;
+      if (cumulativeReturnedQtyUnits > delQtyUnits) {
+        throw new ValidationError(
+          `كمية مرتجع المبيعات (${fromMinorUnits(qtyUnits, QTY_SCALE)}) تتجاوز الكمية القابلة للإرجاع من إذن التسليم (${fromMinorUnits(delQtyUnits - alreadyReturnedQtyUnits, QTY_SCALE)}).`
+        );
+      }
+
+      let restoredTotalUnits = 0n;
+      const restoredAllocations: Array<{ layerId: string | null; qtyUnits: bigint; unitCostUnits: bigint; costUnits: bigint }> = [];
+
+      if (method === 'FIFO') {
+        if (!input.deliveryValuationMovementId) {
+          throw new ValidationError(
+            'VALUATION_INTEGRITY_ERROR: مرتجع المبيعات لنظام FIFO يتطلب الارتباط بحركة تقييم التسليم الأصلية لاستعادة الطبقات بدقة.'
+          );
+        }
+        const origAllocs = await this.valuationRepo.listAllocationsForMovement(
+          companyId,
+          input.deliveryValuationMovementId,
+          client
+        );
+        if (origAllocs.length === 0) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: لا توجد تخصيصات طبقات FIFO لحركة التسليم (${input.deliveryValuationMovementId}).`
+          );
+        }
+
+        let cursor = 0n;
+        for (const alloc of origAllocs) {
+          const allocQtyU = parseExactUnits(alloc.allocatedQty, QTY_SCALE, 'allocQty');
+          const allocCostU = parseExactUnits(alloc.allocatedCost, COST_SCALE, 'allocCost');
+          const allocUnitCostU = parseExactUnits(alloc.unitCost, COST_SCALE, 'allocUnitCost');
+          const segStart = cursor;
+          const segEnd = cursor + allocQtyU;
+          cursor = segEnd;
+
+          const ovStart = segStart > alreadyReturnedQtyUnits ? segStart : alreadyReturnedQtyUnits;
+          const ovEnd = segEnd < cumulativeReturnedQtyUnits ? segEnd : cumulativeReturnedQtyUnits;
+          if (ovEnd <= ovStart) continue;
+
+          const takeQty = ovEnd - ovStart;
+          const prevOffset = ovStart - segStart;
+          const newOffset = ovEnd - segStart;
+
+          let costAtNew =
+            newOffset >= allocQtyU
+              ? allocCostU
+              : mulExactUnits(newOffset, QTY_SCALE, allocUnitCostU, COST_SCALE, COST_SCALE);
+          if (costAtNew > allocCostU) costAtNew = allocCostU;
+
+          let costAtPrev =
+            prevOffset === 0n
+              ? 0n
+              : prevOffset >= allocQtyU
+                ? allocCostU
+                : mulExactUnits(prevOffset, QTY_SCALE, allocUnitCostU, COST_SCALE, COST_SCALE);
+          if (costAtPrev > allocCostU) costAtPrev = allocCostU;
+
+          const takeCost = costAtNew > costAtPrev ? costAtNew - costAtPrev : 0n;
+          const layerUnitCostU = divExactUnits(takeCost, COST_SCALE, takeQty, QTY_SCALE, COST_SCALE);
+
+          const origLayer = alloc.costLayerId
+            ? await this.valuationRepo.findCostLayerById(companyId, alloc.costLayerId, client)
+            : null;
+
+          const createdLayer = await this.valuationRepo.createCostLayer(
+            companyId,
+            {
+              warehouseId: input.warehouseId,
+              itemId: input.itemId,
+              originalQty: fromMinorUnits(takeQty, QTY_SCALE),
+              unitCost: fromMinorUnits(layerUnitCostU, COST_SCALE),
+              totalCost: fromMinorUnits(takeCost, COST_SCALE),
+              sourceType: 'SALES_RETURN',
+              sourceId: input.returnId,
+              sourceLineId: input.returnLineId,
+              originLayerId: origLayer?.id ?? alloc.costLayerId ?? null,
+              originSourceType: origLayer?.originSourceType ?? origLayer?.sourceType ?? 'SALES_RETURN',
+              originSourceId: origLayer?.originSourceId ?? origLayer?.sourceId ?? input.returnId,
+              originSourceLineId: origLayer?.originSourceLineId ?? origLayer?.sourceLineId ?? input.returnLineId,
+              effectiveDate: origLayer?.effectiveDate ?? null,
+            },
+            client
+          );
+
+          restoredTotalUnits += takeCost;
+          restoredAllocations.push({
+            layerId: createdLayer.id,
+            qtyUnits: takeQty,
+            unitCostUnits: layerUnitCostU,
+            costUnits: takeCost,
+          });
+        }
+
+        if (cursor < cumulativeReturnedQtyUnits) {
+          throw new ValidationError('VALUATION_INTEGRITY_ERROR: مجموع طبقات التسليم الأصلية أقل من الكمية المرتجعة');
+        }
+      } else {
+        // PERPETUAL_MOVING_AVERAGE: restore ONLY at frozen delivery average cost (never current pool average)
+        let targetCostUnits: bigint;
+        if (cumulativeReturnedQtyUnits >= delQtyUnits) {
+          targetCostUnits = delFrozenTotalUnits;
+        } else {
+          targetCostUnits = divExactUnits(
+            delFrozenTotalUnits * cumulativeReturnedQtyUnits,
+            COST_SCALE + QTY_SCALE,
+            delQtyUnits,
+            QTY_SCALE,
+            COST_SCALE
+          );
+        }
+        restoredTotalUnits =
+          targetCostUnits > alreadyReturnedCostUnits ? targetCostUnits - alreadyReturnedCostUnits : 0n;
+        const restoredUnitU = divExactUnits(restoredTotalUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+        restoredAllocations.push({
+          layerId: null,
+          qtyUnits,
+          unitCostUnits: restoredUnitU,
+          costUnits: restoredTotalUnits,
+        });
+      }
+
+      const newQtyUnits = prevQtyUnits + qtyUnits;
+      const newTotalUnits = prevTotalUnits + restoredTotalUnits;
+      const newUnitCostUnits =
+        newQtyUnits > 0n ? divExactUnits(newTotalUnits, COST_SCALE, newQtyUnits, QTY_SCALE, COST_SCALE) : 0n;
+      const effectiveUnitCostUnits = divExactUnits(restoredTotalUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+
+      if (stockSyncMode === 'internal') {
+        await this.stockRepo.incrementBalance(
+          companyId,
+          input.warehouseId,
+          input.itemId,
+          unitsToSafeNumber(qtyUnits, QTY_SCALE),
+          client
+        );
+      }
+
+      const balance = await this.valuationRepo.setValuationBalanceExact(
+        companyId,
+        input.warehouseId,
+        input.itemId,
+        fromMinorUnits(newQtyUnits, QTY_SCALE),
+        fromMinorUnits(newTotalUnits, COST_SCALE),
+        fromMinorUnits(newUnitCostUnits, COST_SCALE),
+        client
+      );
+
+      const movement = await this.valuationRepo.createValuationMovement(
+        companyId,
+        {
+          warehouseId: input.warehouseId,
+          itemId: input.itemId,
+          movementType: 'RETURN',
+          qty: fromMinorUnits(qtyUnits, QTY_SCALE),
+          unitCost: fromMinorUnits(effectiveUnitCostUnits, COST_SCALE),
+          totalCost: fromMinorUnits(restoredTotalUnits, COST_SCALE),
+          sourceType: 'SALES_RETURN',
+          sourceId: input.returnId,
+          sourceLineId: input.returnLineId,
+          journalEntryId: input.journalEntryId ?? null,
+          reason: input.reason ?? 'مرتجع مبيعات بتكلفة التسليم المجمدة الأصلية',
+          costSource: 'DELIVERY_FROZEN_COST',
+          costingMethod: method,
+          referenceMovementId: input.deliveryValuationMovementId ?? null,
+          createdBy: userId ?? null,
+        },
+        client
+      );
+
+      for (const alloc of restoredAllocations) {
+        await this.valuationRepo.createCostAllocation(
+          companyId,
+          {
+            valuationMovementId: movement.id,
+            costLayerId: alloc.layerId,
+            allocatedQty: fromMinorUnits(alloc.qtyUnits, QTY_SCALE),
+            unitCost: fromMinorUnits(alloc.unitCostUnits, COST_SCALE),
+            allocatedCost: fromMinorUnits(alloc.costUnits, COST_SCALE),
+          },
+          client
+        );
+      }
+
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        const qtyStr = fromMinorUnits(qtyUnits, QTY_SCALE);
+        const totalCostStr = fromMinorUnits(restoredTotalUnits, COST_SCALE);
+
+        await this.valuationRepo.upsertMaSourceBalance(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: 'SALES_RETURN',
+            sourceId: input.returnId,
+            sourceLineId: input.returnLineId,
+            originSourceType: 'SALES_RETURN',
+            originSourceId: input.returnId,
+            originSourceLineId: input.returnLineId,
+            grnId: null,
+            grnLineId: null,
+            receivedQty: qtyStr,
+            remainingQty: qtyStr,
+            consumedQty: '0.0000',
+            originalValue: totalCostStr,
+            remainingValue: totalCostStr,
+            consumedValue: '0.0000',
+          },
+          client
+        );
+
+        await this.valuationRepo.createMaSourceEvent(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: 'SALES_RETURN',
+            sourceId: input.returnId,
+            sourceLineId: input.returnLineId,
+            originSourceType: 'SALES_RETURN',
+            originSourceId: input.returnId,
+            originSourceLineId: input.returnLineId,
+            grnId: null,
+            grnLineId: null,
+            eventType: 'SALES_RETURN',
+            quantity: qtyStr,
+            valueDelta: totalCostStr,
+            referenceMovementId: movement.id,
+          },
+          client
+        );
+      }
+
+      return {
+        balance,
+        movement,
+        unitCost: unitsToSafeNumber(effectiveUnitCostUnits, COST_SCALE),
+        totalCost: unitsToSafeNumber(restoredTotalUnits, COST_SCALE),
         costingMethod: method,
       };
     };
@@ -2697,6 +3267,9 @@ export class InventoryValuationService {
         periodEndDate = periodRes.rows[0].end_date;
       }
 
+      const hasScopedFilter = Boolean(input.warehouseId || input.itemId || input.costingMethod);
+      const isHistoricalPeriod = Boolean(input.periodId) && !hasScopedFilter;
+
       // 1. Subledger Valuation Total (filtered cleanly by warehouse/item/costingMethod)
       const subClauses = ['vb.company_id = $1'];
       const subParams: any[] = [companyId];
@@ -2720,70 +3293,142 @@ export class InventoryValuationService {
          WHERE ${subClauses.join(' AND ')};`,
         subParams
       );
-      const subledgerTotalUnits = parseExactUnits(subRes.rows[0]?.total || '0', COST_SCALE, 'subledgerTotal');
+      let subledgerTotalUnits = parseExactUnits(subRes.rows[0]?.total || '0', COST_SCALE, 'subledgerTotal');
 
-      // 2. GL Control Account Net Posted Balance (Debit - Credit)
-      const glRes = await tx.query<{ netBalance: string }>(
-        `SELECT COALESCE(SUM(l.debit - l.credit), 0)::text as "netBalance"
-         FROM journal_lines l
-         JOIN journal_entries e ON e.id = l.entry_id AND e.company_id = l.company_id
-         WHERE l.company_id = $1
-           AND l.account_id = $2
-           AND e.status = 'posted'
-           AND ($3::date IS NULL OR e.entry_date <= $3::date);`,
-        [companyId, inventoryAccountId, periodEndDate]
-      );
-      const glControlTotalUnits = parseExactUnits(glRes.rows[0]?.netBalance || '0', COST_SCALE, 'glControlTotal');
-      const varianceUnits = subledgerTotalUnits - glControlTotalUnits;
+      // Diagnostic scope filters when filtered reconciliation is requested
+      const vmClauses = ['vm.company_id = $1', `vm.movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN')`, 'vm.journal_entry_id IS NULL'];
+      const vmParams: any[] = [companyId];
+      const caClauses = ['ca.company_id = $1', `((ca.remaining_allocation + ca.consumed_allocation) <> ca.adjustment_amount OR (ca.status = 'posted' AND ca.journal_entry_id IS NULL))`];
+      const caParams: any[] = [companyId];
+      const dupMovClauses = ['vm.company_id = $1', 'vm.journal_entry_id IS NOT NULL'];
+      const dupMovParams: any[] = [companyId];
+      const dupAdjClauses = ['ca.company_id = $1', 'ca.journal_entry_id IS NOT NULL'];
+      const dupAdjParams: any[] = [companyId];
+      const openClauses = ['company_id = $1', `status = 'approved'`];
+      const openParams: any[] = [companyId];
+
+      if (hasScopedFilter) {
+        if (input.warehouseId) {
+          vmParams.push(input.warehouseId);
+          vmClauses.push(`vm.warehouse_id = $${vmParams.length}`);
+          caParams.push(input.warehouseId);
+          caClauses.push(`ca.warehouse_id = $${caParams.length}`);
+          dupMovParams.push(input.warehouseId);
+          dupMovClauses.push(`vm.warehouse_id = $${dupMovParams.length}`);
+          dupAdjParams.push(input.warehouseId);
+          dupAdjClauses.push(`ca.warehouse_id = $${dupAdjParams.length}`);
+          openParams.push(input.warehouseId);
+          openClauses.push(`warehouse_id = $${openParams.length}`);
+        }
+        if (input.itemId) {
+          vmParams.push(input.itemId);
+          vmClauses.push(`vm.item_id = $${vmParams.length}`);
+          caParams.push(input.itemId);
+          caClauses.push(`ca.item_id = $${caParams.length}`);
+          dupMovParams.push(input.itemId);
+          dupMovClauses.push(`vm.item_id = $${dupMovParams.length}`);
+          dupAdjParams.push(input.itemId);
+          dupAdjClauses.push(`ca.item_id = $${dupAdjParams.length}`);
+          openParams.push(input.itemId);
+          openClauses.push(`item_id = $${openParams.length}`);
+        }
+        if (input.costingMethod) {
+          vmParams.push(input.costingMethod);
+          vmClauses.push(`vm.costing_method = $${vmParams.length}`);
+          caParams.push(input.costingMethod);
+          caClauses.push(`ca.costing_method = $${caParams.length}`);
+          dupMovParams.push(input.costingMethod);
+          dupMovClauses.push(`vm.costing_method = $${dupMovParams.length}`);
+          dupAdjParams.push(input.costingMethod);
+          dupAdjClauses.push(`ca.costing_method = $${dupAdjParams.length}`);
+          openParams.push(input.costingMethod);
+          openClauses.push(`costing_method = $${openParams.length}`);
+        }
+      }
 
       // 3. Unmatched non-transfer valuation movements (missing journal link)
       const unmatchedRes = await tx.query<{ cnt: number }>(
         `SELECT COUNT(*)::int as cnt
-         FROM inv_valuation_movements
-         WHERE company_id = $1
-           AND movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN')
-           AND journal_entry_id IS NULL;`,
-        [companyId]
+         FROM inv_valuation_movements vm
+         WHERE ${vmClauses.join(' AND ')};`,
+        vmParams
       );
       const unmatchedMovementsCount = Number(unmatchedRes.rows[0]?.cnt || 0);
 
       // 4. Unbalanced PPV/cost adjustments or missing journal link
       const adjMismatchRes = await tx.query<{ cnt: number }>(
         `SELECT COUNT(*)::int as cnt
-         FROM inv_cost_adjustments
-         WHERE company_id = $1
-           AND (
-             (remaining_allocation + consumed_allocation) <> adjustment_amount
-             OR (status = 'posted' AND journal_entry_id IS NULL)
-           );`,
-        [companyId]
+         FROM inv_cost_adjustments ca
+         WHERE ${caClauses.join(' AND ')};`,
+        caParams
       );
       const unbalancedAdjustmentsCount = Number(adjMismatchRes.rows[0]?.cnt || 0);
 
       // 5. Duplicate journal links across distinct sources
-      const dupRes = await tx.query<{ cnt: number }>(
-        `SELECT (
-           (SELECT COUNT(*)::int FROM (
-             SELECT journal_entry_id
-             FROM inv_valuation_movements
-             WHERE company_id = $1 AND journal_entry_id IS NOT NULL
-             GROUP BY journal_entry_id
-             HAVING COUNT(DISTINCT source_id) > 1
-           ) x)
-           +
-           (SELECT COUNT(*)::int FROM (
-             SELECT journal_entry_id
-             FROM inv_cost_adjustments
-             WHERE company_id = $1 AND journal_entry_id IS NOT NULL
-             GROUP BY journal_entry_id
-             HAVING COUNT(DISTINCT invoice_id) > 1
-           ) y)
-         )::int as cnt;`,
-        [companyId]
-      );
-      const duplicateJournalLinksCount = Number(dupRes.rows[0]?.cnt || 0);
+      let duplicateJournalLinksCount = 0;
+      if (hasScopedFilter) {
+        const dupMovRes = await tx.query<{ cnt: number }>(
+          `SELECT COUNT(*)::int as cnt FROM (
+             SELECT vm.journal_entry_id
+             FROM inv_valuation_movements vm
+             WHERE ${dupMovClauses.join(' AND ')}
+             GROUP BY vm.journal_entry_id
+             HAVING COUNT(DISTINCT vm.source_id) > 1
+           ) x;`,
+          dupMovParams
+        );
+        const dupAdjRes = await tx.query<{ cnt: number }>(
+          `SELECT COUNT(*)::int as cnt FROM (
+             SELECT ca.journal_entry_id
+             FROM inv_cost_adjustments ca
+             WHERE ${dupAdjClauses.join(' AND ')}
+             GROUP BY ca.journal_entry_id
+             HAVING COUNT(DISTINCT ca.invoice_id) > 1
+           ) y;`,
+          dupAdjParams
+        );
+        duplicateJournalLinksCount = Number(dupMovRes.rows[0]?.cnt || 0) + Number(dupAdjRes.rows[0]?.cnt || 0);
+      } else {
+        const dupRes = await tx.query<{ cnt: number }>(
+          `SELECT (
+             (SELECT COUNT(*)::int FROM (
+               SELECT journal_entry_id
+               FROM inv_valuation_movements
+               WHERE company_id = $1 AND journal_entry_id IS NOT NULL
+               GROUP BY journal_entry_id
+               HAVING COUNT(DISTINCT source_id) > 1
+             ) x)
+             +
+             (SELECT COUNT(*)::int FROM (
+               SELECT journal_entry_id
+               FROM inv_cost_adjustments
+               WHERE company_id = $1 AND journal_entry_id IS NOT NULL
+               GROUP BY journal_entry_id
+               HAVING COUNT(DISTINCT invoice_id) > 1
+             ) y)
+           )::int as cnt;`,
+          [companyId]
+        );
+        duplicateJournalLinksCount = Number(dupRes.rows[0]?.cnt || 0);
+      }
 
       // 6. Qty vs Valuation Qty vs FIFO Layer Sum Mismatches
+      const qtyFilterClauses = ['COALESCE(sb.company_id, vb.company_id) = $1'];
+      const qtyFilterParams: any[] = [companyId];
+      if (hasScopedFilter) {
+        if (input.warehouseId) {
+          qtyFilterParams.push(input.warehouseId);
+          qtyFilterClauses.push(`COALESCE(sb.warehouse_id, vb.warehouse_id) = $${qtyFilterParams.length}`);
+        }
+        if (input.itemId) {
+          qtyFilterParams.push(input.itemId);
+          qtyFilterClauses.push(`COALESCE(sb.item_id, vb.item_id) = $${qtyFilterParams.length}`);
+        }
+        if (input.costingMethod) {
+          qtyFilterParams.push(input.costingMethod);
+          qtyFilterClauses.push(`cp.costing_method = $${qtyFilterParams.length}`);
+        }
+      }
       const qtyMismatchRes = await tx.query<{ cnt: number }>(
         `SELECT COUNT(*)::int as cnt
          FROM inv_stock_balances sb
@@ -2802,35 +3447,264 @@ export class InventoryValuationService {
            ON cl.company_id = COALESCE(sb.company_id, vb.company_id)
           AND cl.warehouse_id = COALESCE(sb.warehouse_id, vb.warehouse_id)
           AND cl.item_id = COALESCE(sb.item_id, vb.item_id)
-         WHERE COALESCE(sb.company_id, vb.company_id) = $1
+         WHERE ${qtyFilterClauses.join(' AND ')}
            AND (
              COALESCE(sb.qty, 0) <> COALESCE(vb.quantity, 0)
              OR (cp.costing_method = 'FIFO' AND COALESCE(vb.quantity, 0) <> COALESCE(cl.layer_qty, 0))
            );`,
-        [companyId]
+        qtyFilterParams
       );
       const qtyValuationMismatchesCount = Number(qtyMismatchRes.rows[0]?.cnt || 0);
 
-      // 7. Opening balance difference (approved opening total vs posted GL opening entries linked to openings)
-      const openingDiffRes = await tx.query<{ diff: string }>(
-        `WITH openings AS (
-           SELECT COALESCE(SUM(total_cost), 0) as sub_open,
-                  ARRAY_AGG(journal_entry_id) FILTER (WHERE journal_entry_id IS NOT NULL) as je_ids
-           FROM inv_opening_valuations
-           WHERE company_id = $1 AND status = 'approved'
-         ),
-         gl_open AS (
-           SELECT COALESCE(SUM(l.debit - l.credit), 0) as gl_open
-           FROM journal_lines l
-           JOIN openings o ON l.entry_id = ANY(o.je_ids)
-           WHERE l.company_id = $1 AND l.account_id = $2
-         )
-         SELECT (o.sub_open - g.gl_open)::text as diff FROM openings o, gl_open g;`,
-        [companyId, inventoryAccountId]
-      );
-      const openingDiffUnits = parseExactUnits(openingDiffRes.rows[0]?.diff || '0', COST_SCALE, 'openingDiff');
+      // 7. Opening balance difference
+      let openingDiffUnits = 0n;
+      if (hasScopedFilter) {
+        const scopedOpenRes = await tx.query<{ diff: string }>(
+          `WITH openings AS (
+             SELECT COALESCE(SUM(total_cost), 0) as sub_open,
+                    ARRAY_AGG(journal_entry_id) FILTER (WHERE journal_entry_id IS NOT NULL) as je_ids
+             FROM inv_opening_valuations
+             WHERE ${openClauses.join(' AND ')}
+           ),
+           gl_open AS (
+             SELECT COALESCE(SUM(l.debit - l.credit), 0) as gl_open
+             FROM journal_lines l
+             JOIN openings o ON l.entry_id = ANY(o.je_ids)
+             WHERE l.company_id = $1 AND l.account_id = $${openParams.length + 1}
+           )
+           SELECT (o.sub_open - g.gl_open)::text as diff FROM openings o, gl_open g;`,
+          [...openParams, inventoryAccountId]
+        );
+        openingDiffUnits = parseExactUnits(scopedOpenRes.rows[0]?.diff || '0', COST_SCALE, 'openingDiff');
+      } else {
+        const openingDiffRes = await tx.query<{ diff: string }>(
+          `WITH openings AS (
+             SELECT COALESCE(SUM(total_cost), 0) as sub_open,
+                    ARRAY_AGG(journal_entry_id) FILTER (WHERE journal_entry_id IS NOT NULL) as je_ids
+             FROM inv_opening_valuations
+             WHERE company_id = $1 AND status = 'approved'
+           ),
+           gl_open AS (
+             SELECT COALESCE(SUM(l.debit - l.credit), 0) as gl_open
+             FROM journal_lines l
+             JOIN openings o ON l.entry_id = ANY(o.je_ids)
+             WHERE l.company_id = $1 AND l.account_id = $2
+           )
+           SELECT (o.sub_open - g.gl_open)::text as diff FROM openings o, gl_open g;`,
+          [companyId, inventoryAccountId]
+        );
+        openingDiffUnits = parseExactUnits(openingDiffRes.rows[0]?.diff || '0', COST_SCALE, 'openingDiff');
+      }
 
-      const hasScopedFilter = Boolean(input.warehouseId || input.itemId || input.costingMethod);
+      // Filtered run -> SUBLEDGER_ONLY (never compare filtered warehouse/item/method subledger against whole-company GL)
+      if (hasScopedFilter) {
+        const record = await this.valuationRepo.saveReconciliation(
+          companyId,
+          {
+            warehouseId: input.warehouseId ?? null,
+            itemId: input.itemId ?? null,
+            costingMethod: input.costingMethod ?? null,
+            periodId: input.periodId ?? null,
+            accountId: inventoryAccountId,
+            comparisonScope: 'SUBLEDGER_ONLY',
+            isGlComparable: false,
+            subledgerTotal: fromMinorUnits(subledgerTotalUnits, COST_SCALE),
+            glControlTotal: '0.0000',
+            variance: '0.0000',
+            status: 'subledger_only',
+            unmatchedMovementsCount,
+            unbalancedAdjustmentsCount,
+            duplicateJournalLinksCount,
+            qtyValuationMismatchesCount,
+            openingDiff: fromMinorUnits(openingDiffUnits, COST_SCALE),
+            details: {
+              comparisonScope: 'SUBLEDGER_ONLY',
+              scopedFilterApplied: true,
+              periodEndDate,
+              filters: {
+                warehouseId: input.warehouseId ?? null,
+                itemId: input.itemId ?? null,
+                costingMethod: input.costingMethod ?? null,
+              },
+              diagnostics: {
+                unmatchedMovementsCount,
+                unbalancedAdjustmentsCount,
+                duplicateJournalLinksCount,
+                qtyValuationMismatchesCount,
+                openingDiff: fromMinorUnits(openingDiffUnits, COST_SCALE),
+              },
+            },
+            notes: input.notes ?? 'تقييم مرشّح للدفتر الفرعي فقط (لا يُقارن برصيد حساب مراقبة الأستاذ العام للشركة)',
+            reconciledBy: actorId ?? null,
+          },
+          tx
+        );
+
+        await this.auditService.record(
+          {
+            actorUserId: actorId || null,
+            companyId,
+            action: 'RUN_INVENTORY_GL_RECONCILIATION',
+            entityType: 'inv_valuation_reconciliation',
+            entityId: record.id,
+            metadata: {
+              status: record.status,
+              comparisonScope: record.comparisonScope,
+              isGlComparable: record.isGlComparable,
+              subledgerTotal: record.subledgerTotal,
+              glControlTotal: record.glControlTotal,
+              variance: record.variance,
+              qtyValuationMismatchesCount,
+              unmatchedMovementsCount,
+            },
+          },
+          { executor: tx }
+        );
+
+        return record;
+      }
+
+      // 2. GL Control Account Net Posted Balance (Debit - Credit)
+      const glRes = await tx.query<{ netBalance: string }>(
+        `SELECT COALESCE(SUM(l.debit - l.credit), 0)::text as "netBalance"
+         FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.entry_id AND e.company_id = l.company_id
+         WHERE l.company_id = $1
+           AND l.account_id = $2
+           AND e.status = 'posted'
+           AND ($3::date IS NULL OR e.entry_date <= $3::date);`,
+        [companyId, inventoryAccountId, periodEndDate]
+      );
+      const glControlTotalUnits = parseExactUnits(glRes.rows[0]?.netBalance || '0', COST_SCALE, 'glControlTotal');
+
+      if (isHistoricalPeriod && periodEndDate) {
+        // Reconstruct point-in-time historical subledger rather than comparing current subledger against historical GL.
+        const histRes = await tx.query<{
+          ambiguousAdjCount: number;
+          crossPeriodUnlinkedCount: number;
+          inflowTotal: string;
+          outflowTotal: string;
+          adjRemTotal: string;
+        }>(
+          `WITH period_movs AS (
+             SELECT vm.movement_type, vm.source_type, vm.total_cost, vm.journal_entry_id,
+                    vm.created_at::date as mov_date,
+                    je.entry_date as je_date,
+                    je.status as je_status
+             FROM inv_valuation_movements vm
+             LEFT JOIN journal_entries je ON je.id = vm.journal_entry_id AND je.company_id = vm.company_id
+             WHERE vm.company_id = $1
+               AND (
+                 (je.id IS NOT NULL AND je.status = 'posted' AND je.entry_date <= $2::date)
+                 OR (je.id IS NULL AND vm.created_at::date <= $2::date)
+               )
+           ),
+           period_adjs AS (
+             SELECT ca.remaining_allocation, ca.journal_entry_id, je.entry_date as je_date, je.status as je_status
+             FROM inv_cost_adjustments ca
+             LEFT JOIN journal_entries je ON je.id = ca.journal_entry_id AND je.company_id = ca.company_id
+             WHERE ca.company_id = $1
+               AND ca.status = 'posted'
+               AND je.id IS NOT NULL
+               AND je.status = 'posted'
+               AND je.entry_date <= $2::date
+           ),
+           adj_after_or_unlinked AS (
+             SELECT COUNT(*)::int as cnt
+             FROM inv_cost_adjustments ca
+             LEFT JOIN journal_entries je ON je.id = ca.journal_entry_id AND je.company_id = ca.company_id
+             WHERE ca.company_id = $1
+               AND ca.created_at::date <= $2::date
+               AND (je.id IS NULL OR je.status <> 'posted' OR je.entry_date > $2::date)
+           )
+           SELECT
+             COALESCE((SELECT COUNT(*)::int FROM period_movs WHERE movement_type = 'ADJUSTMENT'), 0) as "ambiguousAdjCount",
+             COALESCE((SELECT COUNT(*)::int FROM period_movs WHERE movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN') AND (journal_entry_id IS NULL OR je_status <> 'posted')), 0)
+               + COALESCE((SELECT cnt FROM adj_after_or_unlinked), 0) as "crossPeriodUnlinkedCount",
+             COALESCE((SELECT SUM(total_cost) FROM period_movs WHERE movement_type IN ('RECEIVE', 'OPENING', 'TRANSFER_IN') OR (movement_type = 'RETURN' AND source_type = 'SALES_RETURN')), 0)::text as "inflowTotal",
+             COALESCE((SELECT SUM(total_cost) FROM period_movs WHERE movement_type IN ('ISSUE', 'TRANSFER_OUT') OR (movement_type = 'RETURN' AND source_type = 'PURCHASE_RETURN')), 0)::text as "outflowTotal",
+             COALESCE((SELECT SUM(remaining_allocation) FROM period_adjs), 0)::text as "adjRemTotal";`,
+          [companyId, periodEndDate]
+        );
+
+        const row = histRes.rows[0];
+        const ambiguousAdjCount = Number(row?.ambiguousAdjCount || 0);
+        const crossPeriodUnlinkedCount = Number(row?.crossPeriodUnlinkedCount || 0);
+        const inflowUnits = parseExactUnits(row?.inflowTotal || '0', COST_SCALE, 'histInflow');
+        const outflowUnits = parseExactUnits(row?.outflowTotal || '0', COST_SCALE, 'histOutflow');
+        const adjRemUnits = parseExactUnits(row?.adjRemTotal || '0', COST_SCALE, 'histAdjRem');
+        const reconstructedUnits = inflowUnits - outflowUnits + adjRemUnits;
+
+        const cannotReconstruct =
+          ambiguousAdjCount > 0 ||
+          crossPeriodUnlinkedCount > 0 ||
+          reconstructedUnits < 0n;
+
+        if (cannotReconstruct) {
+          const reasonMsg =
+            ambiguousAdjCount > 0
+              ? 'يتعذر إعادة بناء رصيد الدفتر الفرعي التاريخي بدقة لوجود حركات تسوية غير موقعة الاتجاه في الفترة.'
+              : crossPeriodUnlinkedCount > 0
+                ? 'يتعذر إعادة بناء رصيد الدفتر الفرعي التاريخي بدقة لوجود حركات أو فروق أسعار غير مرتبطة بقيود مرحلة في نطاق الفترة.'
+                : 'تعذر إعادة بناء رصيد تاريخي متسق للدفتر الفرعي نهاية الفترة.';
+
+          const record = await this.valuationRepo.saveReconciliation(
+            companyId,
+            {
+              warehouseId: null,
+              itemId: null,
+              costingMethod: null,
+              periodId: input.periodId ?? null,
+              accountId: inventoryAccountId,
+              comparisonScope: 'HISTORICAL_GL',
+              isGlComparable: false,
+              subledgerTotal: fromMinorUnits(subledgerTotalUnits, COST_SCALE),
+              glControlTotal: fromMinorUnits(glControlTotalUnits, COST_SCALE),
+              variance: '0.0000',
+              status: 'historical_unavailable',
+              unmatchedMovementsCount,
+              unbalancedAdjustmentsCount,
+              duplicateJournalLinksCount,
+              qtyValuationMismatchesCount,
+              openingDiff: fromMinorUnits(openingDiffUnits, COST_SCALE),
+              details: {
+                comparisonScope: 'HISTORICAL_GL',
+                periodEndDate,
+                ambiguousAdjCount,
+                crossPeriodUnlinkedCount,
+                historicalReason: reasonMsg,
+              },
+              notes: input.notes ?? reasonMsg,
+              reconciledBy: actorId ?? null,
+            },
+            tx
+          );
+
+          await this.auditService.record(
+            {
+              actorUserId: actorId || null,
+              companyId,
+              action: 'RUN_INVENTORY_GL_RECONCILIATION',
+              entityType: 'inv_valuation_reconciliation',
+              entityId: record.id,
+              metadata: {
+                status: record.status,
+                comparisonScope: record.comparisonScope,
+                isGlComparable: record.isGlComparable,
+                periodEndDate,
+              },
+            },
+            { executor: tx }
+          );
+
+          return record;
+        }
+
+        subledgerTotalUnits = reconstructedUnits;
+      }
+
+      const varianceUnits = subledgerTotalUnits - glControlTotalUnits;
+      const comparisonScope = isHistoricalPeriod ? 'HISTORICAL_GL' : 'COMPANY_GL';
       const isReconciled =
         varianceUnits === 0n &&
         unmatchedMovementsCount === 0 &&
@@ -2847,6 +3721,8 @@ export class InventoryValuationService {
           costingMethod: input.costingMethod ?? null,
           periodId: input.periodId ?? null,
           accountId: inventoryAccountId,
+          comparisonScope,
+          isGlComparable: true,
           subledgerTotal: fromMinorUnits(subledgerTotalUnits, COST_SCALE),
           glControlTotal: fromMinorUnits(glControlTotalUnits, COST_SCALE),
           variance: fromMinorUnits(varianceUnits, COST_SCALE),
@@ -2857,10 +3733,12 @@ export class InventoryValuationService {
           qtyValuationMismatchesCount,
           openingDiff: fromMinorUnits(openingDiffUnits, COST_SCALE),
           details: {
-            scopedFilterApplied: hasScopedFilter,
+            comparisonScope,
+            scopedFilterApplied: false,
             periodEndDate,
+            reconstructedFromHistoricalLedger: isHistoricalPeriod,
           },
-          notes: input.notes ?? (hasScopedFilter ? 'تسوية مرشّحة لمستودع/صنف محدد مقارنة بإجمالي حساب المخزون' : null),
+          notes: input.notes ?? (isHistoricalPeriod ? `تسوية تاريخية للدفتر الفرعي والأستاذ العام حتى ${periodEndDate}` : null),
           reconciledBy: actorId ?? null,
         },
         tx
@@ -2875,6 +3753,8 @@ export class InventoryValuationService {
           entityId: record.id,
           metadata: {
             status: record.status,
+            comparisonScope: record.comparisonScope,
+            isGlComparable: record.isGlComparable,
             subledgerTotal: record.subledgerTotal,
             glControlTotal: record.glControlTotal,
             variance: record.variance,

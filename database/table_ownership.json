@@ -323,6 +323,16 @@
     "table": "inv_sales_cogs_reversals",
     "scope": "tenant",
     "reason": "Per-company audited forward-only sales COGS reversals"
+  },
+  {
+    "table": "sales_returns",
+    "scope": "tenant",
+    "reason": "Per-company sales return headers with AR credit and valuation restoration"
+  },
+  {
+    "table": "sales_return_lines",
+    "scope": "tenant",
+    "reason": "Per-company sales return lines linked to original invoice and delivery lines"
   }
 ]
 

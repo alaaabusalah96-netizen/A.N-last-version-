@@ -130,6 +130,10 @@ function mapHeaderRow(row: any): SalesInvoice {
     memo: row.memo || null,
     journalEntryId: row.journal_entry_id || null,
     journalEntryNo: row.journal_entry_no || null,
+    reversalJournalEntryId: row.reversal_journal_entry_id || null,
+    cancelledAt: row.cancelled_at ? (row.cancelled_at instanceof Date ? row.cancelled_at.toISOString() : String(row.cancelled_at)) : null,
+    cancelledBy: row.cancelled_by || null,
+    cancellationReason: row.cancellation_reason || null,
     postedAt: row.posted_at ? (row.posted_at instanceof Date ? row.posted_at.toISOString() : String(row.posted_at)) : null,
     postedBy: row.posted_by || null,
     createdBy: row.created_by || null,
@@ -170,6 +174,7 @@ export class SalesInvoiceRepository {
         SELECT 
           i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date, i.due_date,
           i.status, i.subtotal, i.tax_amount, i.total_amount, i.cogs_amount, i.cogs_posted_at, i.memo, i.journal_entry_id,
+          i.reversal_journal_entry_id, i.cancelled_at, i.cancelled_by, i.cancellation_reason,
           i.posted_at, i.posted_by, i.created_by, i.created_at, i.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           d.delivery_no as delivery_no,
@@ -195,6 +200,7 @@ export class SalesInvoiceRepository {
         SELECT 
           i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date, i.due_date,
           i.status, i.subtotal, i.tax_amount, i.total_amount, i.cogs_amount, i.cogs_posted_at, i.memo, i.journal_entry_id,
+          i.reversal_journal_entry_id, i.cancelled_at, i.cancelled_by, i.cancellation_reason,
           i.posted_at, i.posted_by, i.created_by, i.created_at, i.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           d.delivery_no as delivery_no,
@@ -328,6 +334,39 @@ export class SalesInvoiceRepository {
     return await withTenantTransaction(companyId, run);
   }
 
+  async markCancelled(
+    companyId: string,
+    id: string,
+    reversalJournalEntryId: string,
+    cancellationReason: string,
+    cancelledBy?: string,
+    customExecutor?: DbExecutor
+  ): Promise<void> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        UPDATE sales_invoices
+        SET
+          status = 'cancelled',
+          reversal_journal_entry_id = $3,
+          cancellation_reason = $4,
+          cancelled_at = NOW(),
+          cancelled_by = $5,
+          updated_at = NOW()
+        WHERE company_id = $1 AND id = $2 AND status = 'posted'
+      `;
+      await executor.query(sql, [
+        companyId,
+        id,
+        reversalJournalEntryId,
+        cancellationReason,
+        cancelledBy || null,
+      ]);
+    };
+
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
+
   async delete(companyId: string, id: string, customExecutor?: DbExecutor): Promise<boolean> {
     const run = async (executor: DbExecutor) => {
       const sql = `DELETE FROM sales_invoices WHERE company_id = $1 AND id = $2 AND status = 'draft' RETURNING id`;
@@ -359,7 +398,8 @@ export class SalesInvoiceRepository {
           c.name_ar as "customerNameAr",
           i.total_amount as "invoiceTotal",
           COALESCE(col.total, 0) as "collectedAmount",
-          ROUND((i.total_amount - COALESCE(col.total, 0))::numeric, 2) as "remainingOpenAmount"
+          COALESCE(ret.total, 0) as "returnedAmount",
+          GREATEST(0, ROUND((i.total_amount - COALESCE(col.total, 0) - COALESCE(ret.total, 0))::numeric, 2)) as "remainingOpenAmount"
         FROM sales_invoices i
         INNER JOIN sales_customers c ON c.id = i.customer_id AND c.company_id = i.company_id
         LEFT JOIN (
@@ -368,8 +408,14 @@ export class SalesInvoiceRepository {
           WHERE company_id = $1 AND status = 'posted'
           GROUP BY invoice_id
         ) col ON col.invoice_id = i.id
+        LEFT JOIN (
+          SELECT invoice_id, SUM(total_amount) as total
+          FROM sales_returns
+          WHERE company_id = $1 AND status = 'posted'
+          GROUP BY invoice_id
+        ) ret ON ret.invoice_id = i.id
         WHERE i.company_id = $1 AND i.status = 'posted' ${customerFilter}
-          AND ROUND((i.total_amount - COALESCE(col.total, 0))::numeric, 2) > 0
+          AND ROUND((i.total_amount - COALESCE(col.total, 0) - COALESCE(ret.total, 0))::numeric, 2) > 0
         ORDER BY i.invoice_date ASC
       `;
       const res = await executor.query<any>(sql, params);
@@ -377,6 +423,7 @@ export class SalesInvoiceRepository {
         ...r,
         invoiceTotal: toMoney(r.invoiceTotal ?? 0),
         collectedAmount: toMoney(r.collectedAmount ?? 0),
+        returnedAmount: toMoney(r.returnedAmount ?? 0),
         remainingOpenAmount: toMoney(r.remainingOpenAmount ?? 0),
       }));
     };

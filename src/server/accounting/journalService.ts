@@ -286,14 +286,15 @@ export class JournalService {
     entryId: string,
     actorId: string,
     reversalMemo?: string,
-    isPlatformAdmin: boolean = false
+    isPlatformAdmin: boolean = false,
+    executor?: DbExecutor
   ): Promise<JournalEntry> {
     if (!companyId || !entryId) {
       throw new ValidationError('companyId and entryId are required');
     }
 
-    return await withTenantTransaction(companyId, async (tx) => {
-      const source = await this.journalRepo.findById(companyId, entryId, tx);
+    const runOp = async (tx: DbExecutor) => {
+      const source = await this.journalRepo.findByIdForUpdate(companyId, entryId, tx);
       if (!source) {
         throw new NotFoundError('Source journal entry not found');
       }
@@ -403,7 +404,12 @@ export class JournalService {
 
       const finalReversal = await this.journalRepo.findById(companyId, draftReversal.id, tx);
       return finalReversal!;
-    });
+    };
+
+    if (executor) {
+      return await runOp(executor);
+    }
+    return await withTenantTransaction(companyId, runOp);
   }
 
   /**

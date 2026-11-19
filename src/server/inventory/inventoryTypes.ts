@@ -55,6 +55,8 @@ export type MovementType =
   | 'transfer_in'
   | 'transfer'
   | 'purchase_return'
+  | 'sales_delivery'
+  | 'sales_return'
   | 'adjustment'
   | 'write_off'
   | 'damage'

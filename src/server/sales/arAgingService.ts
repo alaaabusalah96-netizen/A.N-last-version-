@@ -19,7 +19,8 @@ export class ArAgingService {
           c.name_ar as "customerNameAr",
           i.total_amount as "invoiceTotal",
           COALESCE(col.total, 0) as "collectedAmount",
-          ROUND((i.total_amount - COALESCE(col.total, 0))::numeric, 2) as "remainingOpenAmount",
+          COALESCE(ret.total, 0) as "returnedAmount",
+          GREATEST(0, ROUND((i.total_amount - COALESCE(col.total, 0) - COALESCE(ret.total, 0))::numeric, 2)) as "remainingOpenAmount",
           GREATEST(0, (CURRENT_DATE - COALESCE(i.due_date, i.invoice_date)))::int as "agingDays"
         FROM sales_invoices i
         INNER JOIN sales_customers c ON c.id = i.customer_id AND c.company_id = i.company_id
@@ -29,8 +30,14 @@ export class ArAgingService {
           WHERE company_id = $1 AND status = 'posted'
           GROUP BY invoice_id
         ) col ON col.invoice_id = i.id
+        LEFT JOIN (
+          SELECT invoice_id, SUM(total_amount) as total
+          FROM sales_returns
+          WHERE company_id = $1 AND status = 'posted'
+          GROUP BY invoice_id
+        ) ret ON ret.invoice_id = i.id
         WHERE i.company_id = $1 AND i.status = 'posted'
-          AND ROUND((i.total_amount - COALESCE(col.total, 0))::numeric, 2) > 0
+          AND ROUND((i.total_amount - COALESCE(col.total, 0) - COALESCE(ret.total, 0))::numeric, 2) > 0
         ORDER BY "agingDays" DESC, i.invoice_date ASC
       `;
 

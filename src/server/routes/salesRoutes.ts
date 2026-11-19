@@ -5,6 +5,7 @@ import { defaultCustomerService } from '../sales/customerService.js';
 import { defaultSalesDeliveryService } from '../sales/salesDeliveryService.js';
 import { defaultSalesInvoiceService } from '../sales/salesInvoiceService.js';
 import { defaultSalesCollectionService } from '../sales/salesCollectionService.js';
+import { defaultSalesReturnService } from '../sales/salesReturnService.js';
 import { defaultArAgingService } from '../sales/arAgingService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
@@ -255,6 +256,21 @@ salesRoutes.post(
   })
 );
 
+salesRoutes.post(
+  '/invoices/:id/cancel',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const id = req.params.id;
+    await assertSalesPermission(user, PERMISSIONS.SALES_POST, companyId);
+    if (!isUuid(id)) throw new ValidationError('Invalid invoice ID format');
+    const reason = (req.body?.reason as string) || '';
+    const invoice = await defaultSalesInvoiceService.cancelPostedInvoice(companyId, id, reason, user.id);
+    return res.status(200).json({ status: 'ok', invoice });
+  })
+);
+
 salesRoutes.delete(
   '/invoices/:id',
   requireAuth,
@@ -341,7 +357,79 @@ salesRoutes.delete(
   })
 );
 
-// 5. AR Aging Report API
+// 5. Sales Returns API
+salesRoutes.get(
+  '/returns',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertSalesPermission(user, PERMISSIONS.SALES_READ, companyId);
+    const returns = await defaultSalesReturnService.listReturns(companyId);
+    return res.status(200).json({ status: 'ok', returns });
+  })
+);
+
+salesRoutes.get(
+  '/returns/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const id = req.params.id;
+    await assertSalesPermission(user, PERMISSIONS.SALES_READ, companyId);
+    if (!isUuid(id)) throw new ValidationError('Invalid return ID format');
+    const salesReturn = await defaultSalesReturnService.getReturn(companyId, id);
+    return res.status(200).json({ status: 'ok', return: salesReturn });
+  })
+);
+
+salesRoutes.post(
+  '/returns',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertSalesPermission(user, PERMISSIONS.SALES_WRITE, companyId);
+    const { customerId, invoiceId, warehouseId, returnDate, reason, memo, lines } = req.body || {};
+    const salesReturn = await defaultSalesReturnService.createReturn(
+      companyId,
+      { customerId, invoiceId, warehouseId, returnDate, reason, memo, lines },
+      user.id
+    );
+    return res.status(201).json({ status: 'ok', return: salesReturn });
+  })
+);
+
+salesRoutes.post(
+  '/returns/:id/post',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const id = req.params.id;
+    await assertSalesPermission(user, PERMISSIONS.SALES_POST, companyId);
+    if (!isUuid(id)) throw new ValidationError('Invalid return ID format');
+    const salesReturn = await defaultSalesReturnService.postReturn(companyId, id, user.id);
+    return res.status(200).json({ status: 'ok', return: salesReturn });
+  })
+);
+
+salesRoutes.delete(
+  '/returns/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const id = req.params.id;
+    await assertSalesPermission(user, PERMISSIONS.SALES_WRITE, companyId);
+    if (!isUuid(id)) throw new ValidationError('Invalid return ID format');
+    await defaultSalesReturnService.deleteReturn(companyId, id, user.id);
+    return res.status(200).json({ status: 'ok', deleted: true });
+  })
+);
+
+// 6. AR Aging Report API
 salesRoutes.get(
   '/ar/aging',
   requireAuth,

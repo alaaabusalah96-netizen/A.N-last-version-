@@ -595,6 +595,26 @@ export class InventoryValuationRepository {
     return res.rows.map(mapLayer);
   }
 
+  async findCostLayerById(
+    companyId: string,
+    layerId: string,
+    executor: DbExecutor
+  ): Promise<CostLayer | null> {
+    const res = await executor.query<any>(
+      `SELECT id, company_id as "companyId", warehouse_id as "warehouseId", item_id as "itemId",
+              original_qty::text as "originalQty", remaining_qty::text as "remainingQty",
+              unit_cost::text as "unitCost", total_cost::text as "totalCost",
+              source_type as "sourceType", source_id as "sourceId", source_line_id as "sourceLineId",
+              origin_layer_id as "originLayerId", origin_source_type as "originSourceType",
+              origin_source_id as "originSourceId", origin_source_line_id as "originSourceLineId",
+              effective_date as "effectiveDate", is_exhausted as "isExhausted", created_at as "createdAt"
+       FROM inv_cost_layers
+       WHERE company_id = $1 AND id = $2;`,
+      [companyId, layerId]
+    );
+    return res.rows[0] ? mapLayer(res.rows[0]) : null;
+  }
+
   async updateCostLayerRemaining(
     companyId: string,
     layerId: string,
@@ -838,6 +858,30 @@ export class InventoryValuationRepository {
     };
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);
+  }
+
+  async listSalesReturnMovementsByReference(
+    companyId: string,
+    referenceMovementId: string,
+    executor: DbExecutor
+  ): Promise<ValuationMovement[]> {
+    const res = await executor.query<any>(
+      `SELECT id, company_id as "companyId", warehouse_id as "warehouseId", item_id as "itemId",
+              movement_type as "movementType", qty::text as "qty", unit_cost::text as "unitCost",
+              total_cost::text as "totalCost", source_type as "sourceType", source_id as "sourceId",
+              source_line_id as "sourceLineId", journal_entry_id as "journalEntryId",
+              reason, cost_source as "costSource", costing_method as "costingMethod",
+              reference_movement_id as "referenceMovementId", notes,
+              created_by as "createdBy", created_at as "createdAt"
+       FROM inv_valuation_movements
+       WHERE company_id = $1
+         AND movement_type = 'RETURN'
+         AND source_type = 'SALES_RETURN'
+         AND reference_movement_id = $2
+       ORDER BY created_at ASC, id ASC;`,
+      [companyId, referenceMovementId]
+    );
+    return res.rows.map(mapMovement);
   }
 
   async findCostAdjustmentsByInvoiceLine(
@@ -1481,6 +1525,22 @@ export class InventoryValuationRepository {
        SET remaining_qty = $3::numeric, consumed_qty = $4::numeric, updated_at = now()
        WHERE company_id = $1 AND id = $2;`,
       [companyId, id, remainingQty, consumedQty]
+    );
+  }
+
+  async applyPpvToMaSourceBalance(
+    companyId: string,
+    id: string,
+    valueDelta: string | number,
+    executor: DbExecutor
+  ): Promise<void> {
+    await executor.query(
+      `UPDATE inv_ma_source_balances
+       SET original_value = original_value + $3::numeric,
+           remaining_value = remaining_value + $3::numeric,
+           updated_at = now()
+       WHERE company_id = $1 AND id = $2;`,
+      [companyId, id, valueDelta]
     );
   }
 

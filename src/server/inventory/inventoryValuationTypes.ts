@@ -228,6 +228,7 @@ export type MaSourceEventType =
   | 'TRANSFER_OUT'
   | 'TRANSFER_IN'
   | 'PURCHASE_RETURN'
+  | 'SALES_RETURN'
   | 'PPV';
 
 export interface MaSourceBalance {

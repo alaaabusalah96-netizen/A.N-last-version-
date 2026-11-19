@@ -136,12 +136,84 @@ export interface SalesInvoice {
   memo?: string | null;
   journalEntryId?: string | null;
   journalEntryNo?: string | null;
+  reversalJournalEntryId?: string | null;
+  cancelledAt?: string | null;
+  cancelledBy?: string | null;
+  cancellationReason?: string | null;
   postedAt?: string | null;
   postedBy?: string | null;
   createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
   lines?: SalesInvoiceLine[];
+}
+
+export type SalesReturnStatus = 'draft' | 'posted' | 'cancelled';
+
+export interface SalesReturnLine {
+  id: string;
+  returnId: string;
+  companyId: string;
+  invoiceLineId: string;
+  deliveryLineId?: string | null;
+  itemId: string;
+  itemCode?: string;
+  itemNameAr?: string;
+  itemUom?: string;
+  qty: number;
+  unitPrice: number;
+  taxRate: number;
+  taxAmount: number;
+  lineTotal: number;
+  netAmount?: number;
+  cogsCost: number;
+  valuationMovementId?: string | null;
+  lineNo: number;
+}
+
+export interface SalesReturn {
+  id: string;
+  companyId: string;
+  customerId: string;
+  customerCode?: string;
+  customerNameAr?: string;
+  invoiceId: string;
+  invoiceNo?: string | null;
+  warehouseId: string;
+  warehouseCode?: string;
+  warehouseNameAr?: string;
+  returnNo?: string | null;
+  returnDate: string;
+  status: SalesReturnStatus;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  cogsAmount: number;
+  reason?: string | null;
+  memo?: string | null;
+  journalEntryId?: string | null;
+  journalEntryNo?: string | null;
+  postedAt?: string | null;
+  postedBy?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines?: SalesReturnLine[];
+}
+
+export interface CreateSalesReturnLineInput {
+  invoiceLineId: string;
+  qty: number;
+}
+
+export interface CreateSalesReturnInput {
+  customerId: string;
+  invoiceId: string;
+  warehouseId: string;
+  returnDate?: string;
+  reason?: string;
+  memo?: string;
+  lines: CreateSalesReturnLineInput[];
 }
 
 export interface CreateSalesInvoiceLineInput {

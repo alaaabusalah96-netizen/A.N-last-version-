@@ -416,7 +416,12 @@ export class SalesInvoiceService {
           const invSumRes = await tx.query<any>(
             `SELECT COALESCE(SUM(invoiced_qty), 0) as invoiced_qty
              FROM inv_sales_cogs_links
-             WHERE company_id = $1 AND delivery_line_id = $2 AND invoice_id <> $3`,
+             WHERE company_id = $1 AND delivery_line_id = $2 AND invoice_id <> $3
+               AND NOT EXISTS (
+                 SELECT 1 FROM inv_sales_cogs_reversals r
+                 WHERE r.company_id = inv_sales_cogs_links.company_id
+                   AND r.original_cogs_link_id = inv_sales_cogs_links.id
+               )`,
             [companyId, line.deliveryLineId, id]
           );
           const deliveredUnits = toMinorUnits(dlRow.qty ?? '0', QTY_SCALE);
@@ -436,7 +441,12 @@ export class SalesInvoiceService {
           const cogsLinkedRes = await tx.query<any>(
             `SELECT COALESCE(SUM(cogs_amount), 0) as linked_cost
              FROM inv_sales_cogs_links
-             WHERE company_id = $1 AND delivery_line_id = $2 AND invoice_id <> $3`,
+             WHERE company_id = $1 AND delivery_line_id = $2 AND invoice_id <> $3
+               AND NOT EXISTS (
+                 SELECT 1 FROM inv_sales_cogs_reversals r
+                 WHERE r.company_id = inv_sales_cogs_links.company_id
+                   AND r.original_cogs_link_id = inv_sales_cogs_links.id
+               )`,
             [companyId, line.deliveryLineId, id]
           );
           const alreadyLinkedMoneyUnits = toMinorUnits(cogsLinkedRes.rows[0]?.linked_cost ?? '0', MONEY_SCALE);
@@ -633,6 +643,130 @@ export class SalesInvoiceService {
     });
   }
 
+  async cancelPostedInvoice(
+    companyId: string,
+    id: string,
+    reason: string,
+    actorUserId?: string
+  ): Promise<SalesInvoice> {
+    if (!companyId) throw new ValidationError('companyId is required');
+    if (!id) throw new ValidationError('id is required');
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!trimmedReason) {
+      throw new ValidationError('سبب إلغاء فاتورة المبيعات مطلوب');
+    }
+
+    return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const locked = await this.invoiceRepo.findByIdForUpdate(companyId, id, tx);
+      if (!locked) {
+        throw new NotFoundError('فاتورة المبيعات غير موجودة');
+      }
+      if (locked.status === 'draft') {
+        throw new ValidationError('لا يمكن إلغاء فاتورة مسودة؛ استخدم الحذف بدلاً من الإلغاء');
+      }
+      if (locked.status === 'cancelled') {
+        throw new ValidationError('فاتورة المبيعات ملغاة مسبقاً');
+      }
+
+      const colRes = await tx.query<any>(
+        `SELECT id FROM sales_collections WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted' LIMIT 1`,
+        [companyId, id]
+      );
+      if (colRes.rows.length > 0) {
+        throw new ValidationError('لا يمكن إلغاء فاتورة مبيعات مرتبطة بسندات تحصيل مرحلة');
+      }
+
+      const retRes = await tx.query<any>(
+        `SELECT id FROM sales_returns WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted' LIMIT 1`,
+        [companyId, id]
+      );
+      if (retRes.rows.length > 0) {
+        throw new ValidationError('لا يمكن إلغاء فاتورة مبيعات مرتبطة بمرتجعات مبيعات مرحلة');
+      }
+
+      const invoice = await this.invoiceRepo.findById(companyId, id, tx);
+      if (!invoice || !invoice.journalEntryId) {
+        throw new ValidationError('فاتورة المبيعات تفتقر إلى القيد المحاسبي المرحل ولا يمكن إلغاؤها');
+      }
+
+      const reversalJe = await this.journalService.reverseEntry(
+        companyId,
+        invoice.journalEntryId,
+        actorUserId || '',
+        `إلغاء فاتورة مبيعات رقم ${invoice.invoiceNo || invoice.id}: ${trimmedReason}`,
+        false,
+        tx
+      );
+
+      const linksRes = await tx.query<any>(
+        `SELECT id, invoice_id, invoice_line_id, delivery_line_id, invoiced_qty, cogs_amount
+         FROM inv_sales_cogs_links
+         WHERE company_id = $1 AND invoice_id = $2
+         FOR UPDATE`,
+        [companyId, id]
+      );
+
+      for (const link of linksRes.rows) {
+        const existingRev = await tx.query<any>(
+          `SELECT id FROM inv_sales_cogs_reversals WHERE company_id = $1 AND original_cogs_link_id = $2`,
+          [companyId, link.id]
+        );
+        if (existingRev.rows.length > 0) {
+          throw new ValidationError('تم عكس تكلفة البضاعة المباعة لهذه الفاتورة مسبقاً');
+        }
+        await tx.query(
+          `INSERT INTO inv_sales_cogs_reversals (
+             company_id, original_cogs_link_id, invoice_id, invoice_line_id,
+             delivery_line_id, reversed_qty, reversed_cogs_amount, reason,
+             reversal_journal_entry_id, created_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            companyId,
+            link.id,
+            link.invoice_id,
+            link.invoice_line_id,
+            link.delivery_line_id,
+            link.invoiced_qty,
+            link.cogs_amount,
+            trimmedReason,
+            reversalJe.id,
+            actorUserId || null,
+          ]
+        );
+      }
+
+      await this.invoiceRepo.markCancelled(
+        companyId,
+        id,
+        reversalJe.id,
+        trimmedReason,
+        actorUserId,
+        tx
+      );
+
+      await this.auditService.record(
+        {
+          actorUserId: actorUserId || null,
+          companyId,
+          action: 'SALES_INVOICE_CANCEL',
+          entityType: 'sales_invoices',
+          entityId: id,
+          metadata: {
+            invoiceNo: invoice.invoiceNo,
+            originalJournalEntryId: invoice.journalEntryId,
+            reversalJournalEntryId: reversalJe.id,
+            reason: trimmedReason,
+          },
+        },
+        { executor: tx }
+      );
+
+      const cancelled = await this.invoiceRepo.findById(companyId, id, tx);
+      return cancelled!;
+    });
+  }
+
   async reversePostedInvoiceCogs(
     companyId: string,
     invoiceId: string,
@@ -641,6 +775,11 @@ export class SalesInvoiceService {
   ): Promise<void> {
     if (!companyId || !invoiceId) throw new ValidationError('companyId and invoiceId are required');
     await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const lockedInv = await this.invoiceRepo.findByIdForUpdate(companyId, invoiceId, tx);
+      if (lockedInv?.status === 'cancelled') {
+        throw new ValidationError('الفاتورة ملغاة مسبقاً وتم عكس قيودها');
+      }
+
       const linksRes = await tx.query<any>(
         `SELECT id, invoice_id, invoice_line_id, delivery_line_id, invoiced_qty, cogs_amount, journal_entry_id
          FROM inv_sales_cogs_links

@@ -64,15 +64,22 @@ export class SalesCollectionService {
         throw new ValidationError('العميل في سند التحصيل لا يطابق عميل الفاتورة');
       }
 
-      // Check remaining open amount
+      // Check remaining open amount (net of posted collections and posted sales returns)
       const balRes = await tx.query<any>(
-        `SELECT COALESCE(SUM(amount), 0) as paid
+        `SELECT
+           COALESCE(SUM(amount), 0) as paid,
+           COALESCE((
+             SELECT SUM(total_amount)
+             FROM sales_returns
+             WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'
+           ), 0) as returned
          FROM sales_collections
          WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'`,
         [companyId, input.invoiceId]
       );
       const alreadyPaid = parseFloat(balRes.rows[0]?.paid || '0');
-      const openAmount = Math.max(0, invoice.totalAmount - alreadyPaid);
+      const alreadyReturned = parseFloat(balRes.rows[0]?.returned || '0');
+      const openAmount = Math.max(0, invoice.totalAmount - alreadyPaid - alreadyReturned);
 
       if (input.amount > openAmount + 0.0001) {
         throw new ValidationError(
@@ -160,15 +167,22 @@ export class SalesCollectionService {
         throw new ValidationError('الفاتورة المرتبطة غير موجودة أو غير مرحلة');
       }
 
-      // Check open balance under lock
+      // Check open balance under lock (net of posted collections and posted sales returns)
       const balRes = await tx.query<any>(
-        `SELECT COALESCE(SUM(amount), 0) as paid
+        `SELECT
+           COALESCE(SUM(amount), 0) as paid,
+           COALESCE((
+             SELECT SUM(total_amount)
+             FROM sales_returns
+             WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'
+           ), 0) as returned
          FROM sales_collections
          WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted' AND id <> $3`,
         [companyId, collection.invoiceId, id]
       );
       const alreadyPaid = parseFloat(balRes.rows[0]?.paid || '0');
-      const openAmount = Math.max(0, invoiceLocked.totalAmount - alreadyPaid);
+      const alreadyReturned = parseFloat(balRes.rows[0]?.returned || '0');
+      const openAmount = Math.max(0, invoiceLocked.totalAmount - alreadyPaid - alreadyReturned);
 
       if (collection.amount > openAmount + 0.0001) {
         throw new ValidationError(
