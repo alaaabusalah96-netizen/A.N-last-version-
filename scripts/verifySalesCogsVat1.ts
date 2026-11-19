@@ -605,7 +605,7 @@ async function run() {
       const delMovRes = await checkClient.query<{ id: string; valuation_movement_id: string | null; linked_mov_id: string | null }>(
         `SELECT sdl.id, sdl.valuation_movement_id, ivm.id as linked_mov_id
          FROM sales_delivery_lines sdl
-         INNER JOIN sales_delivery_notes sdn ON sdn.id = sdl.delivery_note_id AND sdn.company_id = sdl.company_id
+         INNER JOIN sales_delivery_notes sdn ON sdn.id = sdl.delivery_id AND sdn.company_id = sdl.company_id
          LEFT JOIN inv_valuation_movements ivm ON ivm.id = sdl.valuation_movement_id AND ivm.company_id = sdl.company_id
          WHERE sdl.company_id = $1 AND sdn.status = 'posted'`,
         [companyId]
