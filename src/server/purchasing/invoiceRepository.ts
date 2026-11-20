@@ -223,7 +223,29 @@ export class InvoiceRepository {
     `;
     const res = await tx.query(sql, [companyId, id]);
     if (res.rows.length === 0) return null;
-    return mapInvoiceHeader(res.rows[0]);
+
+    const linesSql = `
+      SELECT
+        sil.id,
+        sil.company_id as "companyId",
+        sil.invoice_id as "invoiceId",
+        sil.grn_line_id as "grnLineId",
+        sil.item_id as "itemId",
+        i.code as "itemCode",
+        i.name_ar as "itemNameAr",
+        i.uom as "itemUom",
+        sil.qty,
+        sil.unit_cost as "unitCost",
+        sil.line_no as "lineNo"
+      FROM purch_supplier_invoice_lines sil
+      INNER JOIN inv_items i ON i.id = sil.item_id AND i.company_id = sil.company_id
+      WHERE sil.company_id = $1 AND sil.invoice_id = $2
+      ORDER BY sil.line_no ASC;
+    `;
+    const linesRes = await tx.query(linesSql, [companyId, id]);
+    const lines = linesRes.rows.map((lr: any) => mapInvoiceLine(lr));
+
+    return mapInvoiceHeader(res.rows[0], lines);
   }
 
   /**

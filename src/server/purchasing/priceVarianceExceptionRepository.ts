@@ -11,11 +11,14 @@ export interface PriceVarianceExceptionRow {
   requestedBy: string | null;
   approvedBy: string | null;
   rejectedBy: string | null;
+  supersededBy?: string | null;
   reason: string;
   decisionReason: string | null;
   fingerprint: string;
   snapshot: any;
   maxVariancePc: number;
+  decidedAt?: string | null;
+  supersededAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,9 +59,13 @@ export class PriceVarianceExceptionRepository {
       // Supersede any existing pending or approved exceptions for this invoice
       await executor.query(
         `UPDATE purch_price_variance_exceptions
-         SET status = 'superseded', updated_at = NOW()
+         SET status = 'superseded',
+             superseded_by = $3,
+             superseded_at = NOW(),
+             decision_reason = 'تم استبدال الطلب بطلب استثناء جديد',
+             updated_at = NOW()
          WHERE company_id = $1 AND invoice_id = $2 AND status IN ('pending', 'approved')`,
-        [companyId, data.invoiceId]
+        [companyId, data.invoiceId, data.requestedBy]
       );
 
       const res = await executor.query<any>(
@@ -74,11 +81,14 @@ export class PriceVarianceExceptionRepository {
            requested_by as "requestedBy",
            approved_by as "approvedBy",
            rejected_by as "rejectedBy",
+           superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
+           decided_at as "decidedAt",
+           superseded_at as "supersededAt",
            created_at as "createdAt",
            updated_at as "updatedAt";`,
         [
@@ -111,11 +121,14 @@ export class PriceVarianceExceptionRepository {
            requested_by as "requestedBy",
            approved_by as "approvedBy",
            rejected_by as "rejectedBy",
+           superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
+           decided_at as "decidedAt",
+           superseded_at as "supersededAt",
            created_at as "createdAt",
            updated_at as "updatedAt"
          FROM purch_price_variance_exceptions
@@ -139,11 +152,14 @@ export class PriceVarianceExceptionRepository {
          requested_by as "requestedBy",
          approved_by as "approvedBy",
          rejected_by as "rejectedBy",
+         superseded_by as "supersededBy",
          reason,
          decision_reason as "decisionReason",
          fingerprint,
          snapshot,
          max_variance_pct as "maxVariancePc",
+         decided_at as "decidedAt",
+         superseded_at as "supersededAt",
          created_at as "createdAt",
          updated_at as "updatedAt"
        FROM purch_price_variance_exceptions
@@ -166,11 +182,14 @@ export class PriceVarianceExceptionRepository {
            requested_by as "requestedBy",
            approved_by as "approvedBy",
            rejected_by as "rejectedBy",
+           superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
+           decided_at as "decidedAt",
+           superseded_at as "supersededAt",
            created_at as "createdAt",
            updated_at as "updatedAt"
          FROM purch_price_variance_exceptions
@@ -196,11 +215,14 @@ export class PriceVarianceExceptionRepository {
            requested_by as "requestedBy",
            approved_by as "approvedBy",
            rejected_by as "rejectedBy",
+           superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
+           decided_at as "decidedAt",
+           superseded_at as "supersededAt",
            created_at as "createdAt",
            updated_at as "updatedAt"
          FROM purch_price_variance_exceptions
@@ -222,15 +244,17 @@ export class PriceVarianceExceptionRepository {
     decisionReason: string | null,
     tx: DbExecutor
   ): Promise<PriceVarianceExceptionRow> {
-    const col = status === 'approved' ? 'approved_by' : status === 'rejected' ? 'rejected_by' : 'approved_by';
     const res = await tx.query<any>(
       `UPDATE purch_price_variance_exceptions
-       SET status = $3,
-           approved_by = CASE WHEN $3 = 'approved' THEN $4 ELSE approved_by END,
-           rejected_by = CASE WHEN $3 = 'rejected' THEN $4 ELSE rejected_by END,
-           decision_reason = COALESCE($5, decision_reason),
+       SET status = $3::varchar,
+           approved_by = CASE WHEN $3::text = 'approved' THEN COALESCE($4::uuid, approved_by) ELSE approved_by END,
+           rejected_by = CASE WHEN $3::text = 'rejected' THEN COALESCE($4::uuid, rejected_by) ELSE rejected_by END,
+           superseded_by = CASE WHEN $3::text = 'superseded' THEN COALESCE($4::uuid, superseded_by) ELSE superseded_by END,
+           decided_at = CASE WHEN $3::text IN ('approved', 'rejected') THEN NOW() ELSE decided_at END,
+           superseded_at = CASE WHEN $3::text = 'superseded' THEN NOW() ELSE superseded_at END,
+           decision_reason = COALESCE($5::text, decision_reason),
            updated_at = NOW()
-       WHERE company_id = $1 AND id = $2
+       WHERE company_id = $1::uuid AND id = $2::uuid
        RETURNING
          id,
          company_id as "companyId",
@@ -240,11 +264,14 @@ export class PriceVarianceExceptionRepository {
          requested_by as "requestedBy",
          approved_by as "approvedBy",
          rejected_by as "rejectedBy",
+         superseded_by as "supersededBy",
          reason,
          decision_reason as "decisionReason",
          fingerprint,
          snapshot,
          max_variance_pct as "maxVariancePc",
+         decided_at as "decidedAt",
+         superseded_at as "supersededAt",
          created_at as "createdAt",
          updated_at as "updatedAt";`,
       [companyId, exceptionId, status, actorId, decisionReason]

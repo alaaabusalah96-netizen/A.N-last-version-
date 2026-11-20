@@ -1101,6 +1101,116 @@ async function runVerification() {
     }
     assert(t93Error, `T9.3: StockService.issueStock threw error when issuing 100 against balance 30`);
 
+    // --- WP-2: PROVE STOCK QTY == VALUATION QTY BEFORE TRANSFER & PROVE INTEGRITY REJECTION ---
+    console.log('\n--- WP-2: Harmonizing & Proving Valuation Layers for WH_A and WH_B ---');
+    await appClient1.query('BEGIN;');
+    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
+    // Seed valuation layers and valuation balances matching current physical stock (WH_A: 2, WH_B: 4)
+    await appClient1.query(
+      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost, updated_at)
+       VALUES ($1, $2, $3, 2, 20, 10, NOW())
+       ON CONFLICT (company_id, warehouse_id, item_id)
+       DO UPDATE SET quantity = 2, total_cost = 20, unit_cost = 10, updated_at = NOW();`,
+      [compId, whA, itemId]
+    );
+    await appClient1.query(
+      `INSERT INTO inv_cost_layers (company_id, warehouse_id, item_id, original_qty, remaining_qty, unit_cost, total_cost, source_type, source_id, is_exhausted)
+       VALUES ($1, $2, $3, 2, 2, 10, 20, 'OPENING', gen_random_uuid(), false);`,
+      [compId, whA, itemId]
+    );
+
+    await appClient1.query(
+      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost, updated_at)
+       VALUES ($1, $2, $3, 4, 40, 10, NOW())
+       ON CONFLICT (company_id, warehouse_id, item_id)
+       DO UPDATE SET quantity = 4, total_cost = 40, unit_cost = 10, updated_at = NOW();`,
+      [compId, whB, itemId]
+    );
+    await appClient1.query(
+      `INSERT INTO inv_cost_layers (company_id, warehouse_id, item_id, original_qty, remaining_qty, unit_cost, total_cost, source_type, source_id, is_exhausted)
+       VALUES ($1, $2, $3, 4, 4, 10, 40, 'OPENING', gen_random_uuid(), false);`,
+      [compId, whB, itemId]
+    );
+
+    // 1) PROOF: Stock qty == Valuation qty for fixture warehouses before transfer
+    const preProofA = await appClient1.query<{ stock_qty: number; val_qty: number }>(
+      `SELECT s.qty::float as stock_qty, v.quantity::float as val_qty
+       FROM inv_stock_balances s
+       JOIN inv_valuation_balances v ON v.company_id = s.company_id AND v.warehouse_id = s.warehouse_id AND v.item_id = s.item_id
+       WHERE s.company_id = $1 AND s.warehouse_id = $2 AND s.item_id = $3;`,
+      [compId, whA, itemId]
+    );
+    const preProofB = await appClient1.query<{ stock_qty: number; val_qty: number }>(
+      `SELECT s.qty::float as stock_qty, v.quantity::float as val_qty
+       FROM inv_stock_balances s
+       JOIN inv_valuation_balances v ON v.company_id = s.company_id AND v.warehouse_id = s.warehouse_id AND v.item_id = s.item_id
+       WHERE s.company_id = $1 AND s.warehouse_id = $2 AND s.item_id = $3;`,
+      [compId, whB, itemId]
+    );
+    const preProofC = await appClient1.query<{ stock_qty: number; val_qty: number }>(
+      `SELECT s.qty::float as stock_qty, v.quantity::float as val_qty
+       FROM inv_stock_balances s
+       JOIN inv_valuation_balances v ON v.company_id = s.company_id AND v.warehouse_id = s.warehouse_id AND v.item_id = s.item_id
+       WHERE s.company_id = $1 AND s.warehouse_id = $2 AND s.item_id = $3;`,
+      [compId, whC, itemId]
+    );
+    await appClient1.query('COMMIT;');
+
+    assert(
+      preProofA.rows[0]?.stock_qty === 2 && preProofA.rows[0]?.val_qty === 2,
+      `WP-2 PROOF: WH_A stock qty (2) equals valuation qty (2) before transfer`
+    );
+    assert(
+      preProofB.rows[0]?.stock_qty === 4 && preProofB.rows[0]?.val_qty === 4,
+      `WP-2 PROOF: WH_B stock qty (4) equals valuation qty (4) before transfer`
+    );
+    assert(
+      preProofC.rows[0]?.stock_qty === 30 && preProofC.rows[0]?.val_qty === 30,
+      `WP-2 PROOF: WH_C stock qty (30) equals valuation qty (30) before transfer`
+    );
+
+    // 2) PROOF: Deliberate mismatch case MUST be rejected by VALUATION_INTEGRITY_ERROR
+    console.log('Testing that deliberate stock vs valuation mismatch is rejected by VALUATION_INTEGRITY_ERROR...');
+    const whMismatchRes = await appClient1.query<{ id: string }>(
+      "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, $2, 'مستودع عدم تطابق اختباري') RETURNING id;",
+      [compId, `WH_MISMATCH_${suffix}`]
+    );
+    const whMismatch = whMismatchRes.rows[0].id;
+    registry.registerWarehouse(whMismatch);
+
+    await appClient1.query('BEGIN;');
+    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+    // Deliberate mismatch: stock balance = 20, but valuation balance = 10 (or absent)
+    await appClient1.query(
+      `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at) VALUES ($1, $2, $3, 20, NOW());`,
+      [compId, whMismatch, itemId]
+    );
+    registry.registerBalance(compId, whMismatch, itemId);
+    await appClient1.query(
+      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost, updated_at) VALUES ($1, $2, $3, 10, 100, 10, NOW());`,
+      [compId, whMismatch, itemId]
+    );
+    await appClient1.query('COMMIT;');
+
+    let mismatchCaught = false;
+    let mismatchErrMsg = '';
+    try {
+      await defaultStockService.transfer(
+        compId,
+        { sourceWarehouseId: whMismatch, destWarehouseId: whB, itemId, qty: 5, memo: 'Deliberate Mismatch Transfer' },
+        actorId
+      );
+    } catch (err: any) {
+      mismatchCaught = true;
+      mismatchErrMsg = err?.message || String(err);
+    }
+    assert(
+      mismatchCaught && mismatchErrMsg.includes('VALUATION_INTEGRITY_ERROR'),
+      `WP-2 PROOF: Deliberate stock vs valuation mismatch was strictly rejected with VALUATION_INTEGRITY_ERROR (actual: '${mismatchErrMsg}')`
+    );
+
+    // 3) PROOF: Transfer succeeds cleanly after correct seed
     const svcTransfer = await defaultStockService.transfer(compId, { sourceWarehouseId: whC, destWarehouseId: whA, itemId, qty: 10, memo: 'Svc Transfer 10' }, actorId);
     registry.registerMovement(svcTransfer.movementOut.id);
     registry.registerMovement(svcTransfer.movementIn.id);

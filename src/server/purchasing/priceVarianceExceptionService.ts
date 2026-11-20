@@ -123,22 +123,26 @@ export class PriceVarianceExceptionService {
       throw new ValidationError('exceptionId is required');
     }
 
-    return await withTenantTransaction(companyId, async (tx) => {
-      const exc = await this.exceptionRepo.findByIdForUpdate(companyId, exceptionId, tx);
-      if (!exc) {
+    let fingerprintMismatch = false;
+    let approvedResult: PriceVarianceExceptionRow;
+
+    await withTenantTransaction(companyId, async (tx) => {
+      // 1. Initial lookup to identify target invoice
+      const excInfo = await this.exceptionRepo.findById(companyId, exceptionId, tx);
+      if (!excInfo) {
         throw new NotFoundError('طلب استثناء تباين الأسعار غير موجود');
       }
-      if (exc.status !== 'pending') {
-        throw new ValidationError(`لا يمكن اعتماد طلب استثناء حالته الحالية هي '${exc.status}'`);
+      if (excInfo.status !== 'pending') {
+        throw new ValidationError(`لا يمكن اعتماد طلب استثناء حالته الحالية هي '${excInfo.status}'`);
       }
 
       // Segregation of Duties (SoD): Approver cannot be requester
-      if (actorId && exc.requestedBy && actorId === exc.requestedBy) {
+      if (actorId && excInfo.requestedBy && actorId === excInfo.requestedBy) {
         throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من اعتماده بنفسه');
       }
 
-      // Lock target invoice FOR UPDATE in same transaction
-      const invoice = await this.invoiceRepo.findByIdForUpdate(companyId, exc.invoiceId, tx);
+      // 2. WP-6: Lock target invoice FOR UPDATE FIRST
+      const invoice = await this.invoiceRepo.findByIdForUpdate(companyId, excInfo.invoiceId, tx);
       if (!invoice) {
         throw new NotFoundError('فاتورة المورد المرتبطة غير موجودة');
       }
@@ -147,6 +151,21 @@ export class PriceVarianceExceptionService {
       }
       if (invoice.status === 'cancelled') {
         throw new ValidationError('فاتورة المورد ملغاة');
+      }
+
+      // 3. WP-6: Lock target exception FOR UPDATE SECOND
+      const exc = await this.exceptionRepo.findByIdForUpdate(companyId, exceptionId, tx);
+      if (!exc) {
+        throw new NotFoundError('طلب استثناء تباين الأسعار غير موجود');
+      }
+      if (exc.invoiceId !== invoice.id || exc.companyId !== companyId) {
+        throw new ValidationError('عدم تطابق بين طلب الاستثناء والفاتورة المرتبطة');
+      }
+      if (exc.status !== 'pending') {
+        throw new ValidationError(`لا يمكن اعتماد طلب استثناء حالته الحالية هي '${exc.status}'`);
+      }
+      if (actorId && exc.requestedBy && actorId === exc.requestedBy) {
+        throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من اعتماده بنفسه');
       }
 
       const report = await this.threeWayMatchService.evaluateInvoice(companyId, exc.invoiceId, tx);
@@ -182,11 +201,38 @@ export class PriceVarianceExceptionService {
       );
 
       if (currentFingerprint !== exc.fingerprint) {
-        await this.exceptionRepo.updateStatus(companyId, exceptionId, 'superseded', actorId || null, 'تغيرت بنود الفاتورة', tx);
-        throw new ValidationError('تغيرت بنود الفاتورة أو أسعارها بعد تقديم طلب الاستثناء؛ تم إلغاء الطلب ويجب تقديم طلب جديد.');
+        // WP-4 Option A: Persist status='superseded' inside committed transaction boundary
+        await this.exceptionRepo.updateStatus(
+          companyId,
+          exceptionId,
+          'superseded',
+          actorId || null,
+          'تغيرت بنود الفاتورة أو أسعارها بعد تقديم طلب الاستثناء',
+          tx
+        );
+
+        await this.auditService.record(
+          {
+            actorUserId: actorId || null,
+            companyId,
+            action: 'PURCHASING_VARIANCE_SUPERSEDE',
+            entityType: 'purch_price_variance_exceptions',
+            entityId: exceptionId,
+            metadata: {
+              invoiceId: exc.invoiceId,
+              reason: 'تغيرت بنود الفاتورة أو أسعارها بعد تقديم طلب الاستثناء',
+              oldFingerprint: exc.fingerprint,
+              newFingerprint: currentFingerprint,
+            },
+          },
+          { executor: tx }
+        );
+
+        fingerprintMismatch = true;
+        return; // Exits transaction block cleanly to commit status='superseded'
       }
 
-      const approved = await this.exceptionRepo.updateStatus(
+      approvedResult = await this.exceptionRepo.updateStatus(
         companyId,
         exceptionId,
         'approved',
@@ -206,9 +252,13 @@ export class PriceVarianceExceptionService {
         },
         { executor: tx }
       );
-
-      return approved;
     });
+
+    if (fingerprintMismatch) {
+      throw new ValidationError('تغيرت بنود الفاتورة أو أسعارها بعد تقديم طلب الاستثناء؛ تم إلغاء الطلب ويجب تقديم طلب جديد.');
+    }
+
+    return approvedResult!;
   }
 
   async rejectException(
@@ -225,12 +275,39 @@ export class PriceVarianceExceptionService {
     }
 
     return await withTenantTransaction(companyId, async (tx) => {
+      // 1. Initial lookup to identify target invoice and validate basic status
+      const excInfo = await this.exceptionRepo.findById(companyId, exceptionId, tx);
+      if (!excInfo) {
+        throw new NotFoundError('طلب استثناء تباين الأسعار غير موجود');
+      }
+      if (excInfo.status !== 'pending') {
+        throw new ValidationError(`لا يمكن رفض طلب استثناء حالته الحالية هي '${excInfo.status}'`);
+      }
+
+      // WP-5: SoD check on reject (requester cannot reject their own request)
+      if (actorId && excInfo.requestedBy && actorId === excInfo.requestedBy) {
+        throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من رفضه بنفسه');
+      }
+
+      // 2. WP-6: Lock target invoice FOR UPDATE FIRST
+      const invoice = await this.invoiceRepo.findByIdForUpdate(companyId, excInfo.invoiceId, tx);
+      if (!invoice) {
+        throw new NotFoundError('فاتورة المورد المرتبطة غير موجودة');
+      }
+
+      // 3. WP-6: Lock target exception FOR UPDATE SECOND
       const exc = await this.exceptionRepo.findByIdForUpdate(companyId, exceptionId, tx);
       if (!exc) {
         throw new NotFoundError('طلب استثناء تباين الأسعار غير موجود');
       }
+      if (exc.invoiceId !== invoice.id || exc.companyId !== companyId) {
+        throw new ValidationError('عدم تطابق بين طلب الاستثناء والفاتورة المرتبطة');
+      }
       if (exc.status !== 'pending') {
         throw new ValidationError(`لا يمكن رفض طلب استثناء حالته الحالية هي '${exc.status}'`);
+      }
+      if (actorId && exc.requestedBy && actorId === exc.requestedBy) {
+        throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من رفضه بنفسه');
       }
 
       const rejected = await this.exceptionRepo.updateStatus(
