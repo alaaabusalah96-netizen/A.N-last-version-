@@ -9,8 +9,11 @@ import { SalesCollection, CreateSalesCollectionInput } from './salesTypes.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 export class SalesCollectionService {
   constructor(
@@ -44,6 +47,7 @@ export class SalesCollectionService {
     if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
       throw new ValidationError('مبلغ التحصيل يجب أن يكون أكبر من الصفر');
     }
+    const validatedCollectionDate = assertOptionalCalendarDate(input.collectionDate, 'تاريخ التحصيل');
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       const customer = await this.customerRepo.findById(companyId, input.customerId, tx);
@@ -87,7 +91,16 @@ export class SalesCollectionService {
         );
       }
 
-      const created = await this.collectionRepo.createDraft(companyId, input, actorUserId, tx);
+      const effectiveCollectionDate = validatedCollectionDate ?? (await resolveCompanyToday(companyId, tx));
+      const created = await this.collectionRepo.createDraft(
+        companyId,
+        {
+          ...input,
+          collectionDate: effectiveCollectionDate,
+        },
+        actorUserId,
+        tx
+      );
 
       await this.auditService.record(
         {
@@ -192,7 +205,9 @@ export class SalesCollectionService {
 
       const arAccountId = await this.resolveArAccount(companyId, tx);
       const collectionNo = await this.journalRepo.allocateSequenceNumber(companyId, 'customer_collection', 'COL', tx);
-      const entryDate = ISO_DATE.test(collection.collectionDate) ? collection.collectionDate : new Date().toISOString().slice(0, 10);
+      const entryDate = isValidCalendarDate(collection.collectionDate)
+        ? collection.collectionDate
+        : await resolveCompanyToday(companyId, tx);
 
       // Balanced journal entry: Dr Cash Register, Cr Accounts Receivable
       const lines: any[] = [

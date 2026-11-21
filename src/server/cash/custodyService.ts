@@ -21,8 +21,11 @@ import {
 import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMoney } from '../lib/numeric.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 const ALLOWED_TRANSITIONS: Record<CustodyStatus, readonly CustodyStatus[]> = {
   pending: ['approved', 'rejected', 'cancelled'],
@@ -67,13 +70,6 @@ function assertValidMoney(value: unknown, fieldLabel: string, allowZero: boolean
   return rounded;
 }
 
-function resolveEntryDate(candidate?: string | null): string {
-  if (candidate && ISO_DATE.test(candidate.slice(0, 10))) {
-    return candidate.slice(0, 10);
-  }
-  return new Date().toISOString().slice(0, 10);
-}
-
 export class CustodyService {
   constructor(
     private custodyRepo: CustodyRepository = defaultCustodyRepository,
@@ -99,6 +95,12 @@ export class CustodyService {
   async listCustodies(companyId: string, filters: CustodyListFilters = {}): Promise<CustodyRecord[]> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('معرف الشركة مطلوب');
+    }
+    if (filters.from && !isValidCalendarDate(filters.from)) {
+      throw new ValidationError('صيغة تاريخ البداية غير صالحة (YYYY-MM-DD)');
+    }
+    if (filters.to && !isValidCalendarDate(filters.to)) {
+      throw new ValidationError('صيغة تاريخ النهاية غير صالحة (YYYY-MM-DD)');
     }
     return await this.custodyRepo.listByCompany(companyId, filters);
   }
@@ -169,12 +171,7 @@ export class CustodyService {
     if (purpose.length < 3) {
       throw new ValidationError('الغرض من العهدة إلزامي ويجب أن لا يقل عن 3 أحرف');
     }
-    if (input.requestDate !== undefined && input.requestDate !== null && input.requestDate !== '') {
-      if (!ISO_DATE.test(String(input.requestDate))) {
-        throw new ValidationError('تاريخ الطلب يجب أن يكون بصيغة YYYY-MM-DD');
-      }
-    }
-    const requestDate = resolveEntryDate(input.requestDate || null);
+    const requestedDate = assertOptionalCalendarDate(input.requestDate, 'تاريخ الطلب');
 
     return await withTenantTransaction(companyId, async (tx) => {
       const employee = await this.userRepo.findById(input.employeeUserId, tx);
@@ -198,6 +195,7 @@ export class CustodyService {
         throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن طلب عهدة عليه`);
       }
 
+      const requestDate = requestedDate ?? (await resolveCompanyToday(companyId, tx));
       const custodyNo = await this.journalRepo.allocateSequenceNumber(companyId, 'custody', 'CUS', tx);
       const created = await this.custodyRepo.create(
         companyId,
@@ -382,7 +380,9 @@ export class CustodyService {
         throw new ValidationError('لا يمكن الصرف لأن حساب ذمة العهد يطابق حساب النقدية المرتبط بالصندوق');
       }
 
-      const entryDate = resolveEntryDate(custody.requestDate);
+      const entryDate = isValidCalendarDate(custody.requestDate)
+        ? custody.requestDate
+        : await resolveCompanyToday(companyId, tx);
       const docRef = custody.custodyNo || id;
 
       const draft = await this.journalService.createDraftEntry(
@@ -540,7 +540,7 @@ export class CustodyService {
       }
 
       const gl = await this.glResolver.resolveAndAssertUsable(companyId, tx);
-      const entryDate = resolveEntryDate(new Date().toISOString().slice(0, 10));
+      const entryDate = await resolveCompanyToday(companyId, tx);
       const docRef = custody.custodyNo || id;
 
       const jeLines: Array<{ accountId: string; debit: number; credit: number; lineMemo: string }> =

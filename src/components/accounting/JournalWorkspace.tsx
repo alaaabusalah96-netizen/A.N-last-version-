@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
 interface JournalLine {
   id?: string;
@@ -74,7 +75,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
   const [actionLoading, setActionLoading] = useState(false);
 
   // New draft form state
-  const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newDate, setNewDate] = useState(() => getLocalTodayDateString());
   const [newMemo, setNewMemo] = useState('');
   const [newOrgUnitId, setNewOrgUnitId] = useState('');
   const [newLines, setNewLines] = useState<

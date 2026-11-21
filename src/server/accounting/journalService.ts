@@ -6,6 +6,7 @@ import { DbExecutor } from '../db/types.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import { defaultOrgUnitService } from '../org/orgUnitService.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.js';
+import { assertValidCalendarDate, resolveCompanyToday } from '../lib/calendarDate.js';
 import {
   JournalEntry,
   CreateDraftJournalEntryInput,
@@ -35,9 +36,7 @@ export class JournalService {
       throw new ValidationError('companyId is required');
     }
 
-    if (!input.entryDate || typeof input.entryDate !== 'string') {
-      throw new ValidationError('entryDate is required (YYYY-MM-DD)');
-    }
+    const validatedEntryDate = assertValidCalendarDate(input.entryDate, 'entryDate');
 
     if (!input.lines || !Array.isArray(input.lines) || input.lines.length < 2) {
       throw new ValidationError('Journal entry must have at least two lines');
@@ -106,7 +105,7 @@ export class JournalService {
 
       const draft = await this.journalRepo.createDraft(
         companyId,
-        input.entryDate,
+        validatedEntryDate,
         input.memo || null,
         input.lines,
         actorId,
@@ -325,7 +324,7 @@ export class JournalService {
         throw new ValidationError('Source entry has no lines to reverse');
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = await resolveCompanyToday(companyId, tx);
 
       // Period Enforcement for reversal entry with row lock (FOR UPDATE)
       const revPeriod = await this.periodRepo.findCoveringDateForUpdate(companyId, today, tx);

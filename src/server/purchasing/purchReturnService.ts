@@ -12,8 +12,11 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { COST_SCALE, MONEY_SCALE, fromMinorUnits, parseExactUnits, rescaleUnits, toDecimal, toMinorUnits, unitsToSafeNumber } from '../lib/numeric.js';
 import { defaultInventoryValuationService, InventoryValuationService } from '../inventory/inventoryValuationService.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 export class PurchReturnService {
   private glMappingService: GlMappingService;
@@ -84,6 +87,7 @@ export class PurchReturnService {
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في المرتجع');
     }
+    const validatedReturnDate = assertOptionalCalendarDate(input.returnDate, 'تاريخ المرتجع');
 
     return await withTenantTransaction(companyId, async (tx) => {
       const supplier = await this.supplierRepo.findById(companyId, input.supplierId, tx);
@@ -170,6 +174,8 @@ export class PurchReturnService {
         }
       }
 
+      const effectiveReturnDate = validatedReturnDate ?? (await resolveCompanyToday(companyId, tx));
+
       const created = await this.returnRepo.createDraft(
         companyId,
         {
@@ -177,7 +183,7 @@ export class PurchReturnService {
           warehouseId: input.warehouseId,
           grnId: input.grnId,
           invoiceId: input.invoiceId,
-          returnDate: input.returnDate,
+          returnDate: effectiveReturnDate,
           reason: input.reason,
           memo: input.memo,
           lines: input.lines,
@@ -410,7 +416,9 @@ export class PurchReturnService {
         throw new ValidationError('قيمة المرتجع الإجمالية يجب أن تكون أكبر من الصفر');
       }
 
-      const entryDate = ISO_DATE.test(ret.returnDate) ? ret.returnDate : new Date().toISOString().slice(0, 10);
+      const entryDate = isValidCalendarDate(ret.returnDate)
+        ? ret.returnDate
+        : await resolveCompanyToday(companyId, tx);
       const returnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'purchase_return', 'PRTN', tx);
 
       const liabilityAccountId = ret.invoiceId

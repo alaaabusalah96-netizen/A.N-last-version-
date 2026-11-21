@@ -1,6 +1,7 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { toDecimal } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 export interface SupplierPayment {
   id: string;
@@ -39,9 +40,7 @@ export interface CreateSupplierPaymentInput {
 }
 
 function toIsoDate(val: unknown): string {
-  if (!val) return '';
-  if (typeof val === 'string') return val.slice(0, 10);
-  return new Date(val as Date).toISOString().slice(0, 10);
+  return toCalendarDate(val);
 }
 
 function toIsoTimestamp(val: unknown): string | null {
@@ -94,7 +93,7 @@ export class SupplierPaymentRepository {
           cr.code as "registerCode",
           cr.name_ar as "registerNameAr",
           sp.payment_no as "paymentNo",
-          sp.payment_date as "paymentDate",
+          sp.payment_date::text as "paymentDate",
           sp.amount,
           sp.status,
           sp.reference,
@@ -137,7 +136,7 @@ export class SupplierPaymentRepository {
           cr.code as "registerCode",
           cr.name_ar as "registerNameAr",
           sp.payment_no as "paymentNo",
-          sp.payment_date as "paymentDate",
+          sp.payment_date::text as "paymentDate",
           sp.amount,
           sp.status,
           sp.reference,
@@ -175,6 +174,7 @@ export class SupplierPaymentRepository {
         register_id as "registerId",
         amount,
         status,
+        payment_date::text as "paymentDate",
         payment_no as "paymentNo"
       FROM purch_supplier_payments
       WHERE company_id = $1 AND id = $2
@@ -213,7 +213,7 @@ export class SupplierPaymentRepository {
           invoice_id as "invoiceId",
           register_id as "registerId",
           payment_no as "paymentNo",
-          payment_date as "paymentDate",
+          payment_date::text as "paymentDate",
           amount,
           status,
           reference,

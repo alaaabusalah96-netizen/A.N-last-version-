@@ -2,6 +2,7 @@ import { defaultPeriodRepository, PeriodRepository } from './periodRepository.js
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
+import { assertValidCalendarDate } from '../lib/calendarDate.js';
 import { AccountingPeriod, CreatePeriodInput } from './periodTypes.js';
 
 export class PeriodService {
@@ -37,15 +38,10 @@ export class PeriodService {
       throw new ValidationError('رمز الفترة المحاسبية مطلوب (كود الفترة)');
     }
 
-    if (!input.startDate || typeof input.startDate !== 'string') {
-      throw new ValidationError('تاريخ بداية الفترة مطلوب بصيغة YYYY-MM-DD');
-    }
+    const startDate = assertValidCalendarDate(input.startDate, 'تاريخ بداية الفترة');
+    const endDate = assertValidCalendarDate(input.endDate, 'تاريخ نهاية الفترة');
 
-    if (!input.endDate || typeof input.endDate !== 'string') {
-      throw new ValidationError('تاريخ نهاية الفترة مطلوب بصيغة YYYY-MM-DD');
-    }
-
-    if (input.startDate > input.endDate) {
+    if (startDate > endDate) {
       throw new ValidationError('تاريخ بداية الفترة يجب أن يكون قبل أو يساوي تاريخ نهاية الفترة');
     }
 
@@ -58,19 +54,19 @@ export class PeriodService {
     // A. Overlap check: Reject when date range overlaps an existing period for the same company_id
     const overlapping = await this.periodRepo.findOverlapping(
       companyId,
-      input.startDate,
-      input.endDate
+      startDate,
+      endDate
     );
     if (overlapping) {
       throw new ValidationError(
-        `تتعارض تواريخ الفترة الجديدة (${input.startDate} إلى ${input.endDate}) مع فترة محاسبية قائمة (${overlapping.code}: من ${overlapping.startDate} إلى ${overlapping.endDate}). لا يمكن تداخل الفترات المالية لنفس الشركة.`
+        `تتعارض تواريخ الفترة الجديدة (${startDate} إلى ${endDate}) مع فترة محاسبية قائمة (${overlapping.code}: من ${overlapping.startDate} إلى ${overlapping.endDate}). لا يمكن تداخل الفترات المالية لنفس الشركة.`
       );
     }
 
     const period = await this.periodRepo.create(companyId, {
       code: input.code.trim(),
-      startDate: input.startDate,
-      endDate: input.endDate,
+      startDate,
+      endDate,
     });
 
     await this.auditService.record({

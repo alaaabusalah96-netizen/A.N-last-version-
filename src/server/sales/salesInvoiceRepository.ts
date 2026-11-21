@@ -2,6 +2,7 @@ import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { SalesInvoice, SalesInvoiceLine, CreateSalesInvoiceInput, CreateSalesInvoiceLineInput } from './salesTypes.js';
 import { MONEY_SCALE, fromMinorUnits, toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function divideHalfUp(numerator: bigint, divisor: bigint): bigint {
   if (numerator >= 0n) {
@@ -117,8 +118,8 @@ function mapHeaderRow(row: any): SalesInvoice {
     deliveryId: row.delivery_id || null,
     deliveryNo: row.delivery_no || null,
     invoiceNo: row.invoice_no || null,
-    invoiceDate: row.invoice_date instanceof Date ? row.invoice_date.toISOString().slice(0, 10) : String(row.invoice_date).slice(0, 10),
-    dueDate: row.due_date ? (row.due_date instanceof Date ? row.due_date.toISOString().slice(0, 10) : String(row.due_date).slice(0, 10)) : null,
+    invoiceDate: toCalendarDate(row.invoice_date),
+    dueDate: row.due_date ? (toCalendarDate(row.due_date) || null) : null,
     status: row.status,
     subtotal,
     taxAmount,
@@ -172,7 +173,7 @@ export class SalesInvoiceRepository {
     const run = async (executor: DbExecutor) => {
       const sql = `
         SELECT 
-          i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date, i.due_date,
+          i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date::text as invoice_date, i.due_date::text as due_date,
           i.status, i.subtotal, i.tax_amount, i.total_amount, i.cogs_amount, i.cogs_posted_at, i.memo, i.journal_entry_id,
           i.reversal_journal_entry_id, i.cancelled_at, i.cancelled_by, i.cancellation_reason,
           i.posted_at, i.posted_by, i.created_by, i.created_at, i.updated_at,
@@ -198,7 +199,7 @@ export class SalesInvoiceRepository {
     const run = async (executor: DbExecutor) => {
       const headerSql = `
         SELECT 
-          i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date, i.due_date,
+          i.id, i.company_id, i.customer_id, i.delivery_id, i.invoice_no, i.invoice_date::text as invoice_date, i.due_date::text as due_date,
           i.status, i.subtotal, i.tax_amount, i.total_amount, i.cogs_amount, i.cogs_posted_at, i.memo, i.journal_entry_id,
           i.reversal_journal_entry_id, i.cancelled_at, i.cancelled_by, i.cancellation_reason,
           i.posted_at, i.posted_by, i.created_by, i.created_at, i.updated_at,
@@ -391,8 +392,8 @@ export class SalesInvoiceRepository {
         SELECT 
           i.id as "invoiceId",
           i.invoice_no as "invoiceNo",
-          i.invoice_date as "invoiceDate",
-          i.due_date as "dueDate",
+          i.invoice_date::text as "invoiceDate",
+          i.due_date::text as "dueDate",
           i.customer_id as "customerId",
           c.code as "customerCode",
           c.name_ar as "customerNameAr",
@@ -421,6 +422,8 @@ export class SalesInvoiceRepository {
       const res = await executor.query<any>(sql, params);
       return res.rows.map((r) => ({
         ...r,
+        invoiceDate: toCalendarDate(r.invoiceDate),
+        dueDate: r.dueDate ? (toCalendarDate(r.dueDate) || null) : null,
         invoiceTotal: toMoney(r.invoiceTotal ?? 0),
         collectedAmount: toMoney(r.collectedAmount ?? 0),
         returnedAmount: toMoney(r.returnedAmount ?? 0),

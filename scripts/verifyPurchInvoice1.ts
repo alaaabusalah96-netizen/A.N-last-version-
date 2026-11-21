@@ -14,6 +14,7 @@ import { defaultWarehouseService } from '../src/server/inventory/warehouseServic
 import { defaultItemService } from '../src/server/inventory/itemService.js';
 import { defaultAccountService } from '../src/server/accounting/accountService.js';
 import { defaultPeriodService } from '../src/server/accounting/periodService.js';
+import { defaultJournalRepository } from '../src/server/accounting/journalRepository.js';
 import { defaultCompanySettingsRepository } from '../src/server/org/companySettingsRepository.js';
 import { ValidationError, NotFoundError } from '../src/server/http/errors.js';
 import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
@@ -223,6 +224,16 @@ async function run() {
     console.log('[Test I4] Posting supplier invoice...');
     const postedInvoice = await defaultInvoiceService.postInvoice(companyAId, invoiceDraft.id, userId);
     await check('I4: Supplier invoice posted successfully with journal entry', Boolean(postedInvoice.status === 'posted' && postedInvoice.journalEntryId));
+
+    const postedJe = postedInvoice.journalEntryId
+      ? await defaultJournalRepository.findById(companyAId, postedInvoice.journalEntryId)
+      : null;
+    await check(
+      'I4c: Supplier invoice and posted journal entry preserve exact calendar date 2026-03-01',
+      invoiceDraft.invoiceDate === '2026-03-01' &&
+        postedInvoice.invoiceDate === '2026-03-01' &&
+        postedJe?.entryDate === '2026-03-01'
+    );
 
     // Verify outstanding qty updated correctly (10 - 6 = 4)
     const outstandingAfter = await defaultInvoiceService.getOutstandingLines(companyAId, supplier.id);

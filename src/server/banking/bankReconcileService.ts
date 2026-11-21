@@ -6,20 +6,16 @@ import { ValidationError, NotFoundError, ConflictError } from '../http/errors.js
 import { isUuid } from '../http/validators.js';
 import { toMinorUnits, fromMinorUnits } from '../lib/numeric.js';
 import {
+  assertValidCalendarDate,
+  assertOptionalCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
+import {
   BankStatementLine,
   CreateBankStatementLineInput,
   BankReconciliationWorkspace,
   BankReconciliation,
 } from './bankingTypes.js';
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function assertDate(val: string, label: string): string {
-  if (!val || typeof val !== 'string' || !DATE_RE.test(val.trim())) {
-    throw new ValidationError(`${label}: صيغة التاريخ غير صحيحة (المتوقع YYYY-MM-DD)`);
-  }
-  return val.trim();
-}
 
 export class BankReconcileService {
   constructor(
@@ -36,11 +32,10 @@ export class BankReconcileService {
     if (!companyId || !bankAccountId || !isUuid(bankAccountId)) {
       throw new ValidationError('معرف الحساب البنكي غير صالح');
     }
-    const targetDate = asOfDate
-      ? assertDate(asOfDate, 'asOfDate')
-      : new Date().toISOString().slice(0, 10);
+    const requestedAsOfDate = assertOptionalCalendarDate(asOfDate, 'asOfDate');
 
     return await withTenantTransaction(companyId, async (tx) => {
+      const targetDate = requestedAsOfDate ?? (await resolveCompanyToday(companyId, tx));
       const bankAccount = await this.accountRepo.findById(companyId, bankAccountId, tx);
       if (!bankAccount) {
         throw new NotFoundError('الحساب البنكي غير موجود');
@@ -115,8 +110,8 @@ export class BankReconcileService {
     }
 
     const sanitized: CreateBankStatementLineInput[] = lines.map((line, idx) => {
-      const statementDate = assertDate(line.statementDate, `السطر ${idx + 1} - تاريخ الكشف`);
-      const valueDate = line.valueDate ? assertDate(line.valueDate, `السطر ${idx + 1} - تاريخ القيمة`) : null;
+      const statementDate = assertValidCalendarDate(line.statementDate, `السطر ${idx + 1} - تاريخ الكشف`);
+      const valueDate = line.valueDate ? assertValidCalendarDate(line.valueDate, `السطر ${idx + 1} - تاريخ القيمة`) : null;
       if (!line.description || typeof line.description !== 'string' || line.description.trim() === '') {
         throw new ValidationError(`السطر ${idx + 1}: البيان مطلوب`);
       }
@@ -309,7 +304,7 @@ export class BankReconcileService {
     if (!companyId || !isUuid(bankAccountId)) {
       throw new ValidationError('معرف الحساب البنكي غير صالح');
     }
-    const endDate = assertDate(input.statementEndDate, 'تاريخ نهاية كشف الحساب');
+    const endDate = assertValidCalendarDate(input.statementEndDate, 'تاريخ نهاية كشف الحساب');
     if (input.statementEndingBalance === undefined || input.statementEndingBalance === null || String(input.statementEndingBalance).trim() === '') {
       throw new ValidationError('الرصيد الختامي بكشف البنك مطلوب');
     }

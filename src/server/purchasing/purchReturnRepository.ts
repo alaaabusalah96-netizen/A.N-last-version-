@@ -1,6 +1,7 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { toDecimal } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 export interface PurchReturnLine {
   id: string;
@@ -78,9 +79,7 @@ export interface ReturnableGrnLineRow {
 }
 
 function toIsoDate(val: unknown): string {
-  if (!val) return '';
-  if (typeof val === 'string') return val.slice(0, 10);
-  return new Date(val as Date).toISOString().slice(0, 10);
+  return toCalendarDate(val);
 }
 
 function toIsoTimestamp(val: unknown): string | null {
@@ -151,7 +150,7 @@ export class PurchReturnRepository {
           g.grn_no as "grnNo",
           pr.invoice_id as "invoiceId",
           pr.return_no as "returnNo",
-          pr.return_date as "returnDate",
+          pr.return_date::text as "returnDate",
           pr.status,
           pr.reason,
           pr.memo,
@@ -225,7 +224,7 @@ export class PurchReturnRepository {
           g.grn_no as "grnNo",
           pr.invoice_id as "invoiceId",
           pr.return_no as "returnNo",
-          pr.return_date as "returnDate",
+          pr.return_date::text as "returnDate",
           pr.status,
           pr.reason,
           pr.memo,
@@ -284,6 +283,7 @@ export class PurchReturnRepository {
         grn_id as "grnId",
         invoice_id as "invoiceId",
         status,
+        return_date::text as "returnDate",
         return_no as "returnNo"
       FROM purch_returns
       WHERE company_id = $1 AND id = $2
@@ -388,7 +388,7 @@ export class PurchReturnRepository {
           invoice_id as "invoiceId",
           status,
           return_no as "returnNo",
-          return_date as "returnDate",
+          return_date::text as "returnDate",
           reason,
           memo,
           journal_entry_id as "journalEntryId",

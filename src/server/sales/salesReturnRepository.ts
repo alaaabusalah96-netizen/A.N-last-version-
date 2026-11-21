@@ -2,6 +2,7 @@ import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { SalesReturn, SalesReturnLine, SalesReturnStatus } from './salesTypes.js';
 import { MONEY_SCALE, fromMinorUnits, toDecimal, toMinorUnits, toMoney } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 export interface PersistSalesReturnLineData {
   invoiceLineId: string;
@@ -41,10 +42,7 @@ function mapHeaderRow(row: any): SalesReturn {
     warehouseCode: row.warehouse_code || undefined,
     warehouseNameAr: row.warehouse_name_ar || undefined,
     returnNo: row.return_no || null,
-    returnDate:
-      row.return_date instanceof Date
-        ? row.return_date.toISOString().slice(0, 10)
-        : String(row.return_date).slice(0, 10),
+    returnDate: toCalendarDate(row.return_date),
     status: row.status as SalesReturnStatus,
     subtotal: toMoney(row.subtotal ?? 0),
     taxAmount: toMoney(row.tax_amount ?? 0),
@@ -99,7 +97,7 @@ export class SalesReturnRepository {
       const sql = `
         SELECT
           sr.id, sr.company_id, sr.customer_id, sr.invoice_id, sr.warehouse_id,
-          sr.return_no, sr.return_date, sr.status, sr.subtotal, sr.tax_amount, sr.total_amount, sr.cogs_amount,
+          sr.return_no, sr.return_date::text as return_date, sr.status, sr.subtotal, sr.tax_amount, sr.total_amount, sr.cogs_amount,
           sr.reason, sr.memo, sr.journal_entry_id, sr.posted_at, sr.posted_by, sr.created_by, sr.created_at, sr.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           inv.invoice_no as invoice_no,
@@ -126,7 +124,7 @@ export class SalesReturnRepository {
       const headerSql = `
         SELECT
           sr.id, sr.company_id, sr.customer_id, sr.invoice_id, sr.warehouse_id,
-          sr.return_no, sr.return_date, sr.status, sr.subtotal, sr.tax_amount, sr.total_amount, sr.cogs_amount,
+          sr.return_no, sr.return_date::text as return_date, sr.status, sr.subtotal, sr.tax_amount, sr.total_amount, sr.cogs_amount,
           sr.reason, sr.memo, sr.journal_entry_id, sr.posted_at, sr.posted_by, sr.created_by, sr.created_at, sr.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           inv.invoice_no as invoice_no,

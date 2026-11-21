@@ -1,6 +1,7 @@
 import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { SalesCollection, CreateSalesCollectionInput } from './salesTypes.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function mapRow(row: any): SalesCollection {
   return {
@@ -15,7 +16,7 @@ function mapRow(row: any): SalesCollection {
     registerCode: row.register_code,
     registerNameAr: row.register_name_ar,
     collectionNo: row.collection_no || null,
-    collectionDate: row.collection_date instanceof Date ? row.collection_date.toISOString().slice(0, 10) : String(row.collection_date).slice(0, 10),
+    collectionDate: toCalendarDate(row.collection_date),
     amount: parseFloat(row.amount || '0'),
     status: row.status,
     reference: row.reference || null,
@@ -36,7 +37,7 @@ export class SalesCollectionRepository {
       const sql = `
         SELECT 
           c.id, c.company_id, c.customer_id, c.invoice_id, c.register_id, c.collection_no,
-          c.collection_date, c.amount, c.status, c.reference, c.memo, c.journal_entry_id,
+          c.collection_date::text as collection_date, c.amount, c.status, c.reference, c.memo, c.journal_entry_id,
           c.posted_at, c.posted_by, c.created_by, c.created_at, c.updated_at,
           cust.code as customer_code, cust.name_ar as customer_name_ar,
           inv.invoice_no as invoice_no,
@@ -63,7 +64,7 @@ export class SalesCollectionRepository {
       const sql = `
         SELECT 
           c.id, c.company_id, c.customer_id, c.invoice_id, c.register_id, c.collection_no,
-          c.collection_date, c.amount, c.status, c.reference, c.memo, c.journal_entry_id,
+          c.collection_date::text as collection_date, c.amount, c.status, c.reference, c.memo, c.journal_entry_id,
           c.posted_at, c.posted_by, c.created_by, c.created_at, c.updated_at,
           cust.code as customer_code, cust.name_ar as customer_name_ar,
           inv.invoice_no as invoice_no,

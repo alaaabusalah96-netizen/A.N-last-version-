@@ -18,8 +18,11 @@ import {
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMoney } from '../lib/numeric.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 function assertValidVoucherMoney(value: unknown): number {
   if (value === undefined || value === null || value === '') {
@@ -39,17 +42,6 @@ function assertValidVoucherMoney(value: unknown): number {
     throw new ValidationError('مبلغ السند يجب أن يكون أكبر من صفر وبحد أقصى منزلتين عشريتين');
   }
   return rounded;
-}
-
-function resolveVoucherDate(candidate?: string): string {
-  if (candidate !== undefined && candidate !== null && candidate !== '') {
-    const trimmed = String(candidate).trim();
-    if (!ISO_DATE.test(trimmed)) {
-      throw new ValidationError('تاريخ السند يجب أن يكون بصيغة YYYY-MM-DD');
-    }
-    return trimmed;
-  }
-  return new Date().toISOString().slice(0, 10);
 }
 
 export class VoucherService {
@@ -101,7 +93,7 @@ export class VoucherService {
       throw new ValidationError('الحساب الطرف مطلوب وبصيغة صحيحة');
     }
     const amount = assertValidVoucherMoney(input.amount);
-    const voucherDate = resolveVoucherDate(input.voucherDate);
+    const requestedVoucherDate = assertOptionalCalendarDate(input.voucherDate, 'تاريخ السند');
 
     return await withTenantTransaction(companyId, async (tx) => {
       const register = await this.registerRepo.findById(companyId, input.registerId, tx);
@@ -113,6 +105,7 @@ export class VoucherService {
       }
 
       await this.validateContraAccount(companyId, input.contraAccountId, register.glAccountId, tx);
+      const voucherDate = requestedVoucherDate ?? (await resolveCompanyToday(companyId, tx));
 
       const created = await this.voucherRepo.createDraft(
         kind,
@@ -167,6 +160,12 @@ export class VoucherService {
   ): Promise<CashVoucher[]> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('معرف الشركة مطلوب');
+    }
+    if (filters.from && !isValidCalendarDate(filters.from)) {
+      throw new ValidationError('صيغة تاريخ البداية غير صالحة (YYYY-MM-DD)');
+    }
+    if (filters.to && !isValidCalendarDate(filters.to)) {
+      throw new ValidationError('صيغة تاريخ النهاية غير صالحة (YYYY-MM-DD)');
     }
     return await this.voucherRepo.listByCompany(kind, companyId, filters);
   }
@@ -390,10 +389,10 @@ export class VoucherService {
     if (!filters.registerId || !isUuid(filters.registerId)) {
       throw new ValidationError('معرف الصندوق / الخزينة مطلوب وبصيغة صحيحة');
     }
-    if (filters.from && !ISO_DATE.test(filters.from)) {
+    if (filters.from && !isValidCalendarDate(filters.from)) {
       throw new ValidationError('صيغة تاريخ البداية غير صالحة (YYYY-MM-DD)');
     }
-    if (filters.to && !ISO_DATE.test(filters.to)) {
+    if (filters.to && !isValidCalendarDate(filters.to)) {
       throw new ValidationError('صيغة تاريخ النهاية غير صالحة (YYYY-MM-DD)');
     }
 

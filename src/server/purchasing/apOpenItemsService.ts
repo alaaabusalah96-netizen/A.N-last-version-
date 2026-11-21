@@ -1,6 +1,11 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { MONEY_SCALE, fromMinorUnits, toMinorUnits } from '../lib/numeric.js';
+import {
+  diffCalendarDays,
+  resolveCompanyToday,
+  toCalendarDate,
+} from '../lib/calendarDate.js';
 
 export interface ApOpenItemRow {
   invoiceId: string;
@@ -77,16 +82,15 @@ export class ApOpenItemsService {
           s.name_ar as "supplierNameAr",
           si.supplier_invoice_no as "supplierInvoiceNo",
           si.invoice_no as "invoiceNo",
-          si.invoice_date as "invoiceDate",
-          si.due_date as "dueDate",
+          si.invoice_date::text as "invoiceDate",
+          si.due_date::text as "dueDate",
           COALESCE(inv_totals.invoice_total, 0)::text as "invoiceTotal",
           COALESCE(ret_totals.credited_total, 0)::text as "creditedReturnTotal",
           COALESCE(pay_totals.paid_total, 0)::text as "paidPaymentTotal",
           GREATEST(
             0,
             COALESCE(inv_totals.invoice_total, 0) - COALESCE(ret_totals.credited_total, 0) - COALESCE(pay_totals.paid_total, 0)
-          )::text as "remainingOpenAmount",
-          COALESCE(invoice_date, CURRENT_DATE) as "invDateRaw"
+          )::text as "remainingOpenAmount"
         FROM purch_supplier_invoices si
         INNER JOIN purch_suppliers s ON s.id = si.supplier_id AND s.company_id = si.company_id
         LEFT JOIN (
@@ -113,7 +117,7 @@ export class ApOpenItemsService {
       `;
       const res = await executor.query<any>(sql, params);
       const rows: ApOpenItemRow[] = [];
-      const today = new Date();
+      const companyToday = await resolveCompanyToday(companyId, executor);
 
       for (const r of res.rows) {
         const amounts = computeApOpenAmounts(
@@ -122,8 +126,11 @@ export class ApOpenItemsService {
           r.paidPaymentTotal
         );
 
-        const invDate = new Date(r.invDateRaw);
-        const agingDays = Math.max(0, Math.floor((today.getTime() - invDate.getTime()) / (1000 * 60 * 60 * 24)));
+        const invDateStr = toCalendarDate(r.invoiceDate);
+        const dueDateStr = toCalendarDate(r.dueDate);
+        const agingDays = invDateStr
+          ? Math.max(0, diffCalendarDays(companyToday, invDateStr))
+          : 0;
 
         rows.push({
           invoiceId: r.invoiceId,
@@ -133,8 +140,8 @@ export class ApOpenItemsService {
           supplierNameAr: r.supplierNameAr,
           supplierInvoiceNo: r.supplierInvoiceNo,
           invoiceNo: r.invoiceNo || null,
-          invoiceDate: String(r.invoiceDate).slice(0, 10),
-          dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+          invoiceDate: invDateStr,
+          dueDate: dueDateStr || null,
           invoiceTotal: amounts.invoiceTotal,
           creditedReturnTotal: amounts.creditedReturnTotal,
           paidPaymentTotal: amounts.paidPaymentTotal,

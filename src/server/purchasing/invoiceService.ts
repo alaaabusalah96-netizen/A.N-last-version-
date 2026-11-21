@@ -30,8 +30,11 @@ import {
   InventoryValuationService,
 } from '../inventory/inventoryValuationService.js';
 import { defaultPriceVarianceExceptionRepository } from './priceVarianceExceptionRepository.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 export class InvoiceService {
   private glMappingService: GlMappingService;
@@ -102,6 +105,8 @@ export class InvoiceService {
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في فاتورة المورد');
     }
+    const validatedInvoiceDate = assertOptionalCalendarDate(input.invoiceDate, 'تاريخ الفاتورة');
+    const validatedDueDate = assertOptionalCalendarDate(input.dueDate, 'تاريخ الاستحقاق');
 
     return await withTenantTransaction(companyId, async (tx) => {
       const supplier = await this.supplierRepo.findById(companyId, input.supplierId, tx);
@@ -159,13 +164,15 @@ export class InvoiceService {
         }
       }
 
+      const effectiveInvoiceDate = validatedInvoiceDate ?? (await resolveCompanyToday(companyId, tx));
+
       const created = await this.invoiceRepo.createDraft(
         companyId,
         {
           supplierId: input.supplierId,
           supplierInvoiceNo: input.supplierInvoiceNo.trim(),
-          invoiceDate: input.invoiceDate,
-          dueDate: input.dueDate,
+          invoiceDate: effectiveInvoiceDate,
+          dueDate: validatedDueDate ?? undefined,
           memo: input.memo,
           lines: input.lines,
         },
@@ -527,7 +534,9 @@ export class InvoiceService {
         lineMemo: `حساب المورد / الدائنين فاتورة ${invoice.supplierInvoiceNo}`,
       });
 
-      const entryDate = ISO_DATE.test(invoice.invoiceDate) ? invoice.invoiceDate : new Date().toISOString().slice(0, 10);
+      const entryDate = isValidCalendarDate(invoice.invoiceDate)
+        ? invoice.invoiceDate
+        : await resolveCompanyToday(companyId, tx);
       const invoiceNo = await this.journalRepo.allocateSequenceNumber(companyId, 'purchase_invoice', 'PINV', tx);
 
       const draftJe = await this.journalService.createDraftEntry(

@@ -9,12 +9,7 @@ import {
   VoucherStatus,
 } from './voucherTypes.js';
 import { toMoney } from '../lib/numeric.js';
-
-function toIsoDate(val: unknown): string {
-  if (!val) return '';
-  if (typeof val === 'string') return val.slice(0, 10);
-  return new Date(val as Date).toISOString().slice(0, 10);
-}
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function toIsoTimestamp(val: unknown): string | null {
   if (!val) return null;
@@ -35,7 +30,7 @@ function mapVoucherRow(kind: VoucherKind, row: any): CashVoucher {
     registerId: row.registerId,
     registerCode: row.registerCode ?? null,
     registerNameAr: row.registerNameAr ?? null,
-    voucherDate: toIsoDate(row.voucherDate),
+    voucherDate: toCalendarDate(row.voucherDate),
     amount: toMoney(row.amount),
     contraAccountId: row.contraAccountId,
     contraAccountCode: row.contraAccountCode ?? null,
@@ -94,7 +89,7 @@ export class VoucherRepository {
         company_id as "companyId",
         voucher_no as "voucherNo",
         register_id as "registerId",
-        voucher_date as "voucherDate",
+        voucher_date::text as "voucherDate",
         amount,
         contra_account_id as "contraAccountId",
         status,
@@ -136,7 +131,7 @@ export class VoucherRepository {
           v.register_id as "registerId",
           cr.code as "registerCode",
           cr.name_ar as "registerNameAr",
-          v.voucher_date as "voucherDate",
+          v.voucher_date::text as "voucherDate",
           v.amount,
           v.contra_account_id as "contraAccountId",
           ca.code as "contraAccountCode",
@@ -178,7 +173,7 @@ export class VoucherRepository {
         company_id as "companyId",
         voucher_no as "voucherNo",
         register_id as "registerId",
-        voucher_date as "voucherDate",
+        voucher_date::text as "voucherDate",
         amount,
         contra_account_id as "contraAccountId",
         status,
@@ -235,7 +230,7 @@ export class VoucherRepository {
           v.register_id as "registerId",
           cr.code as "registerCode",
           cr.name_ar as "registerNameAr",
-          v.voucher_date as "voucherDate",
+          v.voucher_date::text as "voucherDate",
           v.amount,
           v.contra_account_id as "contraAccountId",
           ca.code as "contraAccountCode",
@@ -330,7 +325,7 @@ export class VoucherRepository {
           m.id,
           m.source_type as "sourceType",
           m.movement_label_ar as "movementLabelAr",
-          m.movement_date as "movementDate",
+          m.movement_date::text as "movementDate",
           m.in_amount as "inAmount",
           m.out_amount as "outAmount",
           m.reference,
@@ -456,7 +451,7 @@ export class VoucherRepository {
         id: r.id,
         sourceType: r.sourceType,
         movementLabelAr: r.movementLabelAr,
-        movementDate: toIsoDate(r.movementDate),
+        movementDate: toCalendarDate(r.movementDate),
         inAmount: toMoney(r.inAmount),
         outAmount: toMoney(r.outAmount),
         reference: r.reference || '—',

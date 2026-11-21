@@ -9,6 +9,10 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { defaultInventoryValuationService } from '../inventory/inventoryValuationService.js';
 import { toDecimal } from '../lib/numeric.js';
+import {
+  assertOptionalCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 export class SalesDeliveryService {
   constructor(
@@ -39,6 +43,7 @@ export class SalesDeliveryService {
     if (!input.lines || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في إذن التسليم');
     }
+    const validatedDeliveryDate = assertOptionalCalendarDate(input.deliveryDate, 'تاريخ التسليم');
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       const customer = await this.customerRepo.findById(companyId, input.customerId, tx);
@@ -61,7 +66,16 @@ export class SalesDeliveryService {
         }
       }
 
-      const created = await this.deliveryRepo.createDraft(companyId, input, actorUserId, tx);
+      const effectiveDeliveryDate = validatedDeliveryDate ?? (await resolveCompanyToday(companyId, tx));
+      const created = await this.deliveryRepo.createDraft(
+        companyId,
+        {
+          ...input,
+          deliveryDate: effectiveDeliveryDate,
+        },
+        actorUserId,
+        tx
+      );
 
       await this.auditService.record(
         {

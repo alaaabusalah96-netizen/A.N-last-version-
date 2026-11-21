@@ -7,15 +7,7 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { CreatePoInput, PurchaseOrder } from './purchasingTypes.js';
 import { toDecimal } from '../lib/numeric.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isValidIsoDate(value: string): boolean {
-  if (!ISO_DATE.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return parsed.toISOString().slice(0, 10) === value;
-}
+import { isValidCalendarDate } from '../lib/calendarDate.js';
 
 export class PurchaseOrderService {
   constructor(
@@ -66,7 +58,7 @@ export class PurchaseOrderService {
       typeof input.expectedDate === 'string' && input.expectedDate.trim() !== ''
         ? input.expectedDate.trim()
         : undefined;
-    if (normalizedExpectedDate && !isValidIsoDate(normalizedExpectedDate)) {
+    if (normalizedExpectedDate && !isValidCalendarDate(normalizedExpectedDate)) {
       throw new ValidationError('تاريخ التسليم المتوقع غير صالح (المتوقع YYYY-MM-DD)');
     }
 

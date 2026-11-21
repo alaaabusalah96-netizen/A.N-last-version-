@@ -28,6 +28,7 @@ import { defaultInventoryValuationService, InventoryValuationService } from './i
 import { defaultCompanySettingsRepository, CompanySettingsRepository } from '../org/companySettingsRepository.js';
 import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
 import { defaultJournalService } from '../accounting/journalService.js';
+import { assertOptionalCalendarDate, resolveCompanyToday } from '../lib/calendarDate.js';
 
 export class StockService {
   constructor(
@@ -81,13 +82,6 @@ export class StockService {
       throw new ValidationError('itemId is required');
     }
     return await this.stockRepo.listMovementsByItem(companyId, itemId, filters);
-  }
-
-  private resolveEntryDate(candidate?: string): string {
-    if (candidate && /^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
-      return candidate;
-    }
-    return new Date().toISOString().slice(0, 10);
   }
 
   private async resolveInventoryAccountingAccounts(
@@ -170,9 +164,10 @@ export class StockService {
     }
 
     const qtyNum = unitsToSafeNumber(qtyUnits, QTY_SCALE);
-    const entryDate = this.resolveEntryDate(input.entryDate);
+    const requestedEntryDate = assertOptionalCalendarDate(input.entryDate, 'تاريخ الحركة');
 
     return await withTenantTransaction(companyId, async (tx) => {
+      const entryDate = requestedEntryDate ?? (await resolveCompanyToday(companyId, tx));
       const warehouse = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
       if (!warehouse) throw new NotFoundError('المستودع المحدد غير موجود');
       if (!warehouse.isActive) throw new ValidationError('المستودع المحدد غير نشط');
@@ -309,9 +304,10 @@ export class StockService {
       throw new ValidationError('سبب الصرف المخزني مطلوب');
     }
 
-    const entryDate = this.resolveEntryDate(input.entryDate);
+    const requestedEntryDate = assertOptionalCalendarDate(input.entryDate, 'تاريخ الحركة');
 
     return await withTenantTransaction(companyId, async (tx) => {
+      const entryDate = requestedEntryDate ?? (await resolveCompanyToday(companyId, tx));
       const warehouse = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
       if (!warehouse) throw new NotFoundError('المستودع المحدد غير موجود');
       if (!warehouse.isActive) throw new ValidationError('المستودع المحدد غير نشط');
@@ -498,7 +494,7 @@ export class StockService {
       increaseTotalUnits = mulExactUnits(qtyUnits, QTY_SCALE, increaseUnitCostUnits, COST_SCALE, COST_SCALE);
     }
 
-    const entryDate = this.resolveEntryDate(input.entryDate);
+    const requestedEntryDate = assertOptionalCalendarDate(input.entryDate, 'تاريخ الحركة');
     const sourceTypeMap: Record<StockAdjustmentInput['adjustmentType'], string> = {
       adjustment: 'STOCK_ADJUSTMENT',
       write_off: 'WRITE_OFF',
@@ -507,6 +503,7 @@ export class StockService {
     };
 
     return await withTenantTransaction(companyId, async (tx) => {
+      const entryDate = requestedEntryDate ?? (await resolveCompanyToday(companyId, tx));
       const warehouse = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
       if (!warehouse) throw new NotFoundError('المستودع المحدد غير موجود');
       if (!warehouse.isActive) throw new ValidationError('المستودع المحدد غير نشط');

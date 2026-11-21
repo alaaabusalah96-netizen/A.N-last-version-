@@ -2,6 +2,7 @@ import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { JournalEntry, JournalLine, CreateJournalLineInput } from './journalTypes.js';
 import { toDecimal } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 export class JournalRepository {
   /**
@@ -77,7 +78,7 @@ export class JournalRepository {
         RETURNING 
           id, 
           company_id as "companyId", 
-          entry_date as "entryDate", 
+          entry_date::text as "entryDate", 
           entry_no as "entryNo",
           memo, 
           status, 
@@ -96,7 +97,10 @@ export class JournalRepository {
         actorId || null,
         orgUnitId || null,
       ]);
-      const entry = entryRes.rows[0];
+      const entry = {
+        ...entryRes.rows[0],
+        entryDate: toCalendarDate(entryRes.rows[0].entryDate),
+      };
 
       const insertedLines: JournalLine[] = [];
       for (const line of lines) {
@@ -169,7 +173,10 @@ export class JournalRepository {
       const res = await executor.query<JournalEntry>(entrySql, [entryId, companyId]);
       if (res.rows.length === 0) return null;
 
-      const entry = res.rows[0];
+      const entry = {
+        ...res.rows[0],
+        entryDate: toCalendarDate(res.rows[0].entryDate),
+      };
 
       const linesSql = `
         SELECT 
@@ -248,7 +255,10 @@ export class JournalRepository {
         LIMIT $2 OFFSET $3
       `;
       const res = await executor.query<JournalEntry>(sql, [companyId, limit, offset, orgUnitId || null]);
-      return res.rows;
+      return res.rows.map((r) => ({
+        ...r,
+        entryDate: toCalendarDate(r.entryDate),
+      }));
     };
 
     if (customExecutor) {

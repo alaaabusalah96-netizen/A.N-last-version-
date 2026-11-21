@@ -14,6 +14,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
 interface Company {
   id: string;
@@ -94,7 +95,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   // Form states - Delivery
   const [delCustomerId, setDelCustomerId] = useState('');
   const [delWarehouseId, setDelWarehouseId] = useState('');
-  const [delDate, setDelDate] = useState(new Date().toISOString().slice(0, 10));
+  const [delDate, setDelDate] = useState(() => getLocalTodayDateString());
   const [delMemo, setDelMemo] = useState('');
   const [delLines, setDelLines] = useState<{ itemId: string; qty: number; unitPrice: number }[]>([
     { itemId: '', qty: 1, unitPrice: 0 },
@@ -103,7 +104,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   // Form states - Invoice
   const [invCustomerId, setInvCustomerId] = useState('');
   const [invDeliveryId, setInvDeliveryId] = useState('');
-  const [invDate, setInvDate] = useState(new Date().toISOString().slice(0, 10));
+  const [invDate, setInvDate] = useState(() => getLocalTodayDateString());
   const [invDueDate, setInvDueDate] = useState('');
   const [invMemo, setInvMemo] = useState('');
   const [invLines, setInvLines] = useState<{ itemId: string; deliveryLineId?: string; qty: number; unitPrice: number; taxRate: number }[]>([
@@ -115,7 +116,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   const [colInvoiceId, setColInvoiceId] = useState('');
   const [colRegisterId, setColRegisterId] = useState('');
   const [colAmount, setColAmount] = useState('');
-  const [colDate, setColDate] = useState(new Date().toISOString().slice(0, 10));
+  const [colDate, setColDate] = useState(() => getLocalTodayDateString());
   const [colRef, setColRef] = useState('');
   const [colMemo, setColMemo] = useState('');
 

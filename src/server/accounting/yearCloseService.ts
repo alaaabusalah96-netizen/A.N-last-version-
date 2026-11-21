@@ -9,14 +9,10 @@ import { AccountingPeriod } from './periodTypes.js';
 import { ValidationError, NotFoundError, ConflictError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMinorUnits, fromMinorUnits } from '../lib/numeric.js';
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+import { assertValidCalendarDate } from '../lib/calendarDate.js';
 
 function assertDate(value: string, field: string): string {
-  if (!value || typeof value !== 'string' || !DATE_RE.test(value.trim())) {
-    throw new ValidationError(`${field}: صيغة التاريخ غير صحيحة (المتوقع YYYY-MM-DD)`);
-  }
-  return value.trim();
+  return assertValidCalendarDate(value, field);
 }
 
 export interface YearCloseAccountBalance {

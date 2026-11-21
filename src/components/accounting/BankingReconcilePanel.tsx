@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
 interface BankAccount {
   id: string;
@@ -117,7 +118,7 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [asOfDate, setAsOfDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [asOfDate, setAsOfDate] = useState<string>(() => getLocalTodayDateString());
   const [selectedStmtLineId, setSelectedStmtLineId] = useState<string>('');
   const [selectedGlLineId, setSelectedGlLineId] = useState<string>('');
 
@@ -140,7 +141,7 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
 
   const [showAddStmtModal, setShowAddStmtModal] = useState(false);
   const [newStmtForm, setNewStmtForm] = useState({
-    statementDate: new Date().toISOString().slice(0, 10),
+    statementDate: getLocalTodayDateString(),
     reference: '',
     description: '',
     direction: 'credit' as 'credit' | 'debit',

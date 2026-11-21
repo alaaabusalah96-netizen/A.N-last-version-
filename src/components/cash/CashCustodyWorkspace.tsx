@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountOption, usableAccounts } from '../../lib/accountRules.js';
+import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
 interface Company {
   id: string;
@@ -294,7 +295,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
   const [reqRegisterId, setReqRegisterId] = useState('');
   const [reqAmount, setReqAmount] = useState('');
   const [reqPurpose, setReqPurpose] = useState('');
-  const [reqDate, setReqDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reqDate, setReqDate] = useState(() => getLocalTodayDateString());
   const [reqMemo, setReqMemo] = useState('');
 
   // Reject Modal
@@ -322,7 +323,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
 
   const [showCreateVoucherModal, setShowCreateVoucherModal] = useState(false);
   const [vchKind, setVchKind] = useState<VoucherKind>('receipt');
-  const [vchDate, setVchDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [vchDate, setVchDate] = useState(() => getLocalTodayDateString());
   const [vchRegisterId, setVchRegisterId] = useState('');
   const [vchAmount, setVchAmount] = useState('');
   const [vchContraAccountId, setVchContraAccountId] = useState('');
@@ -795,7 +796,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
 
   const openNewVoucherModal = () => {
     setVchKind(voucherKindToggle);
-    setVchDate(new Date().toISOString().slice(0, 10));
+    setVchDate(getLocalTodayDateString());
     setVchRegisterId(registers.find((r) => r.isActive)?.id || '');
     setVchAmount('');
     setVchContraAccountId('');

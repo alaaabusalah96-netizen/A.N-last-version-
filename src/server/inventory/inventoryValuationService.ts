@@ -38,6 +38,7 @@ import {
   allocateProportionalUnits,
   unitsToSafeNumber,
 } from '../lib/numeric.js';
+import { resolveCompanyToday } from '../lib/calendarDate.js';
 
 export interface AllocatedLayerSlice {
   layerId: string | null;
@@ -3010,7 +3011,7 @@ export class InventoryValuationService {
         throw new ValidationError('القيمة المحاسبية للرصيد الافتتاحي يجب أن تكون أكبر من صفر');
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = await resolveCompanyToday(companyId, tx);
       const journalService = await this.getJournalService();
       const draftJe = await journalService.createDraftEntry(
         companyId,

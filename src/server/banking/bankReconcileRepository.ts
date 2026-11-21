@@ -7,14 +7,15 @@ import {
   BankReconciliation,
 } from './bankingTypes.js';
 import { toMinorUnits, fromMinorUnits } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function mapStatementLine(row: any): BankStatementLine {
   return {
     id: row.id,
     companyId: row.companyId,
     bankAccountId: row.bankAccountId,
-    statementDate: String(row.statementDate).slice(0, 10),
-    valueDate: row.valueDate ? String(row.valueDate).slice(0, 10) : null,
+    statementDate: toCalendarDate(row.statementDate),
+    valueDate: row.valueDate ? toCalendarDate(row.valueDate) : null,
     reference: row.reference ?? null,
     description: row.description,
     debitAmount: fromMinorUnits(toMinorUnits(row.debitAmount ?? '0', 2), 2),
@@ -22,7 +23,7 @@ function mapStatementLine(row: any): BankStatementLine {
     status: row.status === 'matched' ? 'matched' : 'unmatched',
     matchedJournalLineId: row.matchedJournalLineId ?? null,
     matchedEntryNo: row.matchedEntryNo ?? null,
-    matchedEntryDate: row.matchedEntryDate ? String(row.matchedEntryDate).slice(0, 10) : null,
+    matchedEntryDate: row.matchedEntryDate ? toCalendarDate(row.matchedEntryDate) : null,
     reconciliationId: row.reconciliationId ?? null,
     matchedAt: row.matchedAt
       ? typeof row.matchedAt === 'string'
@@ -40,7 +41,7 @@ function mapReconciliation(row: any): BankReconciliation {
     id: row.id,
     companyId: row.companyId,
     bankAccountId: row.bankAccountId,
-    statementEndDate: String(row.statementEndDate).slice(0, 10),
+    statementEndDate: toCalendarDate(row.statementEndDate),
     statementEndingBalance: fromMinorUnits(toMinorUnits(row.statementEndingBalance ?? '0', 2), 2),
     bookBalance: fromMinorUnits(toMinorUnits(row.bookBalance ?? '0', 2), 2),
     unmatchedStatementNet: fromMinorUnits(toMinorUnits(row.unmatchedStatementNet ?? '0', 2), 2),
@@ -223,7 +224,7 @@ export class BankReconcileRepository {
         journalLineId: r.journalLineId,
         entryId: r.entryId,
         entryNo: r.entryNo ?? null,
-        entryDate: String(r.entryDate).slice(0, 10),
+        entryDate: toCalendarDate(r.entryDate),
         entryMemo: r.entryMemo ?? null,
         lineMemo: r.lineMemo ?? null,
         debit: fromMinorUnits(toMinorUnits(r.debit ?? '0', 2), 2),

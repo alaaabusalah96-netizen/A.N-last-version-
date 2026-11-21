@@ -3,6 +3,7 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { SalesDeliveryNote, SalesDeliveryLine, CreateDeliveryInput } from './salesTypes.js';
 
 import { toDecimal } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function mapHeaderRow(row: any): SalesDeliveryNote {
   return {
@@ -15,7 +16,7 @@ function mapHeaderRow(row: any): SalesDeliveryNote {
     warehouseCode: row.warehouse_code,
     warehouseNameAr: row.warehouse_name_ar,
     deliveryNo: row.delivery_no || null,
-    deliveryDate: row.delivery_date instanceof Date ? row.delivery_date.toISOString().slice(0, 10) : String(row.delivery_date).slice(0, 10),
+    deliveryDate: toCalendarDate(row.delivery_date),
     status: row.status,
     memo: row.memo || null,
     postedAt: row.posted_at ? (row.posted_at instanceof Date ? row.posted_at.toISOString() : String(row.posted_at)) : null,
@@ -49,7 +50,7 @@ export class SalesDeliveryRepository {
     const run = async (executor: DbExecutor) => {
       const sql = `
         SELECT 
-          d.id, d.company_id, d.customer_id, d.warehouse_id, d.delivery_no, d.delivery_date,
+          d.id, d.company_id, d.customer_id, d.warehouse_id, d.delivery_no, d.delivery_date::text as delivery_date,
           d.status, d.memo, d.posted_at, d.posted_by, d.created_by, d.created_at, d.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           w.code as warehouse_code, w.name_ar as warehouse_name_ar
@@ -71,7 +72,7 @@ export class SalesDeliveryRepository {
     const run = async (executor: DbExecutor) => {
       const headerSql = `
         SELECT 
-          d.id, d.company_id, d.customer_id, d.warehouse_id, d.delivery_no, d.delivery_date,
+          d.id, d.company_id, d.customer_id, d.warehouse_id, d.delivery_no, d.delivery_date::text as delivery_date,
           d.status, d.memo, d.posted_at, d.posted_by, d.created_by, d.created_at, d.updated_at,
           c.code as customer_code, c.name_ar as customer_name_ar,
           w.code as warehouse_code, w.name_ar as warehouse_name_ar

@@ -8,11 +8,10 @@ import {
   SupplierInvoiceStatus,
 } from './purchasingTypes.js';
 import { toDecimal } from '../lib/numeric.js';
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function toIsoDate(val: unknown): string {
-  if (!val) return '';
-  if (typeof val === 'string') return val.slice(0, 10);
-  return new Date(val as Date).toISOString().slice(0, 10);
+  return toCalendarDate(val);
 }
 
 function toIsoTimestamp(val: unknown): string | null {
@@ -86,8 +85,8 @@ export class InvoiceRepository {
           si.status,
           si.invoice_no as "invoiceNo",
           si.supplier_invoice_no as "supplierInvoiceNo",
-          si.invoice_date as "invoiceDate",
-          si.due_date as "dueDate",
+          si.invoice_date::text as "invoiceDate",
+          si.due_date::text as "dueDate",
           si.memo,
           si.journal_entry_id as "journalEntryId",
           je.entry_no as "journalEntryNo",
@@ -153,8 +152,8 @@ export class InvoiceRepository {
           si.status,
           si.invoice_no as "invoiceNo",
           si.supplier_invoice_no as "supplierInvoiceNo",
-          si.invoice_date as "invoiceDate",
-          si.due_date as "dueDate",
+          si.invoice_date::text as "invoiceDate",
+          si.due_date::text as "dueDate",
           si.memo,
           si.journal_entry_id as "journalEntryId",
           je.entry_no as "journalEntryNo",
@@ -208,8 +207,8 @@ export class InvoiceRepository {
         status,
         invoice_no as "invoiceNo",
         supplier_invoice_no as "supplierInvoiceNo",
-        invoice_date as "invoiceDate",
-        due_date as "dueDate",
+        invoice_date::text as "invoiceDate",
+        due_date::text as "dueDate",
         memo,
         journal_entry_id as "journalEntryId",
         posted_at as "postedAt",
@@ -410,8 +409,8 @@ export class InvoiceRepository {
           status,
           invoice_no as "invoiceNo",
           supplier_invoice_no as "supplierInvoiceNo",
-          invoice_date as "invoiceDate",
-          due_date as "dueDate",
+          invoice_date::text as "invoiceDate",
+          due_date::text as "dueDate",
           memo,
           journal_entry_id as "journalEntryId",
           posted_at as "postedAt",

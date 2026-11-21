@@ -13,8 +13,11 @@ import { GlMappingService } from '../accounting/glMappingService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { toDecimal, toMinorUnits } from '../lib/numeric.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 export class SupplierPaymentService {
   private glMappingService: GlMappingService;
@@ -76,6 +79,7 @@ export class SupplierPaymentService {
     if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
       throw new ValidationError('مبلغ السداد يجب أن يكون أكبر من الصفر');
     }
+    const validatedPaymentDate = assertOptionalCalendarDate(input.paymentDate, 'تاريخ السداد');
 
     return await withTenantTransaction(companyId, async (tx) => {
       const supplier = await this.supplierRepo.findById(companyId, input.supplierId, tx);
@@ -96,13 +100,15 @@ export class SupplierPaymentService {
         throw new ValidationError('المورد المحدد لا يطابق مورد الفاتورة');
       }
 
+      const effectivePaymentDate = validatedPaymentDate ?? (await resolveCompanyToday(companyId, tx));
+
       const created = await this.paymentRepo.createDraft(
         companyId,
         {
           supplierId: input.supplierId,
           invoiceId: input.invoiceId,
           registerId: input.registerId,
-          paymentDate: input.paymentDate,
+          paymentDate: effectivePaymentDate,
           amount: input.amount,
           reference: input.reference,
           memo: input.memo,
@@ -219,7 +225,9 @@ export class SupplierPaymentService {
       }
 
       const apAccountId = await this.resolveApAccount(companyId);
-      const entryDate = ISO_DATE.test(payment.paymentDate) ? payment.paymentDate : new Date().toISOString().slice(0, 10);
+      const entryDate = isValidCalendarDate(payment.paymentDate)
+        ? payment.paymentDate
+        : await resolveCompanyToday(companyId, tx);
       const paymentNo = await this.journalRepo.allocateSequenceNumber(companyId, 'supplier_payment', 'SPAY', tx);
 
       const draftJe = await this.journalService.createDraftEntry(

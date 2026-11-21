@@ -21,8 +21,11 @@ import {
   toMinorUnits,
   toMoney,
 } from '../lib/numeric.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 interface AccountRow {
   id: string;
@@ -221,6 +224,7 @@ export class SalesReturnService {
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في مرتجع المبيعات');
     }
+    const validatedReturnDate = assertOptionalCalendarDate(input.returnDate, 'تاريخ المرتجع');
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       const customer = await this.customerRepo.findById(companyId, input.customerId, tx);
@@ -349,13 +353,15 @@ export class SalesReturnService {
         });
       }
 
+      const effectiveReturnDate = validatedReturnDate ?? (await resolveCompanyToday(companyId, tx));
+
       const created = await this.returnRepo.createDraft(
         companyId,
         {
           customerId: input.customerId,
           invoiceId: input.invoiceId,
           warehouseId: input.warehouseId,
-          returnDate: input.returnDate,
+          returnDate: effectiveReturnDate,
           reason: input.reason,
           memo: input.memo,
           subtotal: fromMinorUnits(subtotalUnits, MONEY_SCALE),
@@ -599,7 +605,9 @@ export class SalesReturnService {
       }
 
       const returnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'sales_return', 'SRTN', tx);
-      const entryDate = ISO_DATE.test(ret.returnDate) ? ret.returnDate : new Date().toISOString().slice(0, 10);
+      const entryDate = isValidCalendarDate(ret.returnDate)
+        ? ret.returnDate
+        : await resolveCompanyToday(companyId, tx);
 
       const netAmount = toMoney(fromMinorUnits(subtotalUnits, MONEY_SCALE));
       const taxAmount = toMoney(fromMinorUnits(taxAmountUnits, MONEY_SCALE));

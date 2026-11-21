@@ -29,8 +29,10 @@ import { findGlEvent } from '../accounting/glEventCatalog.js';
 import { GlMappingService } from '../accounting/glMappingService.js';
 import { DbExecutor } from '../db/types.js';
 import { defaultInventoryValuationService, InventoryValuationService } from '../inventory/inventoryValuationService.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  getBusinessDateToday,
+  resolveCompanyTimeZone,
+} from '../lib/calendarDate.js';
 
 export class GrnService {
   private glMappingService: GlMappingService;
@@ -207,10 +209,19 @@ export class GrnService {
     });
   }
 
-  private resolveEntryDate(grn: GrnHeader): string {
-    const candidate = typeof grn.createdAt === 'string' ? grn.createdAt.slice(0, 10) : '';
-    if (ISO_DATE.test(candidate)) return candidate;
-    return new Date().toISOString().slice(0, 10);
+  private async resolveEntryDate(
+    companyId: string,
+    grn: GrnHeader,
+    tx: DbExecutor
+  ): Promise<string> {
+    const tz = await resolveCompanyTimeZone(companyId, tx);
+    if (grn.createdAt) {
+      const parsed = new Date(grn.createdAt);
+      if (!Number.isNaN(parsed.getTime())) {
+        return getBusinessDateToday(tz, parsed);
+      }
+    }
+    return getBusinessDateToday(tz);
   }
 
   private requireGlAccounts(settings: CompanySettings | null): {
@@ -404,7 +415,7 @@ export class GrnService {
 
       await this.assertGlAccountsUsable(companyId, gl, tx);
 
-      const entryDate = this.resolveEntryDate(grn);
+      const entryDate = await this.resolveEntryDate(companyId, grn, tx);
       const grnNo = await this.journalRepo.allocateSequenceNumber(companyId, 'goods_receipt', 'GRN', tx);
 
       const journalEntry = await defaultJournalService.createDraftEntry(

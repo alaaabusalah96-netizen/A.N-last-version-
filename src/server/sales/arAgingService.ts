@@ -2,18 +2,20 @@ import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ArAgingReport, ArAgingItem, ArCustomerAgingSummary } from './salesTypes.js';
 import { ValidationError } from '../http/errors.js';
+import { resolveCompanyToday, toCalendarDate } from '../lib/calendarDate.js';
 
 export class ArAgingService {
   async getAgingReport(companyId: string, customExecutor?: DbExecutor): Promise<ArAgingReport> {
     if (!companyId) throw new ValidationError('companyId is required');
 
     const run = async (executor: DbExecutor) => {
+      const companyToday = await resolveCompanyToday(companyId, executor);
       const sql = `
         SELECT 
           i.id as "invoiceId",
           i.invoice_no as "invoiceNo",
-          i.invoice_date as "invoiceDate",
-          i.due_date as "dueDate",
+          i.invoice_date::text as "invoiceDate",
+          i.due_date::text as "dueDate",
           i.customer_id as "customerId",
           c.code as "customerCode",
           c.name_ar as "customerNameAr",
@@ -21,7 +23,7 @@ export class ArAgingService {
           COALESCE(col.total, 0) as "collectedAmount",
           COALESCE(ret.total, 0) as "returnedAmount",
           GREATEST(0, ROUND((i.total_amount - COALESCE(col.total, 0) - COALESCE(ret.total, 0))::numeric, 2)) as "remainingOpenAmount",
-          GREATEST(0, (CURRENT_DATE - COALESCE(i.due_date, i.invoice_date)))::int as "agingDays"
+          GREATEST(0, ($2::date - COALESCE(i.due_date, i.invoice_date)))::int as "agingDays"
         FROM sales_invoices i
         INNER JOIN sales_customers c ON c.id = i.customer_id AND c.company_id = i.company_id
         LEFT JOIN (
@@ -41,7 +43,7 @@ export class ArAgingService {
         ORDER BY "agingDays" DESC, i.invoice_date ASC
       `;
 
-      const res = await executor.query<any>(sql, [companyId]);
+      const res = await executor.query<any>(sql, [companyId, companyToday]);
 
       const items: ArAgingItem[] = [];
       const customerMap = new Map<string, ArCustomerAgingSummary>();
@@ -72,8 +74,8 @@ export class ArAgingService {
         const item: ArAgingItem = {
           invoiceId: row.invoiceId,
           invoiceNo: row.invoiceNo || row.invoiceId.slice(0, 8),
-          invoiceDate: row.invoiceDate instanceof Date ? row.invoiceDate.toISOString().slice(0, 10) : String(row.invoiceDate).slice(0, 10),
-          dueDate: row.dueDate ? (row.dueDate instanceof Date ? row.dueDate.toISOString().slice(0, 10) : String(row.dueDate).slice(0, 10)) : null,
+          invoiceDate: toCalendarDate(row.invoiceDate),
+          dueDate: row.dueDate ? (toCalendarDate(row.dueDate) || null) : null,
           customerId: row.customerId,
           customerCode: row.customerCode,
           customerNameAr: row.customerNameAr,

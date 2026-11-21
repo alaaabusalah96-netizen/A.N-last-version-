@@ -8,12 +8,7 @@ import {
   OpenCustodyEmployeeSummary,
 } from './cashTypes.js';
 import { toMoney } from '../lib/numeric.js';
-
-function toIsoDate(val: unknown): string {
-  if (!val) return '';
-  if (typeof val === 'string') return val.slice(0, 10);
-  return new Date(val as Date).toISOString().slice(0, 10);
-}
+import { toCalendarDate } from '../lib/calendarDate.js';
 
 function toIsoTimestamp(val: unknown): string | null {
   if (!val) return null;
@@ -34,7 +29,7 @@ function mapCustodyRow(row: any): CustodyRecord {
     amount: toMoney(row.amount),
     purpose: row.purpose,
     status: row.status as CustodyStatus,
-    requestDate: toIsoDate(row.requestDate),
+    requestDate: toCalendarDate(row.requestDate),
     requestedBy: row.requestedBy ?? null,
     approvedBy: row.approvedBy ?? null,
     approvedAt: toIsoTimestamp(row.approvedAt),
@@ -121,7 +116,7 @@ export class CustodyRepository {
         amount,
         purpose,
         status,
-        request_date as "requestDate",
+        request_date::text as "requestDate",
         requested_by as "requestedBy",
         approved_by as "approvedBy",
         approved_at as "approvedAt",
@@ -169,7 +164,7 @@ export class CustodyRepository {
           c.amount,
           c.purpose,
           c.status,
-          c.request_date as "requestDate",
+          c.request_date::text as "requestDate",
           c.requested_by as "requestedBy",
           c.approved_by as "approvedBy",
           c.approved_at as "approvedAt",
@@ -215,7 +210,7 @@ export class CustodyRepository {
         amount,
         purpose,
         status,
-        request_date as "requestDate",
+        request_date::text as "requestDate",
         requested_by as "requestedBy",
         approved_by as "approvedBy",
         approved_at as "approvedAt",
@@ -285,7 +280,7 @@ export class CustodyRepository {
           c.amount,
           c.purpose,
           c.status,
-          c.request_date as "requestDate",
+          c.request_date::text as "requestDate",
           c.requested_by as "requestedBy",
           c.approved_by as "approvedBy",
           c.approved_at as "approvedAt",

@@ -23,8 +23,11 @@ import {
   divExactUnits,
   allocateProportionalUnits,
 } from '../lib/numeric.js';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import {
+  assertOptionalCalendarDate,
+  isValidCalendarDate,
+  resolveCompanyToday,
+} from '../lib/calendarDate.js';
 
 interface AccountRow {
   id: string;
@@ -68,6 +71,8 @@ export class SalesInvoiceService {
     if (!input.lines || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في فاتورة المبيعات');
     }
+    const validatedInvoiceDate = assertOptionalCalendarDate(input.invoiceDate, 'تاريخ الفاتورة');
+    const validatedDueDate = assertOptionalCalendarDate(input.dueDate, 'تاريخ الاستحقاق');
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       const customer = await this.customerRepo.findById(companyId, input.customerId, tx);
@@ -141,7 +146,17 @@ export class SalesInvoiceService {
         }
       }
 
-      const created = await this.invoiceRepo.createDraft(companyId, input, actorUserId, tx);
+      const effectiveInvoiceDate = validatedInvoiceDate ?? (await resolveCompanyToday(companyId, tx));
+      const created = await this.invoiceRepo.createDraft(
+        companyId,
+        {
+          ...input,
+          invoiceDate: effectiveInvoiceDate,
+          dueDate: validatedDueDate ?? undefined,
+        },
+        actorUserId,
+        tx
+      );
 
       await this.auditService.record(
         {
@@ -510,7 +525,9 @@ export class SalesInvoiceService {
       }
 
       const invoiceNo = await this.journalRepo.allocateSequenceNumber(companyId, 'sales_invoice', 'SINV', tx);
-      const entryDate = ISO_DATE.test(invoice.invoiceDate) ? invoice.invoiceDate : new Date().toISOString().slice(0, 10);
+      const entryDate = isValidCalendarDate(invoice.invoiceDate)
+        ? invoice.invoiceDate
+        : await resolveCompanyToday(companyId, tx);
 
       const grossAmount = toMoney(fromMinorUnits(grossUnits, MONEY_SCALE));
       const netAmount = toMoney(fromMinorUnits(netUnits, MONEY_SCALE));
@@ -800,7 +817,7 @@ export class SalesInvoiceService {
         const amountNum = toMoney(link.cogs_amount);
         if (amountNum <= 0) continue;
 
-        const today = new Date().toISOString().slice(0, 10);
+        const today = await resolveCompanyToday(companyId, tx);
         const draftJe = await this.journalService.createDraftEntry(
           companyId,
           {
