@@ -257,7 +257,10 @@ async function run() {
         `code=${f3Code ?? 'none'}, constraint=${f3Constraint ?? 'none'}`
       );
 
-      // F4: Deleting a role referenced by membership/scope is blocked (ON DELETE RESTRICT -> 23503)
+      // F4: Deleting a role referenced by membership/scope is blocked.
+      // Contract: migration 035 declares these composite FKs ON DELETE RESTRICT (WP-1b/WP-1c, pinned by S0b/S0c).
+      // PostgreSQL raises SQLSTATE 23001 (restrict_violation) for RESTRICT, not 23503 (foreign_key_violation / NO ACTION).
+      // The assertion keeps the safeguard itself: the delete MUST be rejected with exactly that code.
       let f4Code: string | undefined;
       try {
         await runInTenant(companyAId, async () => {
@@ -267,8 +270,8 @@ async function run() {
         f4Code = err?.code;
       }
       await check(
-        'F4: Deleting role referenced by membership/scope is blocked (ON DELETE RESTRICT, SQLSTATE 23503)',
-        f4Code === '23503',
+        'F4: Deleting role referenced by membership/scope is blocked (ON DELETE RESTRICT, SQLSTATE 23001)',
+        f4Code === '23001',
         `code=${f4Code ?? 'none'}`
       );
 
