@@ -1,13 +1,20 @@
 import { scramSha256Verifier } from '../src/server/security/scram.js';
+import { buildPgConfig } from '../src/server/db/connection.js';
 import { randomBytes, pbkdf2Sync, createHmac, createHash } from 'crypto';
 import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
+import {
+  classifyPgHbaAuthMode,
+  evaluateScramLiveAuthProbe,
+  PgHbaRuleInput,
+} from './helpers/pgPrerequisites.js';
 
 async function verifyScramVerifierFormat1() {
   console.log('=== VERIFYING AN-SCRAM-VERIFIER-FORMAT-1 ===\n');
   let passedCount = 0;
   let failedCount = 0;
+  let blockedCount = 0;
 
   function assert(condition: boolean, description: string) {
     if (condition) {
@@ -17,6 +24,11 @@ async function verifyScramVerifierFormat1() {
       console.error(`[FAIL] ${description}`);
       failedCount++;
     }
+  }
+
+  function reportBlocked(reason: string) {
+    console.error(`[BLOCKED] ${reason}`);
+    blockedCount++;
   }
 
   // 1. Generate verifier for a test password
@@ -85,58 +97,149 @@ async function verifyScramVerifierFormat1() {
   assert(correctLogin === true, 'V7: Correct password successfully verifies against generated SCRAM verifier');
   assert(wrongLogin === false, 'V8: Incorrect password is strictly rejected by SCRAM verifier');
 
-  // 5. Live PostgreSQL test (if environment provides DB connection)
-  const dbUrl = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
+  // 5. Live PostgreSQL test (with explicit prerequisite checking: CREATEROLE + non-trust password auth)
+  const dbUrl = (process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL || '').trim();
+  const isDbRequired = process.env.REQUIRE_DB === '1' || process.env.REQUIRE_DB === 'true' || process.env.CI === 'true';
+
   if (dbUrl) {
-    console.log('[verifyScramVerifierFormat1] Live database detected, running live Postgres login test...');
+    console.log('[verifyScramVerifierFormat1] Live database detected, checking SCRAM prerequisites...');
     let liveClient: pg.Client | null = null;
     let authUserClient: pg.Client | null = null;
     const liveTestUser = `an_scram_${randomBytes(4).toString('hex')}`;
+    const controlProbeUser = `an_scram_ctrl_${randomBytes(4).toString('hex')}`;
     const livePassword = `Pass_${randomBytes(12).toString('hex')}!1`;
+    const controlPassword = `Ctrl_${randomBytes(12).toString('hex')}!1`;
+    let createdLiveUser = false;
+    let createdControlUser = false;
+
     try {
-      liveClient = new pg.Client({ connectionString: dbUrl, connectionTimeoutMillis: 5000 });
+      const adminCfg = buildPgConfig(dbUrl, process.env);
+      liveClient = new pg.Client({ ...adminCfg, connectionTimeoutMillis: 5000 });
       await liveClient.connect();
-      const liveVerifier = scramSha256Verifier(livePassword);
 
-      await liveClient.query(
-        `CREATE ROLE ${pg.escapeIdentifier(liveTestUser)} WITH LOGIN PASSWORD '${liveVerifier}';`
+      const privRes = await liveClient.query<{ current_user: string; rolsuper: boolean; rolcreaterole: boolean }>(
+        `SELECT current_user, rolsuper, rolcreaterole FROM pg_roles WHERE rolname = current_user;`
       );
+      const priv = privRes.rows[0];
+      if (!priv || (!priv.rolsuper && !priv.rolcreaterole)) {
+        reportBlocked(
+          `CREATEROLE_MISSING: Connected role '${priv?.current_user || 'unknown'}' lacks SUPERUSER or CREATEROLE required for live SCRAM verifier test.`
+        );
+      } else {
+        let hbaClassification = null;
+        try {
+          const hbaRes = await liveClient.query<PgHbaRuleInput>(
+            `SELECT type, database, user_name, auth_method, error FROM pg_hba_file_rules;`
+          );
+          hbaClassification = classifyPgHbaAuthMode(hbaRes.rows);
+        } catch {
+          // pg_hba_file_rules may require superuser/pg_read_all_settings; control-role probe below remains authoritative
+        }
 
-      // Attempt login with correct password
-      const u = new URL(dbUrl);
-      u.username = liveTestUser;
-      u.password = livePassword;
-      authUserClient = new pg.Client({ connectionString: u.toString(), connectionTimeoutMillis: 5000 });
-      let loggedIn = false;
-      try {
-        await authUserClient.connect();
-        loggedIn = true;
-      } catch (err: any) {
-        console.error('[verifyScramVerifierFormat1] Live login failed:', err?.message || err);
-      }
-      assert(loggedIn, 'V9: Live PostgreSQL authenticates user with generated SCRAM verifier and correct password');
+        if (hbaClassification?.status === 'BLOCKED') {
+          reportBlocked(hbaClassification.reason);
+        } else {
+          const liveVerifier = scramSha256Verifier(livePassword);
+          await liveClient.query(
+            `CREATE ROLE ${pg.escapeIdentifier(liveTestUser)} WITH LOGIN PASSWORD '${liveVerifier}';`
+          );
+          createdLiveUser = true;
 
-      // Attempt login with wrong password
-      u.password = 'WrongPassword999!';
-      const wrongClient = new pg.Client({ connectionString: u.toString(), connectionTimeoutMillis: 5000 });
-      let wrongFailed = false;
-      try {
-        await wrongClient.connect();
-      } catch {
-        wrongFailed = true;
-      } finally {
-        await wrongClient.end().catch(() => {});
+          await liveClient.query(
+            `CREATE ROLE ${pg.escapeIdentifier(controlProbeUser)} WITH LOGIN PASSWORD '${controlPassword}';`
+          );
+          createdControlUser = true;
+
+          // Attempt login with correct password
+          const uCorrect = new URL(dbUrl);
+          uCorrect.username = liveTestUser;
+          uCorrect.password = livePassword;
+          authUserClient = new pg.Client({
+            ...buildPgConfig(uCorrect.toString(), process.env),
+            connectionTimeoutMillis: 5000,
+          });
+          let correctConnected = false;
+          try {
+            await authUserClient.connect();
+            correctConnected = true;
+          } catch (err: any) {
+            console.error('[verifyScramVerifierFormat1] Live login failed:', err?.message || err);
+          }
+
+          // Attempt login with wrong password
+          const uWrong = new URL(dbUrl);
+          uWrong.username = liveTestUser;
+          uWrong.password = 'WrongPassword999!';
+          const wrongClient = new pg.Client({
+            ...buildPgConfig(uWrong.toString(), process.env),
+            connectionTimeoutMillis: 5000,
+          });
+          let wrongRejected = false;
+          try {
+            await wrongClient.connect();
+          } catch {
+            wrongRejected = true;
+          } finally {
+            await wrongClient.end().catch(() => {});
+          }
+
+          // Control-role wrong-password probe to detect `trust`/passwordless pg_hba mode deterministically
+          let controlRoleWrongPasswordConnected = false;
+          if (!wrongRejected) {
+            const uCtrlWrong = new URL(dbUrl);
+            uCtrlWrong.username = controlProbeUser;
+            uCtrlWrong.password = 'WrongControlPassword999!';
+            const ctrlWrongClient = new pg.Client({
+              ...buildPgConfig(uCtrlWrong.toString(), process.env),
+              connectionTimeoutMillis: 5000,
+            });
+            try {
+              await ctrlWrongClient.connect();
+              controlRoleWrongPasswordConnected = true;
+            } catch {
+              controlRoleWrongPasswordConnected = false;
+            } finally {
+              await ctrlWrongClient.end().catch(() => {});
+            }
+          }
+
+          const probeEval = evaluateScramLiveAuthProbe({
+            correctConnected,
+            wrongRejected,
+            controlRoleWrongPasswordConnected,
+            hbaClassification,
+          });
+
+          if (probeEval.status === 'BLOCKED') {
+            reportBlocked(probeEval.reason);
+          } else {
+            assert(
+              correctConnected,
+              'V9: Live PostgreSQL authenticates user with generated SCRAM verifier and correct password'
+            );
+            assert(
+              wrongRejected,
+              'V10: Live PostgreSQL rejects user when providing wrong password'
+            );
+          }
+        }
       }
-      assert(wrongFailed, 'V10: Live PostgreSQL rejects user when providing wrong password');
     } catch (e: any) {
-      console.warn('[verifyScramVerifierFormat1] Live DB execution skipped or failed:', e?.message || e);
+      reportBlocked(`Live PostgreSQL SCRAM prerequisite unavailable: ${e?.message || e}`);
     } finally {
       if (authUserClient) await authUserClient.end().catch(() => {});
       if (liveClient) {
-        await liveClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(liveTestUser)};`).catch(() => {});
+        if (createdLiveUser) {
+          await liveClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(liveTestUser)};`).catch(() => {});
+        }
+        if (createdControlUser) {
+          await liveClient.query(`DROP ROLE IF EXISTS ${pg.escapeIdentifier(controlProbeUser)};`).catch(() => {});
+        }
         await liveClient.end().catch(() => {});
       }
     }
+  } else if (isDbRequired) {
+    reportBlocked('MIGRATION_DATABASE_URL/DATABASE_URL is not set while REQUIRE_DB=1 or CI=true.');
   } else {
     console.log('[verifyScramVerifierFormat1] Note: MIGRATION_DATABASE_URL not set in preview container; live DB test skipped locally.');
   }
@@ -150,11 +253,14 @@ async function verifyScramVerifierFormat1() {
   );
 
   console.log(`\n=== SUMMARY ===`);
-  console.log(`Passed: ${passedCount} | Failed: ${failedCount}`);
+  console.log(`Passed: ${passedCount} | Failed: ${failedCount} | Blocked: ${blockedCount}`);
 
   if (failedCount > 0) {
     console.error('\nFAIL: Verification assertions failed.');
     process.exit(1);
+  } else if (blockedCount > 0) {
+    console.error('\nBLOCKED: Live SCRAM verification prerequisites unfulfilled.');
+    process.exit(2);
   } else {
     console.log('\nSUCCESS: All AN-SCRAM-VERIFIER-FORMAT-1 assertions passed!');
   }

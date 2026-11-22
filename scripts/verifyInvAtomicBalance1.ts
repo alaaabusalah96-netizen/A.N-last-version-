@@ -13,6 +13,12 @@ import { defaultAuditRepository, AuditLogInput } from '../src/server/audit/audit
 import { closeAllExecutors } from '../src/server/db/index.js';
 import { DbExecutor, QueryResult } from '../src/server/db/types.js';
 import { ensureTestCostingProfile } from './helpers/ensureTestCostingProfile.js';
+import {
+  countRemainingTestInventoryRows,
+  createPgClientExecutor,
+  harmonizeStockAndValuationOnExecutor,
+  seedDeliberateValuationMismatchOnExecutor,
+} from './helpers/inventoryTestHarness.js';
 
 function isIPAllowed(ip: string): boolean {
   if (!ip) return false;
@@ -817,15 +823,15 @@ async function runVerification() {
     );
     const actorId = actorRes.rows[0].id;
 
-    // Seed a deterministic test-owned audit record for compId so clean/empty DBs
-    // always have test-owned audit history independent of previous runs or subsequent tests.
+    await appClient1.query('BEGIN;');
+    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+
+    // Seed a deterministic test-owned audit record for compId inside the same tenant transaction
+    // so clean/empty DBs always have test-owned audit history independent of prior runs.
     await appClient1.query(
       "INSERT INTO audit_logs (company_id, actor_user_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, $3, $4, $5, $6);",
       [compId, actorId, 'INV_ATOMIC_TEST_SEED', 'companies', compId, JSON.stringify({ suffix, cleanDbSeed: true })]
     );
-
-    await appClient1.query('BEGIN;');
-    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
 
     const whARes = await appClient1.query<{ id: string }>(
       "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, 'WHA', 'مستودع أ') RETURNING id;",
@@ -877,9 +883,10 @@ async function runVerification() {
       [compId, `FY-${nowY}`, `${nowY}-01-01`, `${nowY}-12-31`]
     );
 
-    await appClient1.query('COMMIT;');
+    const appExecutor1 = createPgClientExecutor(appClient1);
+    await ensureTestCostingProfile(compId, [itemId], actorId, appExecutor1);
 
-    await ensureTestCostingProfile(compId, [itemId], actorId);
+    await appClient1.query('COMMIT;');
 
     await appClient2.query('BEGIN;');
     await appClient2.query("SELECT set_config('app.current_tenant_id', $1, true);", [comp2Id]);
@@ -1101,97 +1108,86 @@ async function runVerification() {
     }
     assert(t93Error, `T9.3: StockService.issueStock threw error when issuing 100 against balance 30`);
 
-    // --- WP-2: PROVE STOCK QTY == VALUATION QTY BEFORE TRANSFER & PROVE INTEGRITY REJECTION ---
-    console.log('\n--- WP-2: Harmonizing & Proving Valuation Layers for WH_A and WH_B ---');
+    // --- WP-2: HARMONIZE STOCK & VALUATION VIA OFFICIAL SERVICE INTERFACES & PROVE INTEGRITY REJECTION ---
+    console.log('\n--- WP-2: Harmonizing & Proving Valuation Layers for WH_A, WH_B, and WH_C ---');
+    const appExec1 = createPgClientExecutor(appClient1);
     await appClient1.query('BEGIN;');
     await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
 
-    // Seed valuation layers and valuation balances matching current physical stock (WH_A: 2, WH_B: 4)
-    await appClient1.query(
-      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost, updated_at)
-       VALUES ($1, $2, $3, 2, 20, 10, NOW())
-       ON CONFLICT (company_id, warehouse_id, item_id)
-       DO UPDATE SET quantity = 2, total_cost = 20, unit_cost = 10, updated_at = NOW();`,
-      [compId, whA, itemId]
-    );
-    await appClient1.query(
-      `INSERT INTO inv_cost_layers (company_id, warehouse_id, item_id, original_qty, remaining_qty, unit_cost, total_cost, source_type, source_id, is_exhausted)
-       VALUES ($1, $2, $3, 2, 2, 10, 20, 'OPENING', gen_random_uuid(), false);`,
-      [compId, whA, itemId]
-    );
-
-    await appClient1.query(
-      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost, updated_at)
-       VALUES ($1, $2, $3, 4, 40, 10, NOW())
-       ON CONFLICT (company_id, warehouse_id, item_id)
-       DO UPDATE SET quantity = 4, total_cost = 40, unit_cost = 10, updated_at = NOW();`,
-      [compId, whB, itemId]
-    );
-    await appClient1.query(
-      `INSERT INTO inv_cost_layers (company_id, warehouse_id, item_id, original_qty, remaining_qty, unit_cost, total_cost, source_type, source_id, is_exhausted)
-       VALUES ($1, $2, $3, 4, 4, 10, 40, 'OPENING', gen_random_uuid(), false);`,
-      [compId, whB, itemId]
-    );
-
-    // 1) PROOF: Stock qty == Valuation qty for fixture warehouses before transfer
-    const preProofA = await appClient1.query<{ stock_qty: number; val_qty: number }>(
-      `SELECT s.qty::float as stock_qty, v.quantity::float as val_qty
-       FROM inv_stock_balances s
-       JOIN inv_valuation_balances v ON v.company_id = s.company_id AND v.warehouse_id = s.warehouse_id AND v.item_id = s.item_id
-       WHERE s.company_id = $1 AND s.warehouse_id = $2 AND s.item_id = $3;`,
-      [compId, whA, itemId]
-    );
-    const preProofB = await appClient1.query<{ stock_qty: number; val_qty: number }>(
-      `SELECT s.qty::float as stock_qty, v.quantity::float as val_qty
-       FROM inv_stock_balances s
-       JOIN inv_valuation_balances v ON v.company_id = s.company_id AND v.warehouse_id = s.warehouse_id AND v.item_id = s.item_id
-       WHERE s.company_id = $1 AND s.warehouse_id = $2 AND s.item_id = $3;`,
-      [compId, whB, itemId]
-    );
-    const preProofC = await appClient1.query<{ stock_qty: number; val_qty: number }>(
-      `SELECT s.qty::float as stock_qty, v.quantity::float as val_qty
-       FROM inv_stock_balances s
-       JOIN inv_valuation_balances v ON v.company_id = s.company_id AND v.warehouse_id = s.warehouse_id AND v.item_id = s.item_id
-       WHERE s.company_id = $1 AND s.warehouse_id = $2 AND s.item_id = $3;`,
-      [compId, whC, itemId]
-    );
+    const parityA = await harmonizeStockAndValuationOnExecutor({
+      companyId: compId,
+      warehouseId: whA,
+      itemId,
+      unitCost: 10,
+      actorId,
+      executor: appExec1,
+    });
+    const parityB = await harmonizeStockAndValuationOnExecutor({
+      companyId: compId,
+      warehouseId: whB,
+      itemId,
+      unitCost: 10,
+      actorId,
+      executor: appExec1,
+    });
+    const parityC = await harmonizeStockAndValuationOnExecutor({
+      companyId: compId,
+      warehouseId: whC,
+      itemId,
+      unitCost: 10,
+      actorId,
+      executor: appExec1,
+    });
     await appClient1.query('COMMIT;');
 
     assert(
-      preProofA.rows[0]?.stock_qty === 2 && preProofA.rows[0]?.val_qty === 2,
-      `WP-2 PROOF: WH_A stock qty (2) equals valuation qty (2) before transfer`
+      parityA.stockQty > 0 && parityA.stockQty === parityA.valuationQty && parityA.valuationQty === parityA.layerRemainingQty,
+      `WP-2 PROOF: WH_A physical stock (${parityA.stockQty}) == valuation (${parityA.valuationQty}) == FIFO layers (${parityA.layerRemainingQty}) before transfer`
     );
     assert(
-      preProofB.rows[0]?.stock_qty === 4 && preProofB.rows[0]?.val_qty === 4,
-      `WP-2 PROOF: WH_B stock qty (4) equals valuation qty (4) before transfer`
+      parityB.stockQty > 0 && parityB.stockQty === parityB.valuationQty && parityB.valuationQty === parityB.layerRemainingQty,
+      `WP-2 PROOF: WH_B physical stock (${parityB.stockQty}) == valuation (${parityB.valuationQty}) == FIFO layers (${parityB.layerRemainingQty}) before transfer`
     );
     assert(
-      preProofC.rows[0]?.stock_qty === 30 && preProofC.rows[0]?.val_qty === 30,
-      `WP-2 PROOF: WH_C stock qty (30) equals valuation qty (30) before transfer`
+      parityC.stockQty > 0 && parityC.stockQty === parityC.valuationQty && parityC.valuationQty === parityC.layerRemainingQty,
+      `WP-2 PROOF: WH_C physical stock (${parityC.stockQty}) == valuation (${parityC.valuationQty}) == FIFO layers (${parityC.layerRemainingQty}) before transfer`
     );
 
-    // 2) PROOF: Deliberate mismatch case MUST be rejected by VALUATION_INTEGRITY_ERROR
+    // 2) PROOF: Deliberate mismatch case MUST be seeded inside one tenant transaction & rejected by VALUATION_INTEGRITY_ERROR with zero partial mutations
     console.log('Testing that deliberate stock vs valuation mismatch is rejected by VALUATION_INTEGRITY_ERROR...');
-    const whMismatchRes = await appClient1.query<{ id: string }>(
-      "INSERT INTO inv_warehouses (company_id, code, name_ar) VALUES ($1, $2, 'مستودع عدم تطابق اختباري') RETURNING id;",
-      [compId, `WH_MISMATCH_${suffix}`]
-    );
-    const whMismatch = whMismatchRes.rows[0].id;
-    registry.registerWarehouse(whMismatch);
-
     await appClient1.query('BEGIN;');
     await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
-    // Deliberate mismatch: stock balance = 20, but valuation balance = 10 (or absent)
-    await appClient1.query(
-      `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at) VALUES ($1, $2, $3, 20, NOW());`,
-      [compId, whMismatch, itemId]
-    );
+
+    const mismatchSeed = await seedDeliberateValuationMismatchOnExecutor({
+      companyId: compId,
+      warehouseCode: `WH_MISMATCH_${suffix}`,
+      warehouseNameAr: 'مستودع عدم تطابق اختباري',
+      itemId,
+      stockQty: 20,
+      valuationQty: 10,
+      unitCost: 10,
+      executor: appExec1,
+    });
+    const whMismatch = mismatchSeed.warehouseId;
+    registry.registerWarehouse(whMismatch);
     registry.registerBalance(compId, whMismatch, itemId);
-    await appClient1.query(
-      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost, updated_at) VALUES ($1, $2, $3, 10, 100, 10, NOW());`,
-      [compId, whMismatch, itemId]
+
+    const preMismatchCheck = await appClient1.query<{
+      whb_stock_qty: number;
+      whb_val_qty: number;
+      transfer_audit_count: number;
+    }>(
+      `SELECT
+         (SELECT qty::float FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3) AS whb_stock_qty,
+         (SELECT quantity::float FROM inv_valuation_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3) AS whb_val_qty,
+         (SELECT count(*)::int FROM audit_logs WHERE company_id = $1 AND action = 'INVENTORY_TRANSFER') AS transfer_audit_count;`,
+      [compId, whB, itemId]
     );
     await appClient1.query('COMMIT;');
+
+    const whBStockBeforeMismatch = preMismatchCheck.rows[0]?.whb_stock_qty ?? 0;
+    const whBValBeforeMismatch = preMismatchCheck.rows[0]?.whb_val_qty ?? 0;
+    const transferAuditCountBefore = preMismatchCheck.rows[0]?.transfer_audit_count ?? 0;
 
     let mismatchCaught = false;
     let mismatchErrMsg = '';
@@ -1210,12 +1206,50 @@ async function runVerification() {
       `WP-2 PROOF: Deliberate stock vs valuation mismatch was strictly rejected with VALUATION_INTEGRITY_ERROR (actual: '${mismatchErrMsg}')`
     );
 
-    // 3) PROOF: Transfer succeeds cleanly after correct seed
+    await appClient1.query('BEGIN;');
+    await appClient1.query("SELECT set_config('app.current_tenant_id', $1, true);", [compId]);
+    const postMismatchCheck = await appClient1.query<{
+      mismatch_stock_qty: number;
+      whb_stock_qty: number;
+      whb_val_qty: number;
+      mismatch_stock_moves: number;
+      mismatch_val_moves: number;
+      transfer_audit_count: number;
+    }>(
+      `SELECT
+         (SELECT qty::float FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3) AS mismatch_stock_qty,
+         (SELECT qty::float FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $4 AND item_id = $3) AS whb_stock_qty,
+         (SELECT quantity::float FROM inv_valuation_balances WHERE company_id = $1 AND warehouse_id = $4 AND item_id = $3) AS whb_val_qty,
+         (SELECT count(*)::int FROM inv_stock_movements WHERE company_id = $1 AND warehouse_id = $2) AS mismatch_stock_moves,
+         (SELECT count(*)::int FROM inv_valuation_movements WHERE company_id = $1 AND warehouse_id = $2) AS mismatch_val_moves,
+         (SELECT count(*)::int FROM audit_logs WHERE company_id = $1 AND action = 'INVENTORY_TRANSFER') AS transfer_audit_count;`,
+      [compId, whMismatch, itemId, whB]
+    );
+    await appClient1.query('COMMIT;');
+
+    const postM = postMismatchCheck.rows[0];
+    assert(
+      Boolean(postM) &&
+        postM.mismatch_stock_qty === mismatchSeed.stockQty &&
+        postM.whb_stock_qty === whBStockBeforeMismatch &&
+        postM.whb_val_qty === whBValBeforeMismatch &&
+        postM.mismatch_stock_moves === 0 &&
+        postM.mismatch_val_moves === 0 &&
+        postM.transfer_audit_count === transferAuditCountBefore,
+      `WP-2 PROOF: Zero partial stock, movement, valuation-movement, or audit writes remained after VALUATION_INTEGRITY_ERROR rejection`
+    );
+
+    // 3) PROOF: Transfer succeeds cleanly using dynamic pre-state expectations
     const svcTransfer = await defaultStockService.transfer(compId, { sourceWarehouseId: whC, destWarehouseId: whA, itemId, qty: 10, memo: 'Svc Transfer 10' }, actorId);
     registry.registerMovement(svcTransfer.movementOut.id);
     registry.registerMovement(svcTransfer.movementIn.id);
     registry.registerTransfer(svcTransfer.transferId);
-    assert(svcTransfer.sourceBalance.qty === 20 && svcTransfer.destBalance.qty === 12, `T9.4 & T9.5b: StockService.transfer transferred 10 from WH_C (to 20) to WH_A (to 12) with dual movements & audit log`);
+    const expectedSvcSource = parityC.stockQty - 10;
+    const expectedSvcDest = parityA.stockQty + 10;
+    assert(
+      svcTransfer.sourceBalance.qty === expectedSvcSource && svcTransfer.destBalance.qty === expectedSvcDest,
+      `T9.4 & T9.5b: StockService.transfer transferred 10 from WH_C (${parityC.stockQty}->${expectedSvcSource}) to WH_A (${parityA.stockQty}->${expectedSvcDest}) with dual movements & audit log`
+    );
 
     // --- T9.6: StockService.transfer integration & dynamic balance calculation ---
     await appClient1.query('BEGIN;');
@@ -1350,6 +1384,7 @@ async function runVerification() {
 
     let auditSurvived = false;
     let moveSurvived = false;
+    let valMoveSurvived = false;
 
     if (capturedAuditId) {
       const checkAudit = await appClient1.query("SELECT id FROM audit_logs WHERE id = $1;", [capturedAuditId]);
@@ -1362,6 +1397,13 @@ async function runVerification() {
       );
       moveSurvived = checkMove.rows.length > 0;
     }
+    if (capturedTransferId) {
+      const checkValMove = await appClient1.query(
+        "SELECT id FROM inv_valuation_movements WHERE company_id = $1 AND source_id = $2;",
+        [compId, capturedTransferId]
+      );
+      valMoveSurvived = checkValMove.rows.length > 0;
+    }
     await appClient1.query('COMMIT;');
 
     const postRbSourceQty = postRollbackSourceRes.rows[0]?.qty ?? 0;
@@ -1371,9 +1413,10 @@ async function runVerification() {
       faultingServiceFailed &&
       !auditSurvived &&
       !moveSurvived &&
+      !valMoveSurvived &&
       postRbSourceQty === preRbSourceQty &&
       postRbDestQty === preRbDestQty,
-      `T9.7: Exact transfer movement proof verified: captured source move (${capturedSourceMoveId}), dest move (${capturedDestMoveId}), transfer ID (${capturedTransferId}), and audit record (${capturedAuditId}) all existed in-transaction, failed with intentional error, and zero operation records survived rollback (source: ${postRbSourceQty}, dest: ${postRbDestQty})`
+      `T9.7: Exact transfer movement proof verified: captured source move (${capturedSourceMoveId}), dest move (${capturedDestMoveId}), transfer ID (${capturedTransferId}), and audit record (${capturedAuditId}) all existed in-transaction, failed with intentional error, and zero operation/valuation records survived rollback (source: ${postRbSourceQty}, dest: ${postRbDestQty})`
     );
 
     // --- T9.8: INDEPENDENT T9.7 OUTCOME ASSERTIONS ---
@@ -1390,148 +1433,165 @@ async function runVerification() {
     assert(Boolean(capturedAuditId), 'T9.8: capturedAuditId must be defined');
 
   } finally {
-    // --- TASK 1: PRECISE TEST-OWNED CLEANUP GUARANTEE & POST-TEARDOWN VERIFICATION ---
+    // --- WP-2: PRECISE TEST-OWNED CLEANUP GUARANTEE & NON-SWALLOWING TEARDOWN ---
     let cleanupErrMessage: string | null = null;
+    let teardownFailed = false;
     let remainingChildCount = 0;
+    let remainingBreakdown: Record<string, number> = {};
 
-    try {
-      await appClient1.query('ROLLBACK;').catch(() => {});
-      await appClient2.query('ROLLBACK;').catch(() => {});
-      await appClient3.query('ROLLBACK;').catch(() => {});
-    } catch {}
+    const recordTeardownError = (phase: string, err: unknown) => {
+      teardownFailed = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      cleanupErrMessage = cleanupErrMessage ? `${cleanupErrMessage}; ${phase}: ${msg}` : `${phase}: ${msg}`;
+      console.error(`[TEARDOWN_FAIL] ${phase}: ${msg}`);
+    };
+
+    for (const [label, client] of [
+      ['appClient1', appClient1],
+      ['appClient2', appClient2],
+      ['appClient3', appClient3],
+    ] as const) {
+      try {
+        await client.query('ROLLBACK;');
+      } catch (rbErr) {
+        console.warn(`[TEARDOWN_WARN] ${label} rollback check:`, rbErr instanceof Error ? rbErr.message : String(rbErr));
+      }
+    }
 
     if (adminClient && (compId || comp2Id)) {
-      const identityGuard = new DatabaseIdentityExecutionGuard(appServerIdentity || ({} as any), adminServerIdentity || ({} as any));
-      
-      const guardResult = await identityGuard.runDestructiveOperation(adminClient, async (guardedExecutor) => {
+      try {
+        const identityGuard = new DatabaseIdentityExecutionGuard(appServerIdentity || ({} as any), adminServerIdentity || ({} as any));
         const registeredMovements = Array.from(registry.movements);
         const registeredTransfers = Array.from(registry.transfers);
         const registeredItems = Array.from(registry.items);
         const registeredWarehouses = Array.from(registry.warehouses);
         const registeredBalances = registry.getRegisteredBalanceTuples();
-
-        await adminClient.query('BEGIN;');
-
-        // Delete ONLY exact registered movements / transfers through execution guard
-        if (registeredMovements.length > 0 || registeredTransfers.length > 0) {
-          await guardedExecutor.query(
-            "DELETE FROM inv_stock_movements WHERE id = ANY($1) OR transfer_id = ANY($2);",
-            [registeredMovements, registeredTransfers]
-          );
-        }
-
-        // Delete ONLY exact registered stock balance tuples through execution guard
-        for (const bal of registeredBalances) {
-          await guardedExecutor.query(
-            "DELETE FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
-            [bal.companyId, bal.warehouseId, bal.itemId]
-          );
-        }
-
-        // Clean test-owned valuation rows referencing registered items/warehouses in strict FK dependency order
         const ownedCompanies = [compId, comp2Id].filter((id): id is string => Boolean(id));
-        if (ownedCompanies.length > 0 && (registeredItems.length > 0 || registeredWarehouses.length > 0)) {
-          await guardedExecutor.query(
-            `DELETE FROM inv_cost_allocations
-             WHERE company_id = ANY($1::uuid[])
-               AND (
-                 cost_layer_id IN (
-                   SELECT id FROM inv_cost_layers
-                   WHERE company_id = ANY($1::uuid[])
-                     AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]))
-                 )
-                 OR valuation_movement_id IN (
-                   SELECT id FROM inv_valuation_movements
-                   WHERE company_id = ANY($1::uuid[])
-                     AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]))
-                 )
-               );`,
-            [ownedCompanies, registeredItems, registeredWarehouses]
-          );
-          await guardedExecutor.query(
-            `DELETE FROM inv_ma_source_events
-             WHERE company_id = ANY($1::uuid[])
-               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
-            [ownedCompanies, registeredItems, registeredWarehouses]
-          );
-          await guardedExecutor.query(
-            `DELETE FROM inv_ma_source_balances
-             WHERE company_id = ANY($1::uuid[])
-               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
-            [ownedCompanies, registeredItems, registeredWarehouses]
-          );
-          await guardedExecutor.query(
-            `DELETE FROM inv_cost_layers
-             WHERE company_id = ANY($1::uuid[])
-               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
-            [ownedCompanies, registeredItems, registeredWarehouses]
-          );
-          await guardedExecutor.query(
-            `DELETE FROM inv_valuation_movements
-             WHERE company_id = ANY($1::uuid[])
-               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
-            [ownedCompanies, registeredItems, registeredWarehouses]
-          );
-          await guardedExecutor.query(
-            `DELETE FROM inv_valuation_balances
-             WHERE company_id = ANY($1::uuid[])
-               AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
-            [ownedCompanies, registeredItems, registeredWarehouses]
-          );
-          await guardedExecutor.query(
-            `DELETE FROM inv_item_costing_profiles
-             WHERE company_id = ANY($1::uuid[])
-               AND item_id = ANY($2::uuid[]);`,
-            [ownedCompanies, registeredItems]
-          );
+
+        const guardResult = await identityGuard.runDestructiveOperation(adminClient, async (guardedExecutor) => {
+          await adminClient!.query('BEGIN;');
+          try {
+            if (registeredMovements.length > 0 || registeredTransfers.length > 0) {
+              await guardedExecutor.query(
+                "DELETE FROM inv_stock_movements WHERE id = ANY($1) OR transfer_id = ANY($2);",
+                [registeredMovements, registeredTransfers]
+              );
+            }
+
+            for (const bal of registeredBalances) {
+              await guardedExecutor.query(
+                "DELETE FROM inv_stock_balances WHERE company_id = $1 AND warehouse_id = $2 AND item_id = $3;",
+                [bal.companyId, bal.warehouseId, bal.itemId]
+              );
+            }
+
+            if (ownedCompanies.length > 0 && (registeredItems.length > 0 || registeredWarehouses.length > 0)) {
+              await guardedExecutor.query(
+                `DELETE FROM inv_cost_allocations
+                 WHERE company_id = ANY($1::uuid[])
+                   AND (
+                     cost_layer_id IN (
+                       SELECT id FROM inv_cost_layers
+                       WHERE company_id = ANY($1::uuid[])
+                         AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]))
+                     )
+                     OR valuation_movement_id IN (
+                       SELECT id FROM inv_valuation_movements
+                       WHERE company_id = ANY($1::uuid[])
+                         AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]))
+                     )
+                   );`,
+                [ownedCompanies, registeredItems, registeredWarehouses]
+              );
+              await guardedExecutor.query(
+                `DELETE FROM inv_ma_source_events
+                 WHERE company_id = ANY($1::uuid[])
+                   AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+                [ownedCompanies, registeredItems, registeredWarehouses]
+              );
+              await guardedExecutor.query(
+                `DELETE FROM inv_ma_source_balances
+                 WHERE company_id = ANY($1::uuid[])
+                   AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+                [ownedCompanies, registeredItems, registeredWarehouses]
+              );
+              await guardedExecutor.query(
+                `DELETE FROM inv_cost_layers
+                 WHERE company_id = ANY($1::uuid[])
+                   AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+                [ownedCompanies, registeredItems, registeredWarehouses]
+              );
+              await guardedExecutor.query(
+                `DELETE FROM inv_valuation_movements
+                 WHERE company_id = ANY($1::uuid[])
+                   AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+                [ownedCompanies, registeredItems, registeredWarehouses]
+              );
+              await guardedExecutor.query(
+                `DELETE FROM inv_valuation_balances
+                 WHERE company_id = ANY($1::uuid[])
+                   AND (item_id = ANY($2::uuid[]) OR warehouse_id = ANY($3::uuid[]));`,
+                [ownedCompanies, registeredItems, registeredWarehouses]
+              );
+              await guardedExecutor.query(
+                `DELETE FROM inv_item_costing_profiles
+                 WHERE company_id = ANY($1::uuid[])
+                   AND item_id = ANY($2::uuid[]);`,
+                [ownedCompanies, registeredItems]
+              );
+            }
+
+            const refCheck = await inspectInventoryReferences(adminClient!, registeredItems, registeredWarehouses);
+
+            const safeItemIds = registeredItems.filter(
+              (id) => !refCheck.blockingReferences.some((r) => r.referencedType === 'item' && r.referencedId === id)
+            );
+            const safeWhIds = registeredWarehouses.filter(
+              (id) => !refCheck.blockingReferences.some((r) => r.referencedType === 'warehouse' && r.referencedId === id)
+            );
+
+            if (safeItemIds.length > 0) {
+              await guardedExecutor.query("DELETE FROM inv_items WHERE id = ANY($1);", [safeItemIds]);
+            }
+            if (safeWhIds.length > 0) {
+              await guardedExecutor.query("DELETE FROM inv_warehouses WHERE id = ANY($1);", [safeWhIds]);
+            }
+
+            await adminClient!.query('COMMIT;');
+
+            if (!refCheck.canDelete) {
+              throw new Error(`CLEANUP_BLOCKED by foreign key references: ${JSON.stringify(refCheck.blockingReferences)}`);
+            }
+          } catch (txCleanupErr) {
+            await adminClient!.query('ROLLBACK;').catch(() => {});
+            throw txCleanupErr;
+          }
+
+          const cleanCheck = await countRemainingTestInventoryRows({
+            executor: adminClient!,
+            ownedCompanies,
+            registeredMovements,
+            registeredItems,
+            registeredWarehouses,
+          });
+          remainingChildCount = cleanCheck.remainingChildCount;
+          remainingBreakdown = cleanCheck.breakdown;
+        });
+
+        if (!guardResult.executed) {
+          teardownFailed = true;
+          cleanupErrMessage = `Execution guard blocked teardown: ${guardResult.reason}`;
         }
-
-        // Inspect dynamic catalog foreign key references before deleting items and warehouses
-        const refCheck = await inspectInventoryReferences(adminClient, registeredItems, registeredWarehouses);
-
-        const safeItemIds = registeredItems.filter(
-          (id) => !refCheck.blockingReferences.some((r) => r.referencedType === 'item' && r.referencedId === id)
-        );
-        const safeWhIds = registeredWarehouses.filter(
-          (id) => !refCheck.blockingReferences.some((r) => r.referencedType === 'warehouse' && r.referencedId === id)
-        );
-
-        if (safeItemIds.length > 0) {
-          await guardedExecutor.query("DELETE FROM inv_items WHERE id = ANY($1);", [safeItemIds]);
-        }
-        if (safeWhIds.length > 0) {
-          await guardedExecutor.query("DELETE FROM inv_warehouses WHERE id = ANY($1);", [safeWhIds]);
-        }
-
-        // ABSOLUTELY DO NOT DELETE:
-        // - purch_grn / purch_grn_lines
-        // - companies
-        // - audit_logs
-        await adminClient.query('COMMIT;');
-
-        if (!refCheck.canDelete) {
-          console.log(`[CLEANUP_BLOCKED] Cleanup partially blocked due to foreign key references:`, refCheck.blockingReferences);
-        }
-
-        const verifyCleanRes = await adminClient.query<{ count: number }>(`
-          SELECT (
-            (SELECT count(*) FROM inv_stock_movements WHERE id = ANY($1)) +
-            (SELECT count(*) FROM inv_stock_balances WHERE company_id = ANY($2))
-          )::int as count;
-        `, [registeredMovements.length > 0 ? registeredMovements : ['00000000-0000-0000-0000-000000000000'], [compId, comp2Id]]);
-
-        remainingChildCount = verifyCleanRes.rows[0]?.count || 0;
-      });
-
-      if (!guardResult.executed) {
-        cleanupErrMessage = `Execution guard blocked teardown: ${guardResult.reason}`;
+      } catch (err) {
+        recordTeardownError('destructiveCleanup', err);
       }
-    }
 
-    // Explicit post-teardown assertions proving protected test-owned records still exist
-    if (adminClient && (compId || comp2Id)) {
+      // Explicit post-teardown assertions proving protected immutable records still exist
       try {
-        const companyCheck = await adminClient.query<{ count: number }>("SELECT count(*)::int as count FROM companies WHERE id = ANY($1);", [[compId, comp2Id]]);
+        const companyCheck = await adminClient.query<{ count: number }>(
+          "SELECT count(*)::int as count FROM companies WHERE id = ANY($1);",
+          [[compId, comp2Id]]
+        );
         const auditCheck = await adminClient.query<{ count: number }>(
           "SELECT count(*)::int as count FROM audit_logs WHERE company_id = $1 AND entity_id = $2;",
           [compId, compId]
@@ -1539,30 +1599,43 @@ async function runVerification() {
 
         assert(companyCheck.rows[0]?.count > 0, `Protected Records Check: Test companies (${companyCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
         assert(auditCheck.rows[0]?.count > 0, `Protected Records Check: Test-owned audit logs (${auditCheck.rows[0]?.count}) intentionally preserved post-cleanup`);
-      } catch (checkErr: any) {
-        console.error('[CLEANUP CHECK ERROR]', checkErr);
-        assert(false, `Protected Records Check FAILED: ${checkErr.message || String(checkErr)}`);
+      } catch (checkErr) {
+        recordTeardownError('protectedRecordsCheck', checkErr);
       }
     }
 
-    await closeAllExecutors().catch(() => {});
-
-    await appClient1.end().catch(() => {});
-    await appClient2.end().catch(() => {});
-    await appClient3.end().catch(() => {});
-    if (adminClient) {
-      await adminClient.end().catch(() => {});
+    try {
+      await closeAllExecutors();
+    } catch (closeErr) {
+      recordTeardownError('closeAllExecutors', closeErr);
     }
 
-    if (cleanupErrMessage) {
-      assert(false, `Guaranteed Teardown Check: ${cleanupErrMessage}`);
+    for (const [label, client] of [
+      ['appClient1', appClient1],
+      ['appClient2', appClient2],
+      ['appClient3', appClient3],
+      ['adminClient', adminClient],
+    ] as const) {
+      if (!client) continue;
+      try {
+        await client.end();
+      } catch (endErr) {
+        recordTeardownError(`${label}.end`, endErr);
+      }
+    }
+
+    if (teardownFailed || cleanupErrMessage) {
+      assert(false, `Guaranteed Teardown Check (TEARDOWN_FAIL): ${cleanupErrMessage || 'Teardown step failed'}`);
     } else if (adminClient && (compId || comp2Id)) {
-      assert(remainingChildCount === 0, `Guaranteed Teardown Check: All test-registered inventory movements & balances cleanly eradicated from DB (companies & immutable audit logs intentionally preserved)`);
+      assert(
+        remainingChildCount === 0,
+        `Guaranteed Teardown Check: Zero remaining test-owned inventory/valuation child rows (remaining=${remainingChildCount}, breakdown=${JSON.stringify(remainingBreakdown)}; companies & audit_logs preserved)`
+      );
     }
   }
 
   console.log(`\n=== SUMMARY ===`);
-  console.log(`Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked} | Skipped: ${skipped}`);
+  console.log(`Passed: ${passed} | Failed: ${failed} | Blocked: ${blocked} | Skipped: ${skipped} | TeardownFailed: ${failed > 0 ? 'see failures' : 'no'}`);
 
   if (failed > 0) {
     process.exitCode = 1;

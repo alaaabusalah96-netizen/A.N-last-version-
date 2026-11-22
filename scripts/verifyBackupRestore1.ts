@@ -11,6 +11,7 @@ import {
   verifyBackupManifest,
 } from './ops/backupUtils.js';
 import { runDisposableDrill } from './ops/backupRestoreDrill.js';
+import { checkPgToolCompatibility } from './helpers/pgPrerequisites.js';
 
 let passed = 0;
 let failed = 0;
@@ -130,10 +131,12 @@ async function run() {
     ''
   ).trim();
 
-  if (!drillUrl || !isBinaryAvailable('pg_dump') || !isBinaryAvailable('pg_restore')) {
-    console.log(
-      '[BLOCKED] Local PostgreSQL URL or pg_dump/pg_restore binaries unavailable in sandbox; live backup->restore drill is BLOCKED.'
-    );
+  const toolCheck = checkPgToolCompatibility();
+  if (!drillUrl || !isBinaryAvailable('pg_dump') || !isBinaryAvailable('pg_restore') || toolCheck.status === 'BLOCKED') {
+    const reason = toolCheck.status === 'BLOCKED'
+      ? toolCheck.reason
+      : 'Local PostgreSQL URL or pg_dump/pg_restore binaries unavailable in sandbox; live backup->restore drill is BLOCKED.';
+    console.log(`[BLOCKED] ${reason}`);
     console.log(`Summary -> Passed: ${passed} | Failed: ${failed} | Blocked: 1`);
     process.exit(2);
   }

@@ -23,8 +23,44 @@ function assertLoopbackHost(urlStr: string | undefined, varName: string) {
   }
 }
 
+import { mapExitCodeToStatus } from './lib/foundationBatteryPolicy.js';
+import { checkPgToolCompatibility, discoverTestSuites } from './helpers/pgPrerequisites.js';
+import pg from 'pg';
+import { buildPgConfig } from '../src/server/db/connection.js';
+
 assertLoopbackHost(process.env.DATABASE_URL, 'DATABASE_URL');
 assertLoopbackHost(process.env.MIGRATION_DATABASE_URL, 'MIGRATION_DATABASE_URL');
+
+async function runBatteryPreflight() {
+  const discovery = discoverTestSuites(process.cwd());
+  console.log(
+    `[Preflight] Test Discovery: ${discovery.totalUnitFiles} Vitest unit file(s), ${discovery.totalE2eFiles} Playwright E2E spec(s), overlap=${discovery.overlap.length}`
+  );
+  if (discovery.overlap.length > 0) {
+    console.error(`[FATAL PREFLIGHT] Unit/E2E overlap detected: ${discovery.overlap.join(', ')}`);
+    process.exit(1);
+  }
+
+  const probeUrl = (process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL || '').trim();
+  let serverVersionNum: string | null = null;
+  if (probeUrl) {
+    const client = new pg.Client({ ...buildPgConfig(probeUrl, process.env), connectionTimeoutMillis: 4000 });
+    try {
+      await client.connect();
+      const res = await client.query<{ server_version_num: string }>('SHOW server_version_num;');
+      serverVersionNum = res.rows[0]?.server_version_num ?? null;
+    } catch (err: any) {
+      console.warn(`[Preflight] Server version probe warning: ${err?.message || String(err)}`);
+    } finally {
+      await client.end().catch(() => {});
+    }
+  }
+
+  const pgTools = checkPgToolCompatibility({ serverVersionNum });
+  console.log(`[Preflight] PostgreSQL CLI Tools (${pgTools.status}): ${pgTools.reason}`);
+}
+
+await runBatteryPreflight();
 
 const scripts = [
   'scripts/verifyP01Scaffold.ts',
@@ -210,8 +246,6 @@ function sanitizeMessage(msg: string): string {
     .replace(/password=[^\s]+/gi, 'password=[REDACTED]')
     .replace(/secret=[^\s]+/gi, 'secret=[REDACTED]');
 }
-
-import { mapExitCodeToStatus } from './lib/foundationBatteryPolicy.js';
 
 for (const script of scripts) {
   console.log(`\n--- Running: ${script} ---`);

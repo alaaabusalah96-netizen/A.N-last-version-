@@ -32,3 +32,15 @@
 ## 3. مجلد الأدلة وإثبات الجودة (Evidence Standard)
 - يتم إنشاء مجلد مخصص للأدلة باسم `evidence/` لكل حزمة عمل (مثل `evidence/p00`, `evidence/p01`).
 - تُحفظ فيه مخرجات الاختبارات، تقارير التغطية، لقطات السجلات أو نتائج الفحص الأمني لتكون مرجعًا قابلاً للمراجعة والتدقيق الإنساني قبل اعتماد أي مرحلة.
+
+## 4. قواعد الاكتشاف والمتطلبات البيئية (Discovery & Prerequisites - R02)
+- **فصل اختبارات الوحدة عن Playwright E2E**:
+  - يضبط ملف `vitest.config.ts` اكتشاف اختبارات الوحدة حصريًا على `src/**/*.test.{ts,tsx}` ويستبعد `e2e/**` و`dist/**` و`.phase_tmp/**`.
+  - تُشغّل اختبارات النهاية إلى النهاية (`e2e/smoke.spec.ts`) حصريًا عبر `npm run test:e2e-smoke` (`playwright test`) ولا يجوز دخولها ضمن `vitest list` أو `npm run test:unit`.
+- **جرد اختبارات الوحدة الحقيقي**:
+  - الأساس قبل R01 كان `26` ملفًا (`215` اختبارًا)، وأضافت حزمة `AN-ERP-R01-DATES` ملفين (`dateBoundaries.test.ts` + `calendarDate.test.ts` بمجموع `10` اختبارات ليصبح `28` ملفًا / `225` اختبارًا)، وأضافت حزمة `AN-ERP-R02-FIXTURES` ملف `src/server/tests/testPrerequisitesAndDiscovery.test.ts` ليصبح الإجمالي الموثق بعد R02 **29 ملفًا / 231 اختبار وحدة حقيقية** دون أي اختبارات فارغة.
+- **توافق أدوات PostgreSQL ومتطلبات SCRAM**:
+  - تتطلب اختبارات وتمارين النسخ الاحتياطي والاستعادة (`verifyBackupRestore1.ts`, `backupRestoreDrill.ts`) تطابق الإصدار الرئيسي لـ `pg_dump` و`pg_restore` مع الخادم (`SHOW server_version_num`، مثلاً `16` لخادم `postgres:16`)؛ وعند عدم التطابق أو فقدان الأدوات يُسجَّل `[BLOCKED]` (exit code `2`) صراحةً.
+  - يتطلب الفحص الحي `verifyScramVerifierFormat1.ts` صلاحية `CREATEROLE`/`SUPERUSER` وتفعيل مصادقة كلمة مرور فعلية في `pg_hba` (`scram-sha-256`/`md5`)؛ وتحت مصادقة `trust`/`peer` يُخرج الفحص `[BLOCKED]` (exit code `2`) بدل `[FAIL]` مضلل.
+- **عزل `VERIFY_SESSION_SHIM`**:
+  - يقتصر `VERIFY_SESSION_SHIM` و`installSessionShim` على اعتراض مسارات Playwright داخل نصوص التحقق الاختبارية (`verifyCashCustodyUi1.ts`, `verifySidebarLayout1.ts`) وخطوة CI الخاصة بها فقط، ولا يوجد أي أثر لهما في `src/` أو `server.ts`.

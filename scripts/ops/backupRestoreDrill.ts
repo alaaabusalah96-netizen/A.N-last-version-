@@ -11,6 +11,7 @@ import {
 import { runBackup } from './backupDb.js';
 import { runRestore } from './restoreDb.js';
 import { runMigrations } from '../../src/server/db/migrationRunner.js';
+import { checkPgToolCompatibility } from '../helpers/pgPrerequisites.js';
 
 function replaceUrlDatabase(parsed: URL, dbName: string): string {
   const clone = new URL(parsed.toString());
@@ -47,11 +48,24 @@ export async function runDisposableDrill(): Promise<void> {
   const srcUrl = replaceUrlDatabase(parsedAdmin, srcDb);
   const dstUrl = replaceUrlDatabase(parsedAdmin, dstDb);
   const origMigUrl = process.env.MIGRATION_DATABASE_URL;
+  let createdDbs = false;
 
   try {
+    const verRes = await adminPool.query<{ server_version_num: string }>('SHOW server_version_num;');
+    const toolCompat = checkPgToolCompatibility({
+      serverVersionNum: verRes.rows[0]?.server_version_num,
+    });
+    if (toolCompat.status !== 'PASS') {
+      console.error(`[BLOCKED] ${toolCompat.reason}`);
+      await adminPool.end();
+      process.exit(2);
+    }
+
+    console.log(`[drill] ${toolCompat.reason}`);
     console.log(`[drill] Creating disposable DBs (${srcDb}, ${dstDb}) on ${sanitizeConnectionUrl(adminUrl)}`);
     await adminPool.query(`CREATE DATABASE ${srcDb}`);
     await adminPool.query(`CREATE DATABASE ${dstDb}`);
+    createdDbs = true;
 
     // 1) Apply migrations to source disposable DB
     process.env.MIGRATION_DATABASE_URL = srcUrl;
@@ -105,13 +119,15 @@ export async function runDisposableDrill(): Promise<void> {
     } else {
       delete process.env.MIGRATION_DATABASE_URL;
     }
-    await adminPool.query(`DROP DATABASE IF EXISTS ${srcDb} WITH (FORCE)`).catch((e) => {
-      console.warn('[drill] Cleanup warning:', redactLogText(String(e)));
-    });
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dstDb} WITH (FORCE)`).catch((e) => {
-      console.warn('[drill] Cleanup warning:', redactLogText(String(e)));
-    });
-    await adminPool.end();
+    if (createdDbs) {
+      await adminPool.query(`DROP DATABASE IF EXISTS ${srcDb} WITH (FORCE)`).catch((e) => {
+        console.warn('[drill] Cleanup warning:', redactLogText(String(e)));
+      });
+      await adminPool.query(`DROP DATABASE IF EXISTS ${dstDb} WITH (FORCE)`).catch((e) => {
+        console.warn('[drill] Cleanup warning:', redactLogText(String(e)));
+      });
+    }
+    await adminPool.end().catch(() => {});
     if (fs.existsSync(workDir)) {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
