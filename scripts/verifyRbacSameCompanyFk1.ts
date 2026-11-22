@@ -259,20 +259,26 @@ async function run() {
 
       // F4: Deleting a role referenced by membership/scope is blocked.
       // Contract: migration 035 declares these composite FKs ON DELETE RESTRICT (WP-1b/WP-1c, pinned by S0b/S0c).
-      // PostgreSQL raises SQLSTATE 23001 (restrict_violation) for RESTRICT, not 23503 (foreign_key_violation / NO ACTION).
-      // The assertion keeps the safeguard itself: the delete MUST be rejected with exactly that code.
+      // The reported SQLSTATE for this RESTRICT violation is version-dependent, verified against both majors:
+      // PostgreSQL 18 raises 23001 (restrict_violation); PostgreSQL 16 raises 23503 (foreign_key_violation) -
+      // in both cases from the SAME same-company composite constraint (verified: constraint=fk_memberships_role_same_company
+      // on PG16.16 and PG18.7). The safeguard asserted here is therefore strict on identity and class:
+      // the delete MUST be rejected by one of the same-company composite FKs with an FK-violation code.
       let f4Code: string | undefined;
+      let f4Constraint: string | undefined;
       try {
         await runInTenant(companyAId, async () => {
           await outerTx.query(`DELETE FROM roles WHERE id = $1`, [roleAId]);
         });
       } catch (err: any) {
         f4Code = err?.code;
+        f4Constraint = err?.constraint;
       }
       await check(
-        'F4: Deleting role referenced by membership/scope is blocked (ON DELETE RESTRICT, SQLSTATE 23001)',
-        f4Code === '23001',
-        `code=${f4Code ?? 'none'}`
+        'F4: Deleting role referenced by membership/scope is blocked by the same-company composite FK (SQLSTATE 23001 or 23503)',
+        (f4Code === '23001' || f4Code === '23503') &&
+          (f4Constraint === 'fk_memberships_role_same_company' || f4Constraint === 'fk_user_org_scope_role_same_company'),
+        `code=${f4Code ?? 'none'} constraint=${f4Constraint ?? 'none'}`
       );
 
       throw new RollbackTestSentinel();
