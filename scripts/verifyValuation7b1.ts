@@ -373,7 +373,7 @@ async function run() {
     );
     const postedSRet = await defaultSalesReturnService.postReturn(companyId, sRet.id, user.id);
     const outstandingAfterRet = await defaultSalesInvoiceService.listOutstandingInvoices(companyId, customer.id);
-    const openRow = outstandingAfterRet.find((r: any) => r.id === postedSInv.id);
+    const openRow = outstandingAfterRet.find((r: any) => r.invoiceId === postedSInv.id);
 
     let overReturnBlocked = false;
     try {
@@ -396,7 +396,7 @@ async function run() {
       postedSRet.status === 'posted' &&
         postedSRet.totalAmount === 230 &&
         postedSRet.cogsAmount === 52 &&
-        Number(openRow?.remainingAmount ?? -1) === 230 &&
+        Number(openRow?.remainingOpenAmount ?? -1) === 230 &&
         overReturnBlocked
     );
 
@@ -474,6 +474,7 @@ async function run() {
         await client.connect();
         await client.query('BEGIN');
         await client.query('ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE purch_price_variance_exceptions DISABLE TRIGGER trg_guard_purch_price_variance_exceptions');
         await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
         await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
 
@@ -532,6 +533,7 @@ async function run() {
           await client.query('DELETE FROM platform_users WHERE id = ANY($1::uuid[])', [userIds]);
         }
 
+        await client.query('ALTER TABLE purch_price_variance_exceptions ENABLE TRIGGER trg_guard_purch_price_variance_exceptions');
         await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
         await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
         await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');

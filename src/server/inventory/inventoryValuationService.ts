@@ -3297,7 +3297,19 @@ export class InventoryValuationService {
       let subledgerTotalUnits = parseExactUnits(subRes.rows[0]?.total || '0', COST_SCALE, 'subledgerTotal');
 
       // Diagnostic scope filters when filtered reconciliation is requested
-      const vmClauses = ['vm.company_id = $1', `vm.movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN')`, 'vm.journal_entry_id IS NULL'];
+      const vmClauses = [
+        'vm.company_id = $1',
+        `vm.movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN')`,
+        'vm.journal_entry_id IS NULL',
+        // Deliveries post their COGS journal at invoice time via inv_sales_cogs_links, not on the movement itself;
+        // a movement with a posted COGS link is linked, not unmatched.
+        `NOT EXISTS (
+          SELECT 1 FROM inv_sales_cogs_links scl
+          WHERE scl.company_id = vm.company_id
+            AND scl.valuation_movement_id = vm.id
+            AND scl.journal_entry_id IS NOT NULL
+        )`,
+      ];
       const vmParams: any[] = [companyId];
       const caClauses = ['ca.company_id = $1', `((ca.remaining_allocation + ca.consumed_allocation) <> ca.adjustment_amount OR (ca.status = 'posted' AND ca.journal_entry_id IS NULL))`];
       const caParams: any[] = [companyId];
@@ -3588,7 +3600,7 @@ export class InventoryValuationService {
           adjRemTotal: string;
         }>(
           `WITH period_movs AS (
-             SELECT vm.movement_type, vm.source_type, vm.total_cost, vm.journal_entry_id,
+             SELECT vm.id, vm.movement_type, vm.source_type, vm.total_cost, vm.journal_entry_id,
                     vm.created_at::date as mov_date,
                     je.entry_date as je_date,
                     je.status as je_status
@@ -3620,7 +3632,12 @@ export class InventoryValuationService {
            )
            SELECT
              COALESCE((SELECT COUNT(*)::int FROM period_movs WHERE movement_type = 'ADJUSTMENT'), 0) as "ambiguousAdjCount",
-             COALESCE((SELECT COUNT(*)::int FROM period_movs WHERE movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN') AND (journal_entry_id IS NULL OR je_status <> 'posted')), 0)
+             COALESCE((SELECT COUNT(*)::int FROM period_movs WHERE movement_type NOT IN ('TRANSFER_OUT', 'TRANSFER_IN') AND (journal_entry_id IS NULL OR je_status <> 'posted') AND NOT EXISTS (
+                 SELECT 1 FROM inv_sales_cogs_links scl
+                 WHERE scl.company_id = $1
+                   AND scl.valuation_movement_id = period_movs.id
+                   AND scl.journal_entry_id IS NOT NULL
+               )), 0)
                + COALESCE((SELECT cnt FROM adj_after_or_unlinked), 0) as "crossPeriodUnlinkedCount",
              COALESCE((SELECT SUM(total_cost) FROM period_movs WHERE movement_type IN ('RECEIVE', 'OPENING', 'TRANSFER_IN') OR (movement_type = 'RETURN' AND source_type = 'SALES_RETURN')), 0)::text as "inflowTotal",
              COALESCE((SELECT SUM(total_cost) FROM period_movs WHERE movement_type IN ('ISSUE', 'TRANSFER_OUT') OR (movement_type = 'RETURN' AND source_type = 'PURCHASE_RETURN')), 0)::text as "outflowTotal",
