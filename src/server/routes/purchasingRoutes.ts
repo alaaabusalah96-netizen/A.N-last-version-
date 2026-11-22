@@ -38,6 +38,15 @@ async function assertPurchasingPermission(
   }
 }
 
+function resolveMutationCompanyId(req: AuthenticatedRequest): string {
+  const bodyCompanyId = typeof req.body?.companyId === 'string' ? req.body.companyId.trim() : '';
+  const queryCompanyId = typeof req.query?.companyId === 'string' ? req.query.companyId.trim() : '';
+  if (bodyCompanyId && queryCompanyId && bodyCompanyId !== queryCompanyId) {
+    throw new ValidationError('Company ID in request body does not match query parameter');
+  }
+  return bodyCompanyId || queryCompanyId;
+}
+
 // 1. Suppliers API
 purchasingRoutes.get(
   '/suppliers',
@@ -385,9 +394,12 @@ purchasingRoutes.post(
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
-    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const companyId = resolveMutationCompanyId(req);
     const invoiceId = req.params.id;
     await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_VARIANCE_REQUEST, companyId);
+    if (!user?.id) {
+      throw new ValidationError('Authenticated user ID is required');
+    }
     if (!isUuid(invoiceId)) {
       throw new ValidationError('Invalid invoice ID format');
     }
@@ -418,9 +430,12 @@ purchasingRoutes.post(
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
-    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const companyId = resolveMutationCompanyId(req);
     const exceptionId = req.params.id;
     await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_VARIANCE_APPROVE, companyId);
+    if (!user?.id) {
+      throw new ValidationError('Authenticated user ID is required');
+    }
     if (!isUuid(exceptionId)) {
       throw new ValidationError('Invalid exception ID format');
     }
@@ -435,9 +450,12 @@ purchasingRoutes.post(
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
-    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const companyId = resolveMutationCompanyId(req);
     const exceptionId = req.params.id;
     await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_VARIANCE_APPROVE, companyId);
+    if (!user?.id) {
+      throw new ValidationError('Authenticated user ID is required');
+    }
     if (!isUuid(exceptionId)) {
       throw new ValidationError('Invalid exception ID format');
     }

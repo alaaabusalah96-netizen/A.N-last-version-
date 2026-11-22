@@ -26,9 +26,13 @@ export class PriceVarianceExceptionService {
     if (!invoiceId || typeof invoiceId !== 'string') {
       throw new ValidationError('invoiceId is required');
     }
+    if (!actorId || typeof actorId !== 'string' || actorId.trim() === '') {
+      throw new ValidationError('معرف المستخدم (actorId) مطلوب لتقديم طلب الاستثناء');
+    }
     if (!reason || typeof reason !== 'string' || reason.trim() === '') {
       throw new ValidationError('سبب طلب الاستثناء مطلوب');
     }
+    const normalizedActorId = actorId.trim();
 
     return await withTenantTransaction(companyId, async (tx) => {
       const invoice = await this.invoiceRepo.findByIdForUpdate(companyId, invoiceId, tx);
@@ -88,7 +92,7 @@ export class PriceVarianceExceptionService {
           reason: reason.trim(),
           fingerprint,
           snapshot: { invoice, report, lines: linesPayload },
-          requestedBy: actorId || null,
+          requestedBy: normalizedActorId,
           maxVariancePct,
         },
         tx
@@ -96,7 +100,7 @@ export class PriceVarianceExceptionService {
 
       await this.auditService.record(
         {
-          actorUserId: actorId || null,
+          actorUserId: normalizedActorId,
           companyId,
           action: 'PURCHASING_VARIANCE_REQUEST',
           entityType: 'purch_price_variance_exceptions',
@@ -122,6 +126,10 @@ export class PriceVarianceExceptionService {
     if (!exceptionId || typeof exceptionId !== 'string') {
       throw new ValidationError('exceptionId is required');
     }
+    if (!actorId || typeof actorId !== 'string' || actorId.trim() === '') {
+      throw new ValidationError('معرف المستخدم (actorId) مطلوب لاعتماد الاستثناء');
+    }
+    const normalizedActorId = actorId.trim();
 
     let fingerprintMismatch = false;
     let approvedResult: PriceVarianceExceptionRow;
@@ -136,8 +144,11 @@ export class PriceVarianceExceptionService {
         throw new ValidationError(`لا يمكن اعتماد طلب استثناء حالته الحالية هي '${excInfo.status}'`);
       }
 
-      // Segregation of Duties (SoD): Approver cannot be requester
-      if (actorId && excInfo.requestedBy && actorId === excInfo.requestedBy) {
+      // Segregation of Duties (SoD): Requester must exist and Approver cannot be requester
+      if (!excInfo.requestedBy) {
+        throw new ValidationError('لا يمكن التحقق من فصل المهام (SoD) لعدم توفر معرف مقدم الطلب');
+      }
+      if (normalizedActorId === excInfo.requestedBy) {
         throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من اعتماده بنفسه');
       }
 
@@ -164,7 +175,10 @@ export class PriceVarianceExceptionService {
       if (exc.status !== 'pending') {
         throw new ValidationError(`لا يمكن اعتماد طلب استثناء حالته الحالية هي '${exc.status}'`);
       }
-      if (actorId && exc.requestedBy && actorId === exc.requestedBy) {
+      if (!exc.requestedBy) {
+        throw new ValidationError('لا يمكن التحقق من فصل المهام (SoD) لعدم توفر معرف مقدم الطلب');
+      }
+      if (normalizedActorId === exc.requestedBy) {
         throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من اعتماده بنفسه');
       }
 
@@ -206,14 +220,14 @@ export class PriceVarianceExceptionService {
           companyId,
           exceptionId,
           'superseded',
-          actorId || null,
+          normalizedActorId,
           'تغيرت بنود الفاتورة أو أسعارها بعد تقديم طلب الاستثناء',
           tx
         );
 
         await this.auditService.record(
           {
-            actorUserId: actorId || null,
+            actorUserId: normalizedActorId,
             companyId,
             action: 'PURCHASING_VARIANCE_SUPERSEDE',
             entityType: 'purch_price_variance_exceptions',
@@ -236,14 +250,14 @@ export class PriceVarianceExceptionService {
         companyId,
         exceptionId,
         'approved',
-        actorId || null,
+        normalizedActorId,
         decisionReason?.trim() || null,
         tx
       );
 
       await this.auditService.record(
         {
-          actorUserId: actorId || null,
+          actorUserId: normalizedActorId,
           companyId,
           action: 'PURCHASING_VARIANCE_APPROVE',
           entityType: 'purch_price_variance_exceptions',
@@ -273,6 +287,10 @@ export class PriceVarianceExceptionService {
     if (!exceptionId || typeof exceptionId !== 'string') {
       throw new ValidationError('exceptionId is required');
     }
+    if (!actorId || typeof actorId !== 'string' || actorId.trim() === '') {
+      throw new ValidationError('معرف المستخدم (actorId) مطلوب لرفض الاستثناء');
+    }
+    const normalizedActorId = actorId.trim();
 
     return await withTenantTransaction(companyId, async (tx) => {
       // 1. Initial lookup to identify target invoice and validate basic status
@@ -285,7 +303,10 @@ export class PriceVarianceExceptionService {
       }
 
       // WP-5: SoD check on reject (requester cannot reject their own request)
-      if (actorId && excInfo.requestedBy && actorId === excInfo.requestedBy) {
+      if (!excInfo.requestedBy) {
+        throw new ValidationError('لا يمكن التحقق من فصل المهام (SoD) لعدم توفر معرف مقدم الطلب');
+      }
+      if (normalizedActorId === excInfo.requestedBy) {
         throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من رفضه بنفسه');
       }
 
@@ -293,6 +314,12 @@ export class PriceVarianceExceptionService {
       const invoice = await this.invoiceRepo.findByIdForUpdate(companyId, excInfo.invoiceId, tx);
       if (!invoice) {
         throw new NotFoundError('فاتورة المورد المرتبطة غير موجودة');
+      }
+      if (invoice.status === 'posted') {
+        throw new ValidationError('فاتورة المورد مرحلة بالفعل');
+      }
+      if (invoice.status === 'cancelled') {
+        throw new ValidationError('فاتورة المورد ملغاة');
       }
 
       // 3. WP-6: Lock target exception FOR UPDATE SECOND
@@ -306,7 +333,10 @@ export class PriceVarianceExceptionService {
       if (exc.status !== 'pending') {
         throw new ValidationError(`لا يمكن رفض طلب استثناء حالته الحالية هي '${exc.status}'`);
       }
-      if (actorId && exc.requestedBy && actorId === exc.requestedBy) {
+      if (!exc.requestedBy) {
+        throw new ValidationError('لا يمكن التحقق من فصل المهام (SoD) لعدم توفر معرف مقدم الطلب');
+      }
+      if (normalizedActorId === exc.requestedBy) {
         throw new ValidationError('قواعد فصل المهام (SoD) تمنع مقدم طلب الاستثناء من رفضه بنفسه');
       }
 
@@ -314,14 +344,14 @@ export class PriceVarianceExceptionService {
         companyId,
         exceptionId,
         'rejected',
-        actorId || null,
+        normalizedActorId,
         decisionReason?.trim() || null,
         tx
       );
 
       await this.auditService.record(
         {
-          actorUserId: actorId || null,
+          actorUserId: normalizedActorId,
           companyId,
           action: 'PURCHASING_VARIANCE_REJECT',
           entityType: 'purch_price_variance_exceptions',
@@ -342,7 +372,51 @@ export class PriceVarianceExceptionService {
     if (!invoiceId || typeof invoiceId !== 'string') {
       throw new ValidationError('invoiceId is required');
     }
-    return await this.exceptionRepo.listByInvoice(companyId, invoiceId);
+
+    return await withTenantTransaction(companyId, async (tx) => {
+      const invoice = await this.invoiceRepo.findById(companyId, invoiceId, tx);
+      if (!invoice) {
+        throw new NotFoundError('فاتورة المورد غير موجودة');
+      }
+
+      const invoiceLines = invoice.lines || [];
+      let currentFingerprint: string | null = null;
+      if (invoiceLines.length > 0) {
+        const report = await this.threeWayMatchService.evaluateInvoice(companyId, invoiceId, tx);
+        const linesPayload = invoiceLines.map((l) => {
+          const matchLine = report.lines.find((m) => m.grnLineId === l.grnLineId);
+          const refUnitCost =
+            matchLine?.poLineId && matchLine.poUnitCost !== null && matchLine.poUnitCost !== undefined
+              ? matchLine.poUnitCost
+              : (matchLine?.grnUnitCost ?? 0);
+          return {
+            invoiceLineId: l.id,
+            itemId: l.itemId,
+            grnLineId: l.grnLineId,
+            qty: l.qty,
+            unitCost: l.unitCost,
+            refUnitCost,
+          };
+        });
+        currentFingerprint = this.exceptionRepo.computeFingerprint(
+          companyId,
+          invoiceId,
+          invoice.supplierId,
+          linesPayload
+        );
+      }
+
+      const rows = await this.exceptionRepo.listByInvoice(companyId, invoiceId, tx);
+      return rows.map((row) => {
+        const isFingerprintValid = Boolean(currentFingerprint && row.fingerprint === currentFingerprint);
+        const isExpired = (row.status === 'pending' || row.status === 'approved') && !isFingerprintValid;
+        return {
+          ...row,
+          isFingerprintValid,
+          isExpired,
+        };
+      });
+    });
   }
 }
 

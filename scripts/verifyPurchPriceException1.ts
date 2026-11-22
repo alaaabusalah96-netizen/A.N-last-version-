@@ -69,20 +69,38 @@ async function run() {
     permsSrc.includes('PURCHASING_VARIANCE_REQUEST') && permsSrc.includes('PURCHASING_VARIANCE_APPROVE')
   );
 
-  // S3: Repository, Service & InvoiceService integration
+  // S3: Repository, Service, Routes & InvoiceService integration
   const repoSrc = fs.readFileSync(path.join(rootDir, 'src/server/purchasing/priceVarianceExceptionRepository.ts'), 'utf8');
   const svcSrc = fs.readFileSync(path.join(rootDir, 'src/server/purchasing/priceVarianceExceptionService.ts'), 'utf8');
+  const routesSrc = fs.readFileSync(path.join(rootDir, 'src/server/routes/purchasingRoutes.ts'), 'utf8');
   const invSvcSrc = fs.readFileSync(path.join(rootDir, 'src/server/purchasing/invoiceService.ts'), 'utf8');
   const invRepoSrc = fs.readFileSync(path.join(rootDir, 'src/server/purchasing/invoiceRepository.ts'), 'utf8');
+  const wsSrc = fs.readFileSync(path.join(rootDir, 'src/components/purchasing/PurchasingWorkspace.tsx'), 'utf8');
+  const panelPath = path.join(rootDir, 'src/components/purchasing/PriceVarianceExceptionPanel.tsx');
+  const panelSrc = fs.existsSync(panelPath) ? fs.readFileSync(panelPath, 'utf8') : '';
 
   await check(
-    'S3: Unified lock order (invoice then exception), durable supersede (Option A), SoD on approve/reject, and findByIdForUpdate loads lines',
+    'S3: Unified lock order (invoice then exception), durable supersede (Option A), mandatory actorId, SoD on approve/reject, and findByIdForUpdate loads lines',
     repoSrc.includes('computeFingerprint') &&
       svcSrc.includes('requestedBy') &&
       svcSrc.includes('fingerprintMismatch') &&
+      svcSrc.includes('normalizedActorId') &&
+      svcSrc.includes('isFingerprintValid') &&
+      routesSrc.includes('resolveMutationCompanyId') &&
       invSvcSrc.includes('findActiveApprovedByInvoice') &&
       invRepoSrc.includes('purch_supplier_invoice_lines') &&
       !invRepoSrc.includes('return mapInvoiceHeader(res.rows[0]);')
+  );
+
+  await check(
+    'S3-UI: PurchasingWorkspace wires PriceVarianceExceptionPanel with /price-exceptions API, RBAC permissions, and UI SoD hiding',
+    wsSrc.includes('PriceVarianceExceptionPanel') &&
+      wsSrc.includes('price-exceptions') &&
+      wsSrc.includes('purchasing:variance:request') &&
+      wsSrc.includes('purchasing:variance:approve') &&
+      panelSrc.includes('/price-exceptions') &&
+      panelSrc.includes('requestedBy === currentUserId') &&
+      panelSrc.includes('hasQtyExceeded')
   );
 
   // Live DB Verification
@@ -284,11 +302,57 @@ async function run() {
     }
     await check('S6: Requester cannot reject their own exception (SoD enforced on reject)', sodRejectFailed);
 
-    // S7: Authorized approval by userA
-    console.log('\n--- S7: Testing Authorized Approval ---');
+    // S7: Authorized approval by userA + new request after approved supersedes old approved
+    console.log('\n--- S7: Testing Authorized Approval & Re-Request Superseding Approved ---');
+    const excToReject = await defaultPriceVarianceExceptionService.requestException(
+      companyId1,
+      invoice.id,
+      'طلب أول سيتم رفضه',
+      userR.id
+    );
+    const rejectedExc = await defaultPriceVarianceExceptionService.rejectException(
+      companyId1,
+      excToReject.id,
+      'مرفوض لتعديل السبب',
+      userA.id
+    );
+    await check(
+      'S7-0: Authorized user rejects exception (status=rejected, rejected_by set)',
+      rejectedExc.status === 'rejected' && rejectedExc.rejectedBy === userA.id
+    );
+
+    const excSupersededByNew = await defaultPriceVarianceExceptionService.requestException(
+      companyId1,
+      invoice.id,
+      'طلب ثاني يعتمد ثم يستبدل',
+      userR.id
+    );
+    const firstApproved = await defaultPriceVarianceExceptionService.approveException(
+      companyId1,
+      excSupersededByNew.id,
+      'اعتماد أول',
+      userA.id
+    );
+    const reRequestedExc = await defaultPriceVarianceExceptionService.requestException(
+      companyId1,
+      invoice.id,
+      'طلب جديد بعد الاعتماد',
+      userR.id
+    );
+    const oldApprovedAfterNewReq = await adminClient.query<{ status: string }>(
+      `SELECT status FROM purch_price_variance_exceptions WHERE id = $1;`,
+      [firstApproved.id]
+    );
+    await check(
+      'S7-1: New request after approved cleanly supersedes previous approved exception',
+      firstApproved.status === 'approved' &&
+        oldApprovedAfterNewReq.rows[0]?.status === 'superseded' &&
+        reRequestedExc.status === 'pending'
+    );
+
     const approvedExc = await defaultPriceVarianceExceptionService.approveException(
       companyId1,
-      excRow.id,
+      reRequestedExc.id,
       'معتمد من المدير المالي',
       userA.id
     );

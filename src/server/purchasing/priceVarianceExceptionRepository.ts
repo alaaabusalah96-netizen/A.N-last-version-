@@ -9,9 +9,13 @@ export interface PriceVarianceExceptionRow {
   supplierId: string;
   status: 'pending' | 'approved' | 'rejected' | 'superseded';
   requestedBy: string | null;
+  requestedByUsername?: string | null;
   approvedBy: string | null;
+  approvedByUsername?: string | null;
   rejectedBy: string | null;
+  rejectedByUsername?: string | null;
   supersededBy?: string | null;
+  supersededByUsername?: string | null;
   reason: string;
   decisionReason: string | null;
   fingerprint: string;
@@ -21,6 +25,8 @@ export interface PriceVarianceExceptionRow {
   supersededAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  isFingerprintValid?: boolean;
+  isExpired?: boolean;
 }
 
 export class PriceVarianceExceptionRepository {
@@ -207,27 +213,35 @@ export class PriceVarianceExceptionRepository {
     const run = async (executor: DbExecutor) => {
       const res = await executor.query<any>(
         `SELECT
-           id,
-           company_id as "companyId",
-           invoice_id as "invoiceId",
-           supplier_id as "supplierId",
-           status,
-           requested_by as "requestedBy",
-           approved_by as "approvedBy",
-           rejected_by as "rejectedBy",
-           superseded_by as "supersededBy",
-           reason,
-           decision_reason as "decisionReason",
-           fingerprint,
-           snapshot,
-           max_variance_pct as "maxVariancePc",
-           decided_at as "decidedAt",
-           superseded_at as "supersededAt",
-           created_at as "createdAt",
-           updated_at as "updatedAt"
-         FROM purch_price_variance_exceptions
-         WHERE company_id = $1 AND invoice_id = $2
-         ORDER BY created_at DESC;`,
+           e.id,
+           e.company_id as "companyId",
+           e.invoice_id as "invoiceId",
+           e.supplier_id as "supplierId",
+           e.status,
+           e.requested_by as "requestedBy",
+           req_u.username as "requestedByUsername",
+           e.approved_by as "approvedBy",
+           app_u.username as "approvedByUsername",
+           e.rejected_by as "rejectedBy",
+           rej_u.username as "rejectedByUsername",
+           e.superseded_by as "supersededBy",
+           sup_u.username as "supersededByUsername",
+           e.reason,
+           e.decision_reason as "decisionReason",
+           e.fingerprint,
+           e.snapshot,
+           e.max_variance_pct as "maxVariancePc",
+           e.decided_at as "decidedAt",
+           e.superseded_at as "supersededAt",
+           e.created_at as "createdAt",
+           e.updated_at as "updatedAt"
+         FROM purch_price_variance_exceptions e
+         LEFT JOIN platform_users req_u ON req_u.id = e.requested_by
+         LEFT JOIN platform_users app_u ON app_u.id = e.approved_by
+         LEFT JOIN platform_users rej_u ON rej_u.id = e.rejected_by
+         LEFT JOIN platform_users sup_u ON sup_u.id = e.superseded_by
+         WHERE e.company_id = $1 AND e.invoice_id = $2
+         ORDER BY e.created_at DESC;`,
         [companyId, invoiceId]
       );
       return res.rows;

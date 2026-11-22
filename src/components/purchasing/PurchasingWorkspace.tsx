@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ShoppingBag,
   Users,
@@ -19,6 +19,13 @@ import {
   Receipt,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { PriceVarianceExceptionPanel } from './PriceVarianceExceptionPanel.js';
+import {
+  MatchReportController,
+  MatchReportState,
+  createInitialMatchReportState,
+  resolveTrustedMatchInvoice,
+} from './matchReportController.js';
 
 interface Company {
   id: string;
@@ -160,6 +167,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<'suppliers' | 'po' | 'grn' | 'invoices' | 'match' | 'returns' | 'ap' | 'payments'>('suppliers');
 
   const [userPermissions, setUserPermissions] = useState<string[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [authMeLoaded, setAuthMeLoaded] = useState(false);
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -179,6 +187,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [showGrnModal, setShowGrnModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
+  const [invoicesCompanyId, setInvoicesCompanyId] = useState<string>('');
   const [invSupplierId, setInvSupplierId] = useState('');
   const [invSupplierInvoiceNo, setInvSupplierInvoiceNo] = useState('');
   const [invDate, setInvDate] = useState('');
@@ -199,8 +208,45 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
 
   // 3-Way Match & Policy state
   const [matchPolicy, setMatchPolicy] = useState<any>(null);
-  const [selectedMatchInvoiceId, setSelectedMatchInvoiceId] = useState('');
-  const [matchReport, setMatchReport] = useState<any>(null);
+  const selectedCompanyIdRef = useRef('');
+  const loadDataSeqRef = useRef(0);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const [matchState, setMatchState] = useState<MatchReportState>(() => createInitialMatchReportState(''));
+  const matchControllerRef = useRef<MatchReportController | null>(null);
+  if (!matchControllerRef.current) {
+    matchControllerRef.current = new MatchReportController(
+      apiFetch,
+      (msg) => setError(msg),
+      selectedCompanyId,
+      {
+        matchUrl: (invId, compId) =>
+          `/api/purchasing/supplier-invoices/${invId}/three-way-match?companyId=${compId}`,
+        exceptionsUrl: (invId, compId) =>
+          `/api/purchasing/supplier-invoices/${invId}/price-exceptions?companyId=${compId}`,
+      }
+    );
+  }
+
+  useEffect(() => {
+    const controller = matchControllerRef.current!;
+    setMatchState(controller.getState());
+    return controller.subscribe((next) => {
+      setMatchState(next);
+    });
+  }, []);
+
+  const selectedMatchInvoiceId = matchState.selectedInvoiceId;
+  const matchReport = matchState.reportCompanyId === selectedCompanyId ? matchState.matchReport : null;
+  const priceExceptions = matchState.reportCompanyId === selectedCompanyId ? matchState.priceExceptions : [];
+  const exceptionsLoading = matchState.loading;
+  const trustedMatchInvoice = resolveTrustedMatchInvoice({
+    selectedCompanyId,
+    selectedInvoiceId: selectedMatchInvoiceId,
+    matchReport,
+    reportCompanyId: matchState.reportCompanyId,
+    invoicesCompanyId,
+    invoices,
+  });
 
   // Returns state
   const [returnsList, setReturnsList] = useState<any[]>([]);
@@ -235,22 +281,13 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [payReference, setPayReference] = useState('');
   const [payMemo, setPayMemo] = useState('');
 
-  const fetchMatchReport = async (invId: string) => {
-    setSelectedMatchInvoiceId(invId);
-    if (!invId || !selectedCompanyId) {
-      setMatchReport(null);
-      return;
-    }
-    try {
-      const res = await apiFetch(`/api/purchasing/supplier-invoices/${invId}/three-way-match?companyId=${selectedCompanyId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setMatchReport(data.report || null);
-      }
-    } catch (err: any) {
-      setError(err.message || 'فشل جلب تقرير المطابقة الثلاثية');
-    }
-  };
+  const fetchMatchReport = useCallback(
+    async (invId: string, targetCompanyId?: string) => {
+      const companyId = targetCompanyId ?? selectedCompanyIdRef.current ?? selectedCompanyId;
+      await matchControllerRef.current!.fetchMatchReport(invId, companyId);
+    },
+    [selectedCompanyId]
+  );
 
   const fetchReturnableLines = async (supplierId: string) => {
     if (!supplierId || !selectedCompanyId) {
@@ -469,8 +506,9 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     }
     setActionLoading(true);
     setError(null);
+    setSuccess(null);
     try {
-      await apiFetch('/api/purchasing/supplier-invoices', {
+      const res = await apiFetch('/api/purchasing/supplier-invoices', {
         method: 'POST',
         body: JSON.stringify({
           companyId: selectedCompanyId,
@@ -486,6 +524,10 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
           })),
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'فشل إنشاء فاتورة المورد');
+      }
       setSuccess('تم إنشاء فاتورة المورد كمسودة بنجاح');
       setShowInvoiceModal(false);
       setInvSupplierInvoiceNo('');
@@ -501,34 +543,66 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
 
   const handlePostInvoice = async (id: string) => {
     if (!confirm('هل أنت متأكد من ترحيل هذه الفاتورة وتوليد القيد المحاسبي؟')) return;
+    const targetCompanyId = selectedCompanyId;
     setActionLoading(true);
     setError(null);
+    setSuccess(null);
     try {
-      await apiFetch(`/api/purchasing/supplier-invoices/${id}/post`, {
+      const res = await apiFetch(`/api/purchasing/supplier-invoices/${id}/post`, {
         method: 'POST',
-        body: JSON.stringify({ companyId: selectedCompanyId }),
+        body: JSON.stringify({ companyId: targetCompanyId }),
       });
-      setSuccess('تم ترحيل فاتورة المورد بنجاح وتوليد قيد الدائنين');
-      await loadData();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'فشل ترحيل الفاتورة');
+      }
+      if (selectedCompanyIdRef.current === targetCompanyId) {
+        setSuccess('تم ترحيل فاتورة المورد بنجاح وتوليد قيد الدائنين');
+        await loadData();
+      }
     } catch (err: any) {
-      setError(err.message || 'فشل ترحيل الفاتورة');
+      if (selectedCompanyIdRef.current === targetCompanyId) {
+        setError(err.message || 'فشل ترحيل الفاتورة');
+      }
     } finally {
-      setActionLoading(false);
+      if (selectedCompanyIdRef.current === targetCompanyId) {
+        setActionLoading(false);
+        const currentMatch = matchControllerRef.current!.getState();
+        if (currentMatch.companyId === targetCompanyId && currentMatch.selectedInvoiceId === id) {
+          await fetchMatchReport(id, targetCompanyId);
+        }
+      } else {
+        setActionLoading(false);
+      }
     }
   };
 
   const handleDeleteInvoice = async (id: string) => {
     if (!confirm('هل أنت متأكد من حذف هذه المسودة؟')) return;
+    const targetCompanyId = selectedCompanyId;
     setActionLoading(true);
     setError(null);
+    setSuccess(null);
     try {
-      await apiFetch(`/api/purchasing/supplier-invoices/${id}?companyId=${selectedCompanyId}`, {
+      const res = await apiFetch(`/api/purchasing/supplier-invoices/${id}?companyId=${targetCompanyId}`, {
         method: 'DELETE',
       });
-      setSuccess('تم حذف مسودة الفاتورة بنجاح');
-      await loadData();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'فشل حذف مسودة الفاتورة');
+      }
+      const currentMatch = matchControllerRef.current!.getState();
+      if (currentMatch.companyId === targetCompanyId && currentMatch.selectedInvoiceId === id) {
+        matchControllerRef.current!.clearSelection();
+      }
+      if (selectedCompanyIdRef.current === targetCompanyId) {
+        setSuccess('تم حذف مسودة الفاتورة بنجاح');
+        await loadData();
+      }
     } catch (err: any) {
-      setError(err.message || 'فشل حذف مسودة الفاتورة');
+      if (selectedCompanyIdRef.current === targetCompanyId) {
+        setError(err.message || 'فشل حذف مسودة الفاتورة');
+      }
     } finally {
       setActionLoading(false);
     }
@@ -561,6 +635,33 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const canPostPo = isPlatformAdmin || userPermissions.includes('purchasing:post');
   const canPostInvoice = isPlatformAdmin || userRole === 'company_admin' || userPermissions.includes('purchasing:post');
   const canWrite = isPlatformAdmin || userRole === 'company_admin' || userPermissions.includes('purchasing:write');
+  const canRequestVariance =
+    authMeLoaded && (isPlatformAdmin || userPermissions.includes('purchasing:variance:request'));
+  const canApproveVariance =
+    authMeLoaded && (isPlatformAdmin || userPermissions.includes('purchasing:variance:approve'));
+
+  const handleCompanyChange = useCallback((nextCompanyId: string) => {
+    selectedCompanyIdRef.current = nextCompanyId;
+    setSelectedCompanyId(nextCompanyId);
+    loadAbortControllerRef.current?.abort();
+    loadDataSeqRef.current += 1;
+    setLoading(false);
+    setError(null);
+    setSuccess(null);
+    setSuppliers([]);
+    setPurchaseOrders([]);
+    setGrns([]);
+    setInvoices([]);
+    setInvoicesCompanyId('');
+    setWarehouses([]);
+    setItems([]);
+    setMatchPolicy(null);
+    setReturnsList([]);
+    setApOpenItems([]);
+    setSupplierPayments([]);
+    setCashRegisters([]);
+    matchControllerRef.current!.setCompanyContext(nextCompanyId);
+  }, []);
 
   useEffect(() => {
     async function bootstrap() {
@@ -574,13 +675,20 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
           const data = await compRes.json();
           const list: Company[] = data.companies || [];
           setCompanies(list);
-          if (list.length > 0) setSelectedCompanyId(list[0].id);
+          if (list.length > 0) {
+            selectedCompanyIdRef.current = list[0].id;
+            matchControllerRef.current!.setCompanyContext(list[0].id);
+            setSelectedCompanyId(list[0].id);
+          }
         }
 
         if (meRes.ok) {
           const meData = await meRes.json();
           if (Array.isArray(meData.permissions)) {
             setUserPermissions(meData.permissions);
+          }
+          if (meData.user?.id) {
+            setCurrentUserId(meData.user.id);
           }
         }
       } catch (err) {
@@ -599,62 +707,104 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   }, [authMeLoaded, activeTab, canReadPo]);
 
   const loadData = useCallback(async () => {
-    if (!selectedCompanyId) return;
+    const targetCompanyId = selectedCompanyId;
+    if (!targetCompanyId) return;
+    selectedCompanyIdRef.current = targetCompanyId;
+    loadAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    loadAbortControllerRef.current = abortController;
+    const reqSeq = ++loadDataSeqRef.current;
+    const isCurrentLoad = () =>
+      loadDataSeqRef.current === reqSeq && selectedCompanyIdRef.current === targetCompanyId;
+
     setLoading(true);
     setError(null);
     try {
+      const reqInit: RequestInit = { signal: abortController.signal };
       const requests: Promise<Response>[] = [
-        apiFetch(`/api/purchasing/suppliers?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/purchasing/grn?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/purchasing/supplier-invoices?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/inventory/warehouses?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/inventory/items?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/purchasing/three-way-match/policy?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/purchasing/returns?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/purchasing/ap/open-items?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/purchasing/supplier-payments?companyId=${selectedCompanyId}`),
-        apiFetch(`/api/cash/registers?companyId=${selectedCompanyId}`),
+        apiFetch(`/api/purchasing/suppliers?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/purchasing/grn?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/purchasing/supplier-invoices?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/inventory/warehouses?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/inventory/items?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/purchasing/three-way-match/policy?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/purchasing/returns?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/purchasing/ap/open-items?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/purchasing/supplier-payments?companyId=${targetCompanyId}`, reqInit),
+        apiFetch(`/api/cash/registers?companyId=${targetCompanyId}`, reqInit),
       ];
 
       if (canReadPo) {
-        requests.push(apiFetch(`/api/purchasing/purchase-orders?companyId=${selectedCompanyId}`));
+        requests.push(apiFetch(`/api/purchasing/purchase-orders?companyId=${targetCompanyId}`, reqInit));
       }
 
       const results = await Promise.all(requests);
-      const suppRes = results[0];
-      const grnRes = results[1];
-      const invRes = results[2];
-      const whRes = results[3];
-      const itemRes = results[4];
-      const policyRes = results[5];
-      const retRes = results[6];
-      const apRes = results[7];
-      const payRes = results[8];
-      const regRes = results[9];
-      const poRes = results[10];
+      if (!isCurrentLoad()) return;
 
-      if (suppRes.ok) setSuppliers((await suppRes.json()).suppliers || []);
-      if (grnRes.ok) setGrns((await grnRes.json()).grns || []);
-      if (invRes.ok) setInvoices((await invRes.json()).invoices || []);
-      if (whRes.ok) setWarehouses((await whRes.json()).warehouses || []);
-      if (itemRes.ok) setItems((await itemRes.json()).items || []);
-      if (policyRes.ok) setMatchPolicy((await policyRes.json()).policy || null);
-      if (retRes.ok) setReturnsList((await retRes.json()).returns || []);
-      if (apRes.ok) setApOpenItems((await apRes.json()).openItems || []);
-      if (payRes.ok) setSupplierPayments((await payRes.json()).payments || []);
-      if (regRes.ok) setCashRegisters((await regRes.json()).registers || []);
+      const [
+        suppJson,
+        grnJson,
+        invJson,
+        whJson,
+        itemJson,
+        policyJson,
+        retJson,
+        apJson,
+        payJson,
+        regJson,
+        poJson,
+      ] = await Promise.all([
+        results[0].ok ? results[0].json().catch(() => null) : null,
+        results[1].ok ? results[1].json().catch(() => null) : null,
+        results[2].ok ? results[2].json().catch(() => null) : null,
+        results[3].ok ? results[3].json().catch(() => null) : null,
+        results[4].ok ? results[4].json().catch(() => null) : null,
+        results[5].ok ? results[5].json().catch(() => null) : null,
+        results[6].ok ? results[6].json().catch(() => null) : null,
+        results[7].ok ? results[7].json().catch(() => null) : null,
+        results[8].ok ? results[8].json().catch(() => null) : null,
+        results[9].ok ? results[9].json().catch(() => null) : null,
+        results[10] && results[10].ok ? results[10].json().catch(() => null) : null,
+      ]);
 
-      if (poRes && poRes.ok) {
-        setPurchaseOrders((await poRes.json()).purchaseOrders || []);
+      if (!isCurrentLoad()) return;
+
+      if (suppJson) setSuppliers(suppJson.suppliers || []);
+      if (grnJson) setGrns(grnJson.grns || []);
+      if (invJson && Array.isArray(invJson.invoices)) {
+        setInvoices(invJson.invoices);
+        setInvoicesCompanyId(targetCompanyId);
+      } else {
+        setInvoices([]);
+        setInvoicesCompanyId('');
+      }
+      if (whJson) setWarehouses(whJson.warehouses || []);
+      if (itemJson) setItems(itemJson.items || []);
+      if (policyJson) setMatchPolicy(policyJson.policy || null);
+      if (retJson) setReturnsList(retJson.returns || []);
+      if (apJson) setApOpenItems(apJson.openItems || []);
+      if (payJson) setSupplierPayments(payJson.payments || []);
+      if (regJson) setCashRegisters(regJson.registers || []);
+
+      if (poJson) {
+        setPurchaseOrders(poJson.purchaseOrders || []);
       } else if (!canReadPo) {
         setPurchaseOrders([]);
       }
-    } catch (err) {
+
+      const currentMatch = matchControllerRef.current!.getState();
+      if (currentMatch.selectedInvoiceId && currentMatch.companyId === targetCompanyId) {
+        await fetchMatchReport(currentMatch.selectedInvoiceId, targetCompanyId);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || !isCurrentLoad()) return;
       setError(err instanceof Error ? err.message : 'خطأ أثناء تحميل بيانات المشتريات');
     } finally {
-      setLoading(false);
+      if (loadDataSeqRef.current === reqSeq && selectedCompanyIdRef.current === targetCompanyId) {
+        setLoading(false);
+      }
     }
-  }, [selectedCompanyId, canReadPo]);
+  }, [selectedCompanyId, canReadPo, fetchMatchReport]);
 
   useEffect(() => {
     loadData();
@@ -886,7 +1036,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
             <Building2 className="w-4 h-4 text-slate-400" />
             <select
               value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
+              onChange={(e) => handleCompanyChange(e.target.value)}
               className="bg-transparent text-white focus:outline-none font-medium cursor-pointer"
             >
               {companies.map((c) => (
@@ -1338,9 +1488,11 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
                           inv.status === 'posted'
                             ? 'bg-emerald-950/60 border border-emerald-800/80 text-emerald-300'
+                            : inv.status === 'cancelled'
+                            ? 'bg-slate-800 border border-slate-700 text-slate-300'
                             : 'bg-amber-950/60 border border-amber-800/80 text-amber-300'
                         }`}>
-                          {inv.status === 'posted' ? 'مرحّلة' : 'مسودة'}
+                          {inv.status === 'posted' ? 'مرحّلة' : inv.status === 'cancelled' ? 'ملغاة' : 'مسودة'}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-center font-mono text-indigo-300">
@@ -1415,7 +1567,8 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                 <option value="">-- اختر الفاتورة للفحص --</option>
                 {invoices.map((inv) => (
                   <option key={inv.id} value={inv.id}>
-                    {inv.supplierInvoiceNo} ({inv.supplierNameAr || inv.supplierCode || 'مورد'}) - {inv.status === 'posted' ? 'مرحلة' : 'مسودة'}
+                    {inv.supplierInvoiceNo} ({inv.supplierNameAr || inv.supplierCode || 'مورد'}) -{' '}
+                    {inv.status === 'posted' ? 'مرحّلة' : inv.status === 'cancelled' ? 'ملغاة' : 'مسودة'}
                   </option>
                 ))}
               </select>
@@ -1423,8 +1576,12 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
           </div>
 
           {!matchReport ? (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center text-slate-500 text-xs shadow-2xl">
-              يرجى اختيار فاتورة مورد من القائمة أعلاه لعرض نتيجة المطابقة الثلاثية التفصيلية بين أمر الشراء وسند الاستلام والفاتورة.
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 text-xs shadow-2xl">
+              {exceptionsLoading
+                ? 'جاري تحميل تقرير المطابقة الثلاثية وسجل الاستثناءات...'
+                : matchState.loadError
+                ? matchState.loadError
+                : 'يرجى اختيار فاتورة مورد من القائمة أعلاه لعرض نتيجة المطابقة الثلاثية التفصيلية بين أمر الشراء وسند الاستلام والفاتورة.'}
             </div>
           ) : (
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
@@ -1528,6 +1685,30 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                 </table>
               </div>
             </div>
+          )}
+
+          {matchReport && matchState.reportCompanyId === selectedCompanyId && (
+            <PriceVarianceExceptionPanel
+              companyId={selectedCompanyId}
+              invoice={trustedMatchInvoice}
+              matchReport={matchReport}
+              exceptions={priceExceptions}
+              loading={exceptionsLoading}
+              loadError={matchState.loadError}
+              currentUserId={currentUserId}
+              canRequestVariance={canRequestVariance}
+              canApproveVariance={canApproveVariance}
+              canPostInvoice={canPostInvoice}
+              actionLoading={actionLoading}
+              onRefresh={async () => {
+                if (selectedMatchInvoiceId && selectedCompanyId) {
+                  await fetchMatchReport(selectedMatchInvoiceId, selectedCompanyId);
+                }
+              }}
+              onPostInvoice={handlePostInvoice}
+              onError={setError}
+              onSuccess={setSuccess}
+            />
           )}
         </div>
       )}
