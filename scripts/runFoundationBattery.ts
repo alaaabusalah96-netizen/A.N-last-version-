@@ -203,6 +203,7 @@ const scripts = [
   'scripts/verifyPurch3WayPostGate1.ts',
   'scripts/verifyValuation7b1.ts',
   'scripts/verifyPurchPriceException1.ts',
+  'scripts/verifyPurchPriceExceptionDbGuards1.ts',
 ];
 
 export interface BatteryItemReport {

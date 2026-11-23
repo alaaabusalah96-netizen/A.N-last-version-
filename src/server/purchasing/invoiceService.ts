@@ -602,7 +602,19 @@ export class InvoiceService {
         throw new ValidationError('لا يمكن حذف فاتورة مورد مرحلة');
       }
 
-      await this.invoiceRepo.deleteDraft(companyId, invoiceId, tx);
+      const hasExceptions = await defaultPriceVarianceExceptionRepository.hasAnyForInvoice(companyId, invoiceId, tx);
+      if (hasExceptions) {
+        throw new ValidationError('لا يمكن حذف فاتورة المورد لوجود سجل طلبات استثناء تباين أسعار مرتبط بها');
+      }
+
+      try {
+        await this.invoiceRepo.deleteDraft(companyId, invoiceId, tx);
+      } catch (err: any) {
+        if (err?.code === '23503') {
+          throw new ValidationError('لا يمكن حذف فاتورة المورد لوجود سجلات مرتبطة تمنع الحذف');
+        }
+        throw err;
+      }
 
       await this.auditService.record(
         {

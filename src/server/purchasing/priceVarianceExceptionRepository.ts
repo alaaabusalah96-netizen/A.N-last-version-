@@ -1,5 +1,6 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
+import { ValidationError } from '../http/errors.js';
 import crypto from 'crypto';
 
 export interface PriceVarianceExceptionRow {
@@ -18,6 +19,7 @@ export interface PriceVarianceExceptionRow {
   supersededByUsername?: string | null;
   reason: string;
   decisionReason: string | null;
+  supersedeReason?: string | null;
   fingerprint: string;
   snapshot: any;
   maxVariancePc: number;
@@ -61,17 +63,27 @@ export class PriceVarianceExceptionRepository {
     },
     tx?: DbExecutor
   ): Promise<PriceVarianceExceptionRow> {
+    if (!data.requestedBy || typeof data.requestedBy !== 'string' || data.requestedBy.trim() === '') {
+      throw new ValidationError('معرف مقدم الطلب (requestedBy) مطلوب لتسجيل طلب الاستثناء');
+    }
+    if (!data.reason || typeof data.reason !== 'string' || data.reason.trim() === '') {
+      throw new ValidationError('سبب طلب الاستثناء مطلوب');
+    }
+    const normalizedRequestedBy = data.requestedBy.trim();
+    const normalizedReason = data.reason.trim();
+
     const run = async (executor: DbExecutor) => {
       // Supersede any existing pending or approved exceptions for this invoice
+      // IMPORTANT (R04 WP-2): Record supersede metadata in supersede_reason only; preserve original decision_reason intact.
       await executor.query(
         `UPDATE purch_price_variance_exceptions
          SET status = 'superseded',
              superseded_by = $3,
              superseded_at = NOW(),
-             decision_reason = 'تم استبدال الطلب بطلب استثناء جديد',
+             supersede_reason = 'تم استبدال الطلب بطلب استثناء جديد',
              updated_at = NOW()
          WHERE company_id = $1 AND invoice_id = $2 AND status IN ('pending', 'approved')`,
-        [companyId, data.invoiceId, data.requestedBy]
+        [companyId, data.invoiceId, normalizedRequestedBy]
       );
 
       const res = await executor.query<any>(
@@ -90,6 +102,7 @@ export class PriceVarianceExceptionRepository {
            superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
+           supersede_reason as "supersedeReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
@@ -101,8 +114,8 @@ export class PriceVarianceExceptionRepository {
           companyId,
           data.invoiceId,
           data.supplierId,
-          data.requestedBy,
-          data.reason,
+          normalizedRequestedBy,
+          normalizedReason,
           data.fingerprint,
           JSON.stringify(data.snapshot),
           data.maxVariancePct ?? 5.0,
@@ -130,6 +143,7 @@ export class PriceVarianceExceptionRepository {
            superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
+           supersede_reason as "supersedeReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
@@ -161,6 +175,7 @@ export class PriceVarianceExceptionRepository {
          superseded_by as "supersededBy",
          reason,
          decision_reason as "decisionReason",
+         supersede_reason as "supersedeReason",
          fingerprint,
          snapshot,
          max_variance_pct as "maxVariancePc",
@@ -191,6 +206,7 @@ export class PriceVarianceExceptionRepository {
            superseded_by as "supersededBy",
            reason,
            decision_reason as "decisionReason",
+           supersede_reason as "supersedeReason",
            fingerprint,
            snapshot,
            max_variance_pct as "maxVariancePc",
@@ -204,6 +220,22 @@ export class PriceVarianceExceptionRepository {
         [companyId, invoiceId]
       );
       return res.rows[0] || null;
+    };
+    if (tx) return await run(tx);
+    return await withTenantTransaction(companyId, run);
+  }
+
+  async hasAnyForInvoice(companyId: string, invoiceId: string, tx?: DbExecutor): Promise<boolean> {
+    const run = async (executor: DbExecutor) => {
+      const res = await executor.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+           FROM purch_price_variance_exceptions
+           WHERE company_id = $1 AND invoice_id = $2
+         ) as exists;`,
+        [companyId, invoiceId]
+      );
+      return Boolean(res.rows[0]?.exists);
     };
     if (tx) return await run(tx);
     return await withTenantTransaction(companyId, run);
@@ -228,6 +260,7 @@ export class PriceVarianceExceptionRepository {
            sup_u.username as "supersededByUsername",
            e.reason,
            e.decision_reason as "decisionReason",
+           e.supersede_reason as "supersedeReason",
            e.fingerprint,
            e.snapshot,
            e.max_variance_pct as "maxVariancePc",
@@ -255,18 +288,35 @@ export class PriceVarianceExceptionRepository {
     exceptionId: string,
     status: 'approved' | 'rejected' | 'superseded',
     actorId: string | null,
-    decisionReason: string | null,
+    reasonText: string | null,
     tx: DbExecutor
   ): Promise<PriceVarianceExceptionRow> {
+    if (!actorId || typeof actorId !== 'string' || actorId.trim() === '') {
+      throw new ValidationError('معرف المستخدم (actorId) مطلوب لتحديث حالة طلب الاستثناء');
+    }
+    const normalizedActorId = actorId.trim();
+    const normalizedReasonText = reasonText && reasonText.trim() !== '' ? reasonText.trim() : null;
+
+    if (status === 'superseded' && !normalizedReasonText) {
+      throw new ValidationError('سبب الاستبدال (supersede_reason) مطلوب عند استبدال طلب الاستثناء');
+    }
+
     const res = await tx.query<any>(
       `UPDATE purch_price_variance_exceptions
        SET status = $3::varchar,
-           approved_by = CASE WHEN $3::text = 'approved' THEN COALESCE($4::uuid, approved_by) ELSE approved_by END,
-           rejected_by = CASE WHEN $3::text = 'rejected' THEN COALESCE($4::uuid, rejected_by) ELSE rejected_by END,
-           superseded_by = CASE WHEN $3::text = 'superseded' THEN COALESCE($4::uuid, superseded_by) ELSE superseded_by END,
+           approved_by = CASE WHEN $3::text = 'approved' THEN $4::uuid ELSE approved_by END,
+           rejected_by = CASE WHEN $3::text = 'rejected' THEN $4::uuid ELSE rejected_by END,
+           superseded_by = CASE WHEN $3::text = 'superseded' THEN $4::uuid ELSE superseded_by END,
            decided_at = CASE WHEN $3::text IN ('approved', 'rejected') THEN NOW() ELSE decided_at END,
            superseded_at = CASE WHEN $3::text = 'superseded' THEN NOW() ELSE superseded_at END,
-           decision_reason = COALESCE($5::text, decision_reason),
+           decision_reason = CASE
+             WHEN $3::text IN ('approved', 'rejected') THEN COALESCE($5::text, decision_reason)
+             ELSE decision_reason
+           END,
+           supersede_reason = CASE
+             WHEN $3::text = 'superseded' THEN COALESCE($5::text, supersede_reason)
+             ELSE supersede_reason
+           END,
            updated_at = NOW()
        WHERE company_id = $1::uuid AND id = $2::uuid
        RETURNING
@@ -281,6 +331,7 @@ export class PriceVarianceExceptionRepository {
          superseded_by as "supersededBy",
          reason,
          decision_reason as "decisionReason",
+         supersede_reason as "supersedeReason",
          fingerprint,
          snapshot,
          max_variance_pct as "maxVariancePc",
@@ -288,7 +339,7 @@ export class PriceVarianceExceptionRepository {
          superseded_at as "supersededAt",
          created_at as "createdAt",
          updated_at as "updatedAt";`,
-      [companyId, exceptionId, status, actorId, decisionReason]
+      [companyId, exceptionId, status, normalizedActorId, normalizedReasonText]
     );
     return res.rows[0];
   }

@@ -833,4 +833,123 @@ describe('Price Variance Exception Unit & Regression Tests', () => {
       /تغيرت بنود أو أسعار فاتورة المورد بعد اعتماد الاستثناء/
     );
   });
+
+  it('separates supersede_reason from decision_reason in repository create() and updateStatus()', async () => {
+    const repo = new PriceVarianceExceptionRepository();
+    const queries: Array<{ sql: string; params: any[] }> = [];
+    const mockTx = {
+      query: vi.fn(async (sql: string, params: any[]) => {
+        queries.push({ sql, params });
+        return {
+          rows: [
+            {
+              id: 'exc-1',
+              companyId: 'comp-1',
+              invoiceId: 'inv-1',
+              supplierId: 'sup-1',
+              status: 'superseded',
+              requestedBy: 'user-req',
+              approvedBy: 'user-app',
+              rejectedBy: null,
+              supersededBy: 'user-req',
+              reason: 'Original reason',
+              decisionReason: 'Approved earlier',
+              supersedeReason: 'تم استبدال الطلب بطلب استثناء جديد',
+              fingerprint: 'fp-1',
+              snapshot: {},
+              maxVariancePc: 12,
+              createdAt: '2026-11-20T00:00:00Z',
+              updatedAt: '2026-11-20T00:00:00Z',
+            },
+          ],
+        };
+      }),
+    };
+
+    // 1. create() supersedes prior rows using supersede_reason ONLY (never decision_reason)
+    await repo.create(
+      'comp-1',
+      {
+        invoiceId: 'inv-1',
+        supplierId: 'sup-1',
+        reason: 'New variance request',
+        fingerprint: 'fp-2',
+        snapshot: {},
+        requestedBy: 'user-req',
+        maxVariancePct: 12,
+      },
+      mockTx as any
+    );
+
+    expect(queries[0].sql).toContain('supersede_reason =');
+    expect(queries[0].sql).not.toContain('decision_reason =');
+    expect(queries[1].sql).toContain('supersede_reason as "supersedeReason"');
+
+    // 2. create() rejects missing requestedBy
+    await expect(
+      repo.create(
+        'comp-1',
+        {
+          invoiceId: 'inv-1',
+          supplierId: 'sup-1',
+          reason: 'Missing actor',
+          fingerprint: 'fp-2',
+          snapshot: {},
+          requestedBy: null,
+        },
+        mockTx as any
+      )
+    ).rejects.toThrow(ValidationError);
+
+    // 3. updateStatus() routes decision_reason for approved/rejected and supersede_reason for superseded
+    queries.length = 0;
+    await repo.updateStatus('comp-1', 'exc-1', 'superseded', 'user-app', 'تغيرت بنود الفاتورة', mockTx as any);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).toContain("WHEN $3::text IN ('approved', 'rejected') THEN COALESCE($5::text, decision_reason)");
+    expect(queries[0].sql).toContain("WHEN $3::text = 'superseded' THEN COALESCE($5::text, supersede_reason)");
+    expect(queries[0].sql).toContain('supersede_reason as "supersedeReason"');
+    expect(queries[0].params).toEqual(['comp-1', 'exc-1', 'superseded', 'user-app', 'تغيرت بنود الفاتورة']);
+
+    // 4. updateStatus() rejects missing actorId or blank supersede reason
+    await expect(repo.updateStatus('comp-1', 'exc-1', 'approved', '', 'Ok', mockTx as any)).rejects.toThrow(ValidationError);
+    await expect(repo.updateStatus('comp-1', 'exc-1', 'superseded', 'user-app', '   ', mockTx as any)).rejects.toThrow(
+      ValidationError
+    );
+  });
+
+  it('blocks InvoiceService.deleteInvoice when price variance exceptions exist or DB raises 23503', async () => {
+    const draftInvoice = {
+      id: 'inv-del-1',
+      companyId: 'comp-1',
+      supplierId: 'sup-1',
+      supplierInvoiceNo: 'SINV-DEL-1',
+      status: 'draft' as const,
+      invoiceDate: '2026-11-20',
+      lines: [],
+    };
+
+    const deleteDraftSpy = vi.fn(async () => {});
+    const invService = new InvoiceService(
+      {
+        findByIdForUpdate: async () => draftInvoice,
+        deleteDraft: deleteDraftSpy,
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { record: async () => {} } as any
+    );
+
+    vi.spyOn(defaultPriceVarianceExceptionRepository, 'hasAnyForInvoice').mockResolvedValueOnce(true);
+    await expect(invService.deleteInvoice('comp-1', 'inv-del-1', 'user-1')).rejects.toThrow(
+      /لا يمكن حذف فاتورة المورد لوجود سجل طلبات استثناء تباين أسعار مرتبط بها/
+    );
+    expect(deleteDraftSpy).not.toHaveBeenCalled();
+
+    // Concurrent race fallback: hasAnyForInvoice returned false, DB ON DELETE RESTRICT throws 23503
+    vi.spyOn(defaultPriceVarianceExceptionRepository, 'hasAnyForInvoice').mockResolvedValueOnce(false);
+    deleteDraftSpy.mockRejectedValueOnce(Object.assign(new Error('fk restrict'), { code: '23503' }));
+    await expect(invService.deleteInvoice('comp-1', 'inv-del-1', 'user-1')).rejects.toThrow(ValidationError);
+  });
 });

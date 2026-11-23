@@ -38,27 +38,35 @@ async function run() {
       pkgJson?.scripts?.['test:purch-price-exception-1'] === 'tsx scripts/verifyPurchPriceException1.ts'
   );
 
-  // S1: Migration 055 & 056 & table_ownership.json structural checks
+  // S1: Migration 055, 056 & 057 & table_ownership.json structural checks
   const mig055Path = path.join(rootDir, 'database/migrations/055_purch_price_variance_exception.sql');
   const mig056Path = path.join(rootDir, 'database/migrations/056_purch_price_variance_exception_harden.sql');
+  const mig057Path = path.join(rootDir, 'database/migrations/057_purch_price_variance_exception_guards.sql');
   const mig055Exists = fs.existsSync(mig055Path);
   const mig056Exists = fs.existsSync(mig056Path);
+  const mig057Exists = fs.existsSync(mig057Path);
   const mig055 = mig055Exists ? fs.readFileSync(mig055Path, 'utf8') : '';
   const mig056 = mig056Exists ? fs.readFileSync(mig056Path, 'utf8') : '';
+  const mig057 = mig057Exists ? fs.readFileSync(mig057Path, 'utf8') : '';
   const ownershipJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'database/table_ownership.json'), 'utf8'));
   const ownershipArr: Array<{ table: string; scope: string }> = Array.isArray(ownershipJson) ? ownershipJson : [];
   const hasTenantEntry = (tableName: string) =>
     ownershipArr.some((entry) => entry.table === tableName && entry.scope === 'tenant');
 
   await check(
-    'S1: Migration 055 & 056 define purch_price_variance_exceptions with RLS FORCE, TO an_app, composite FKs, trigger guard, zero EXCEPTION WHEN OTHERS & table_ownership',
+    'S1: Migrations 055/056/057 define purch_price_variance_exceptions with RLS FORCE, TO an_app, ON DELETE RESTRICT FKs, BEFORE INSERT OR UPDATE OR DELETE guard, zero EXCEPTION WHEN OTHERS & table_ownership',
     mig055Exists &&
       mig056Exists &&
+      mig057Exists &&
       mig055.includes('purch_price_variance_exceptions') &&
       mig056.includes('TO an_app') &&
-      mig056.includes('fk_purch_price_variance_exceptions_invoice_composite') &&
-      mig056.includes('fn_guard_purch_price_variance_exceptions') &&
+      mig057.includes('supersede_reason') &&
+      mig057.includes('ON DELETE RESTRICT') &&
+      mig057.includes('BEFORE INSERT OR UPDATE OR DELETE') &&
+      mig057.includes('fk_purch_price_variance_exceptions_invoice_composite') &&
+      mig057.includes('fn_guard_purch_price_variance_exceptions') &&
       !/\bEXCEPTION\s+WHEN\s+OTHERS\b/i.test(mig056.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\r\n]*/g, '')) &&
+      !/\bEXCEPTION\s+WHEN\s+OTHERS\b/i.test(mig057.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\r\n]*/g, '')) &&
       hasTenantEntry('purch_price_variance_exceptions')
   );
 
@@ -80,14 +88,17 @@ async function run() {
   const panelSrc = fs.existsSync(panelPath) ? fs.readFileSync(panelPath, 'utf8') : '';
 
   await check(
-    'S3: Unified lock order (invoice then exception), durable supersede (Option A), mandatory actorId, SoD on approve/reject, and findByIdForUpdate loads lines',
+    'S3: Unified lock order (invoice then exception), durable supersede (Option A), supersede_reason separation, mandatory actorId, SoD on approve/reject, invoice delete retention guard, and findByIdForUpdate loads lines',
     repoSrc.includes('computeFingerprint') &&
+      repoSrc.includes('supersede_reason as "supersedeReason"') &&
+      repoSrc.includes('hasAnyForInvoice') &&
       svcSrc.includes('requestedBy') &&
       svcSrc.includes('fingerprintMismatch') &&
       svcSrc.includes('normalizedActorId') &&
       svcSrc.includes('isFingerprintValid') &&
       routesSrc.includes('resolveMutationCompanyId') &&
       invSvcSrc.includes('findActiveApprovedByInvoice') &&
+      invSvcSrc.includes('hasAnyForInvoice') &&
       invRepoSrc.includes('purch_supplier_invoice_lines') &&
       !invRepoSrc.includes('return mapInvoiceHeader(res.rows[0]);')
   );
@@ -339,14 +350,22 @@ async function run() {
       'طلب جديد بعد الاعتماد',
       userR.id
     );
-    const oldApprovedAfterNewReq = await adminClient.query<{ status: string }>(
-      `SELECT status FROM purch_price_variance_exceptions WHERE id = $1;`,
+    const oldApprovedAfterNewReq = await adminClient.query<{
+      status: string;
+      decision_reason: string | null;
+      supersede_reason: string | null;
+      approved_by: string | null;
+    }>(
+      `SELECT status, decision_reason, supersede_reason, approved_by FROM purch_price_variance_exceptions WHERE id = $1;`,
       [firstApproved.id]
     );
     await check(
-      'S7-1: New request after approved cleanly supersedes previous approved exception',
+      'S7-1: New request after approved cleanly supersedes previous approved exception while preserving original approval reason and actor',
       firstApproved.status === 'approved' &&
         oldApprovedAfterNewReq.rows[0]?.status === 'superseded' &&
+        oldApprovedAfterNewReq.rows[0]?.decision_reason === 'اعتماد أول' &&
+        oldApprovedAfterNewReq.rows[0]?.approved_by === userA.id &&
+        Boolean(oldApprovedAfterNewReq.rows[0]?.supersede_reason) &&
         reRequestedExc.status === 'pending'
     );
 
@@ -473,16 +492,23 @@ async function run() {
     }
     await check('S9-1: approveException detects fingerprint mismatch and throws ValidationError', supersedeErrorCaught);
 
-    // In a fresh transaction, verify DB status is durably 'superseded' with actor and reason
-    const freshCheck = await adminClient.query<{ status: string; decision_reason: string; superseded_by: string; superseded_at: any }>(
-      `SELECT status, decision_reason, superseded_by, superseded_at FROM purch_price_variance_exceptions WHERE id = $1;`,
+    // In a fresh transaction, verify DB status is durably 'superseded' with actor, timestamp, and supersede_reason (without polluting decision_reason)
+    const freshCheck = await adminClient.query<{
+      status: string;
+      decision_reason: string | null;
+      supersede_reason: string | null;
+      superseded_by: string;
+      superseded_at: any;
+    }>(
+      `SELECT status, decision_reason, supersede_reason, superseded_by, superseded_at FROM purch_price_variance_exceptions WHERE id = $1;`,
       [exc2.id]
     );
     const exc2DbRow = freshCheck.rows[0];
     await check(
-      'S9-2: Exception is durably persisted as status=superseded in DB with actor and timestamp',
+      'S9-2: Exception is durably persisted as status=superseded in DB with actor, timestamp, and supersede_reason (decision_reason remains NULL)',
       exc2DbRow?.status === 'superseded' &&
-        Boolean(exc2DbRow?.decision_reason) &&
+        Boolean(exc2DbRow?.supersede_reason) &&
+        exc2DbRow?.decision_reason === null &&
         exc2DbRow?.superseded_by === userA.id &&
         Boolean(exc2DbRow?.superseded_at)
     );
