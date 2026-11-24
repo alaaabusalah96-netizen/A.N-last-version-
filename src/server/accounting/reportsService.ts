@@ -106,7 +106,7 @@ export class ReportsService {
          FROM journal_lines l
          INNER JOIN journal_entries e ON e.id = l.entry_id AND e.company_id = l.company_id
          WHERE l.company_id = $1 AND l.account_id = $2 AND e.status = 'posted'
-           AND ($3::date IS NULL OR e.entry_date < $3::date)`,
+           AND e.entry_date < $3::date`,
         [companyId, accountId, fromDate]
       );
       const openingUnits = signedAmount(

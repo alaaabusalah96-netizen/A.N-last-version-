@@ -154,6 +154,7 @@ const scripts = [
   'scripts/verifyGrnIntegrity1.ts',
   'scripts/verifyConfigHardening1.ts',
   'scripts/verifyFinancialReports1.ts',
+  'scripts/verifyFinancialReportsLive1.ts',
   'scripts/verifyConfigUi1.ts',
   'scripts/verifyConfigGrnFormAndResolve1.ts',
   'scripts/verifyConfigGrnAccountIntegrity2.ts',
@@ -202,6 +203,7 @@ const scripts = [
   'scripts/verifyStockMovementSign1.ts',
   'scripts/verifyPurch3WayPostGate1.ts',
   'scripts/verifyValuation7b1.ts',
+  'scripts/verifyValuationNumericMatrix1.ts',
   'scripts/verifyPurchPriceException1.ts',
   'scripts/verifyPurchPriceExceptionDbGuards1.ts',
 ];
