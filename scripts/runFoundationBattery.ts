@@ -206,6 +206,7 @@ const scripts = [
   'scripts/verifyValuationNumericMatrix1.ts',
   'scripts/verifyPurchPriceException1.ts',
   'scripts/verifyPurchPriceExceptionDbGuards1.ts',
+  'scripts/verifyEndpointPermissionMatrix.ts',
 ];
 
 export interface BatteryItemReport {
