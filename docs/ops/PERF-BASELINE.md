@@ -107,3 +107,23 @@ All measurement outputs land in `.test-reports/perf/` (gitignored):
 `EXPLAIN` observation flags (reported as observations only, never auto-fixed):
 1. `EST_VS_ACTUAL_DIVERGENCE_GT_10X` — Plan node with `Actual Loops > 0` whose estimated vs actual row ratio exceeds `10x`.
 2. `SEQ_SCAN_OVER_10K` — `Seq Scan` node on a relation whose estimated/actual row count exceeds `10,000` rows.
+
+---
+
+## المستهدفات المعتمدة (قرار المالك بتفويضه، 2026-11-25)
+
+### مستويات الحجم (قيود مرحّلة سنويًا / مستخدمون متزامنون)
+| المستوى | القيود السنوية | المتزامنون |
+| --- | ---: | ---: |
+| صغير | حتى 25K | 2 |
+| متوسط | حتى 250K | 10 |
+| كبير | حتى 2M | 50 |
+| كبير جدًا | أكثر من 2M | 200 (مراجعة معمارية إضافية) |
+
+### مستهدفات زمن الاستجابة (من جهة الخادم، عند حجم كل مستوى)
+- مسارات الترحيل/الكتابة: p50 ≤ 300ms، p95 ≤ 1000ms
+- التقارير/القراءة القياسية: p50 ≤ 200ms، p95 ≤ 500ms
+- التقارير الثقيلة (ميزان مراجعة سنة كاملة، أعمار الذمم): p95 ≤ 2000ms
+- معدل الأخطاء < 0.1%
+
+**قياس 2026-11-25 يحققها بهامش** عند حجم يمثل الصغير/المتوسط: 2822 معاملة، 0 فشل، TPS 46.9، p95 كتابة 528ms، تقارير ~230ms (تفاصيله في `.test-reports/perf/baseline-report.json` وقت التشغيل).

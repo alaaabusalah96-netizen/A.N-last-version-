@@ -28,6 +28,7 @@ export async function runRestore(options: {
   targetDatabaseUrl?: string;
   confirmRestore?: boolean;
   confirmProductionRestore?: boolean;
+  confirmNonEmptyTarget?: boolean;
 }): Promise<RestoreVerifyResult> {
   if (!options.confirmRestore) {
     throw new Error('Refusing destructive restore without --confirm-restore flag.');
@@ -65,7 +66,29 @@ export async function runRestore(options: {
     throw new Error(`Pre-restore checksum verification failed: ${verification.reason}`);
   }
 
-  console.log(`[restoreDb] SHA-256 verified (${manifest.sha256}). Restoring to ${sanitizeConnectionUrl(targetUrl)}...`);
+  console.log(`[restoreDb] SHA-256 verified (${manifest.sha256}). Checking target emptiness...`);
+
+  // Non-empty target guard: never overwrite a database that already holds tables
+  // unless the operator explicitly confirms twice.
+  if (!options.confirmNonEmptyTarget) {
+    const guardPool = new pg.Pool({ connectionString: targetUrl });
+    try {
+      const tablesRes = await guardPool.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r'`
+      );
+      if (Number(tablesRes.rows[0]?.cnt || 0) > 0) {
+        throw new Error(
+          'Target database is not empty; refusing restore. Pass --confirm-non-empty-target to overwrite it deliberately.'
+        );
+      }
+    } finally {
+      await guardPool.end();
+    }
+  }
+
 
   execFileSync(
     'pg_restore',
@@ -123,9 +146,10 @@ if (isDirectCli) {
   const targetEnv = getArgValue(args, '--target-env');
   const confirmRestore = args.includes('--confirm-restore');
   const confirmProductionRestore = args.includes('--confirm-production-restore');
+  const confirmNonEmptyTarget = args.includes('--confirm-non-empty-target');
 
   if (!manifestPath) {
-    console.error('Usage: tsx scripts/ops/restoreDb.ts --manifest <path.manifest.json> --confirm-restore [--confirm-production-restore]');
+    console.error('Usage: tsx scripts/ops/restoreDb.ts --manifest <path.manifest.json> --confirm-restore [--confirm-production-restore] [--confirm-non-empty-target]');
     process.exit(1);
   }
 
@@ -134,6 +158,7 @@ if (isDirectCli) {
     targetDatabaseUrl: targetEnv ? process.env[targetEnv] : undefined,
     confirmRestore,
     confirmProductionRestore,
+    confirmNonEmptyTarget,
   }).catch((err) => {
     console.error('[restoreDb] FAILED:', redactLogText(err instanceof Error ? err.message : String(err)));
     process.exit(1);

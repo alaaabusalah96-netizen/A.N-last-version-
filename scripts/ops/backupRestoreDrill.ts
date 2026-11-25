@@ -110,8 +110,97 @@ export async function runDisposableDrill(): Promise<void> {
       await dstPool.end();
     }
 
+    // 6) Deeper source-vs-target equality: row counts, FK orphans, read-only smoke
+    const eqSrcPool = new pg.Pool({ connectionString: srcUrl });
+    const eqDstPool = new pg.Pool({ connectionString: dstUrl });
+    try {
+      for (const t of ['companies', 'accounts', 'journal_entries', 'journal_lines', 'schema_migrations']) {
+        const srcCnt = await eqSrcPool.query<{ cnt: string }>(`SELECT COUNT(*)::text AS cnt FROM ${t}`);
+        const dstCnt = await eqDstPool.query<{ cnt: string }>(`SELECT COUNT(*)::text AS cnt FROM ${t}`);
+        if (srcCnt.rows[0]?.cnt !== dstCnt.rows[0]?.cnt) {
+          throw new Error(`Row count mismatch on ${t}: source=${srcCnt.rows[0]?.cnt} restored=${dstCnt.rows[0]?.cnt}`);
+        }
+      }
+      console.log('[PASS] Row counts match between source and restored target');
+
+      const orphans = await eqDstPool.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt FROM journal_lines jl LEFT JOIN journal_entries je ON jl.entry_id = je.id WHERE je.id IS NULL`
+      );
+      if (orphans.rows[0]?.cnt !== '0') {
+        throw new Error(`FK integrity failed on restored target: ${orphans.rows[0]?.cnt} orphan journal_lines`);
+      }
+      console.log('[PASS] FK integrity verified on restored target (0 orphan journal_lines)');
+
+      const tbSql = `SELECT account_id, SUM(debit)::text AS d, SUM(credit)::text AS c FROM journal_lines GROUP BY account_id ORDER BY account_id`;
+      const tbSrc = await eqSrcPool.query(tbSql);
+      const tbDst = await eqDstPool.query(tbSql);
+      if (JSON.stringify(tbSrc.rows) !== JSON.stringify(tbDst.rows)) {
+        throw new Error('Read-only smoke failed: trial-balance aggregation differs between source and restored target');
+      }
+      console.log('[PASS] Read-only smoke on restored target matches source (trial-balance aggregation)');
+    } finally {
+      await eqSrcPool.end();
+      await eqDstPool.end();
+    }
+
+    // 7) Corrupt-dump route test: tampered payload must be rejected before touching the target
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { backupFile: string };
+    const corruptDir = path.join(workDir, 'corrupt');
+    fs.mkdirSync(corruptDir, { recursive: true });
+    const corruptManifestPath = path.join(corruptDir, path.basename(manifestPath));
+    fs.copyFileSync(manifestPath, corruptManifestPath);
+    const corruptDumpPath = path.join(corruptDir, manifest.backupFile);
+    fs.copyFileSync(path.join(path.dirname(manifestPath), manifest.backupFile), corruptDumpPath);
+    const fd = fs.openSync(corruptDumpPath, 'r+');
+    fs.writeSync(fd, Buffer.from([0xde, 0xad]), 0, 2, 100);
+    fs.closeSync(fd);
+    let corruptRejected = false;
+    try {
+      await runRestore({ manifestPath: corruptManifestPath, targetDatabaseUrl: dstUrl, confirmRestore: true, confirmNonEmptyTarget: true });
+    } catch (e) {
+      corruptRejected = /SHA-256|checksum/i.test(e instanceof Error ? e.message : String(e));
+    }
+    if (!corruptRejected) {
+      throw new Error('runRestore did not reject the tampered backup payload with a checksum error');
+    }
+    const intactCheck = await (async () => {
+      const pool = new pg.Pool({ connectionString: dstUrl });
+      try {
+        return await pool.query<{ cnt: string }>('SELECT COUNT(*)::text AS cnt FROM companies WHERE code = $1', [`DRILL_${stamp}`]);
+      } finally {
+        await pool.end();
+      }
+    })();
+    if (intactCheck.rows[0]?.cnt !== '1') {
+      throw new Error('Restored target was modified by the rejected corrupt-dump restore attempt');
+    }
+    console.log('[PASS] Corrupt dump rejected by restore route before touching target');
+
+    // 8) Wrong-target safety: restore into a non-empty database must be refused without double confirmation
+    let wrongTargetRejected = false;
+    try {
+      await runRestore({ manifestPath, targetDatabaseUrl: srcUrl, confirmRestore: true });
+    } catch (e) {
+      wrongTargetRejected = /not empty/i.test(e instanceof Error ? e.message : String(e));
+    }
+    if (!wrongTargetRejected) {
+      throw new Error('runRestore did not refuse a non-empty target without --confirm-non-empty-target');
+    }
+    const srcIntact = await (async () => {
+      const pool = new pg.Pool({ connectionString: srcUrl });
+      try {
+        return await pool.query<{ cnt: string }>('SELECT COUNT(*)::text AS cnt FROM companies WHERE code = $1', [`DRILL_${stamp}`]);
+      } finally {
+        await pool.end();
+      }
+    })();
+    if (srcIntact.rows[0]?.cnt !== '1') {
+      throw new Error('Source database was modified by the refused wrong-target restore attempt');
+    }
+    console.log('[PASS] Wrong-target (non-empty) restore refused; source database untouched');
+
     console.log(
-      `[PASS] Backup->Restore disposable drill succeeded (migrations=${verify.schemaMigrationsCount}, rlsTables=${verify.rlsVerifiedTables})`
+      `[PASS] Backup->Restore disposable drill succeeded (migrations=${verify.schemaMigrationsCount}, rlsTables=${verify.rlsVerifiedTables}, corruptDumpRejected=1, wrongTargetRejected=1)`
     );
   } finally {
     if (origMigUrl !== undefined) {

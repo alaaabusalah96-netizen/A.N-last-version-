@@ -118,6 +118,16 @@ async function run() {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // 6) restoreDb carries the non-empty-target safety guard
+  {
+    const restoreSrc = fs.readFileSync(path.join(rootDir, 'scripts/ops/restoreDb.ts'), 'utf8');
+    check(
+      'S6',
+      restoreSrc.includes('confirmNonEmptyTarget') && /not empty/i.test(restoreSrc),
+      'restoreDb refuses non-empty restore target without --confirm-non-empty-target'
+    );
+  }
+
   if (failed > 0) {
     console.log(`\nSummary -> Passed: ${passed} | Failed: ${failed}`);
     process.exit(1);
