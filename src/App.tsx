@@ -1,21 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { RefreshCw, Menu } from 'lucide-react';
 import { LoginForm } from './components/LoginForm.js';
-import { CompaniesPanel } from './components/CompaniesPanel.js';
-import { AccountingWorkspace } from './components/accounting/AccountingWorkspace.js';
-import { InventoryWorkspace } from './components/inventory/InventoryWorkspace.js';
-import { PurchasingWorkspace } from './components/purchasing/PurchasingWorkspace.js';
-import { SalesWorkspace } from './components/sales/SalesWorkspace.js';
-import { CashCustodyWorkspace } from './components/cash/CashCustodyWorkspace.js';
-import { UsersAdminWorkspace } from './components/users/UsersAdminWorkspace.js';
-import { CompanySettingsPanel } from './components/companies/CompanySettingsPanel.js';
-import { OrgUnitsPanel } from './components/org/OrgUnitsPanel.js';
-import { ConfigPlatformPanel } from './components/config/ConfigPlatformPanel.js';
-import { ConfigDefinitionsPanel } from './components/config/ConfigDefinitionsPanel.js';
-import { RolesPanel } from './components/rbac/RolesPanel.js';
-import { CustomFieldsPanel } from './components/customization/CustomFieldsPanel.js';
 import { AppSidebar } from './components/shell/AppSidebar.js';
+import { LoadingState } from './components/ui/LoadingState.js';
+import { WorkspaceErrorBoundary } from './components/WorkspaceErrorBoundary.js';
 import { apiFetch } from './lib/apiClient.js';
+
+const CompaniesPanel = lazy(() =>
+  import('./components/CompaniesPanel.js').then((m) => ({ default: m.CompaniesPanel }))
+);
+const AccountingWorkspace = lazy(() =>
+  import('./components/accounting/AccountingWorkspace.js').then((m) => ({
+    default: m.AccountingWorkspace,
+  }))
+);
+const InventoryWorkspace = lazy(() =>
+  import('./components/inventory/InventoryWorkspace.js').then((m) => ({
+    default: m.InventoryWorkspace,
+  }))
+);
+const PurchasingWorkspace = lazy(() =>
+  import('./components/purchasing/PurchasingWorkspace.js').then((m) => ({
+    default: m.PurchasingWorkspace,
+  }))
+);
+const SalesWorkspace = lazy(() =>
+  import('./components/sales/SalesWorkspace.js').then((m) => ({ default: m.SalesWorkspace }))
+);
+const CashCustodyWorkspace = lazy(() =>
+  import('./components/cash/CashCustodyWorkspace.js').then((m) => ({
+    default: m.CashCustodyWorkspace,
+  }))
+);
+const UsersAdminWorkspace = lazy(() =>
+  import('./components/users/UsersAdminWorkspace.js').then((m) => ({
+    default: m.UsersAdminWorkspace,
+  }))
+);
+const CompanySettingsPanel = lazy(() =>
+  import('./components/companies/CompanySettingsPanel.js').then((m) => ({
+    default: m.CompanySettingsPanel,
+  }))
+);
+const OrgUnitsPanel = lazy(() =>
+  import('./components/org/OrgUnitsPanel.js').then((m) => ({ default: m.OrgUnitsPanel }))
+);
+const ConfigPlatformPanel = lazy(() =>
+  import('./components/config/ConfigPlatformPanel.js').then((m) => ({
+    default: m.ConfigPlatformPanel,
+  }))
+);
+const ConfigDefinitionsPanel = lazy(() =>
+  import('./components/config/ConfigDefinitionsPanel.js').then((m) => ({
+    default: m.ConfigDefinitionsPanel,
+  }))
+);
+const RolesPanel = lazy(() =>
+  import('./components/rbac/RolesPanel.js').then((m) => ({ default: m.RolesPanel }))
+);
+const CustomFieldsPanel = lazy(() =>
+  import('./components/customization/CustomFieldsPanel.js').then((m) => ({
+    default: m.CustomFieldsPanel,
+  }))
+);
 
 interface AuthUser {
   id: string;
@@ -205,33 +252,45 @@ export default function App() {
           </div>
         </div>
 
-        {activeNav === 'companies' ? (
-          <CompaniesPanel userRole={currentUser.role} />
-        ) : activeNav === 'accounting' ? (
-          <AccountingWorkspace userRole={currentUser.role} />
-        ) : activeNav === 'inventory' ? (
-          <InventoryWorkspace userRole={currentUser.role} />
-        ) : activeNav === 'purchasing' ? (
-          <PurchasingWorkspace userRole={currentUser.role} />
-        ) : activeNav === 'sales' ? (
-          <SalesWorkspace userRole={currentUser.role} />
-        ) : activeNav === 'cash' ? (
-          <CashCustodyWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
-        ) : activeNav === 'users' ? (
-          <UsersAdminWorkspace />
-        ) : activeNav === 'roles' ? (
-          <RolesPanel userRole={currentUser.role} />
-        ) : activeNav === 'org_units' ? (
-          <OrgUnitsPanel userRole={currentUser.role} />
-        ) : activeNav === 'config_platform' ? (
-          <ConfigPlatformPanel userRole={currentUser.role} />
-        ) : activeNav === 'config_definitions' ? (
-          <ConfigDefinitionsPanel userRole={currentUser.role} />
-        ) : activeNav === 'custom_fields' ? (
-          <CustomFieldsPanel />
-        ) : (
-          <CompanySettingsPanel userRole={currentUser.role} />
-        )}
+        <WorkspaceErrorBoundary resetKey={activeNav}>
+          <Suspense
+            fallback={
+              <LoadingState
+                label="جاري التحميل..."
+                rows={0}
+                className="flex-1 min-h-[240px] bg-slate-950"
+              />
+            }
+          >
+            {activeNav === 'companies' ? (
+              <CompaniesPanel userRole={currentUser.role} />
+            ) : activeNav === 'accounting' ? (
+              <AccountingWorkspace userRole={currentUser.role} />
+            ) : activeNav === 'inventory' ? (
+              <InventoryWorkspace userRole={currentUser.role} />
+            ) : activeNav === 'purchasing' ? (
+              <PurchasingWorkspace userRole={currentUser.role} />
+            ) : activeNav === 'sales' ? (
+              <SalesWorkspace userRole={currentUser.role} />
+            ) : activeNav === 'cash' ? (
+              <CashCustodyWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
+            ) : activeNav === 'users' ? (
+              <UsersAdminWorkspace />
+            ) : activeNav === 'roles' ? (
+              <RolesPanel userRole={currentUser.role} />
+            ) : activeNav === 'org_units' ? (
+              <OrgUnitsPanel userRole={currentUser.role} />
+            ) : activeNav === 'config_platform' ? (
+              <ConfigPlatformPanel userRole={currentUser.role} />
+            ) : activeNav === 'config_definitions' ? (
+              <ConfigDefinitionsPanel userRole={currentUser.role} />
+            ) : activeNav === 'custom_fields' ? (
+              <CustomFieldsPanel />
+            ) : (
+              <CompanySettingsPanel userRole={currentUser.role} />
+            )}
+          </Suspense>
+        </WorkspaceErrorBoundary>
       </main>
     </div>
   );
