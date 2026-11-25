@@ -111,7 +111,7 @@ export interface CustodyMovement {
   companyId: string;
   custodyId: string;
   registerId: string;
-  movementType: 'disburse' | 'settle_expense' | 'settle_return' | 'reverse';
+  movementType: 'disburse' | 'topup' | 'settle_expense' | 'settle_return' | 'reverse';
   direction: 'out' | 'in' | 'none';
   amount: number;
   expenseAccountId: string | null;

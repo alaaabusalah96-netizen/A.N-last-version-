@@ -24,7 +24,7 @@ export interface CustodyVoucher {
   custodyId: string;
   voucherSeq: number;
   voucherNo: string;
-  status: 'submitted' | 'approved' | 'rejected';
+  status: 'submitted' | 'approved' | 'rejected' | 'reversed';
   totalAmount: number;
   memo: string | null;
   submittedBy: string;
@@ -33,6 +33,10 @@ export interface CustodyVoucher {
   decidedAt: string | null;
   rejectReason: string | null;
   journalEntryId: string | null;
+  reversedBy: string | null;
+  reversedAt: string | null;
+  reversalReason: string | null;
+  reversalJournalEntryId: string | null;
   lines: CustodyVoucherLine[];
 }
 
@@ -49,7 +53,8 @@ export async function getCustodySettledTotals(
 ): Promise<{ expense: number; cashReturn: number }> {
   const res = await tx.query<{ expense: string; cash_return: string }>(
     `SELECT
-       COALESCE(SUM(amount) FILTER (WHERE movement_type = 'settle_expense'), 0) AS expense,
+       COALESCE(SUM(amount) FILTER (WHERE movement_type = 'settle_expense'), 0)
+         - COALESCE(SUM(amount) FILTER (WHERE movement_type = 'reverse'), 0) AS expense,
        COALESCE(SUM(amount) FILTER (WHERE movement_type = 'settle_return'), 0) AS cash_return
      FROM custody_movements
      WHERE company_id = $1 AND custody_id = $2`,
@@ -90,7 +95,9 @@ const VOUCHER_SELECT = `
   SELECT id, company_id AS "companyId", custody_id AS "custodyId", voucher_seq AS "voucherSeq",
          voucher_no AS "voucherNo", status, total_amount AS "totalAmount", memo,
          submitted_by AS "submittedBy", submitted_at AS "submittedAt", decided_by AS "decidedBy",
-         decided_at AS "decidedAt", reject_reason AS "rejectReason", journal_entry_id AS "journalEntryId"
+         decided_at AS "decidedAt", reject_reason AS "rejectReason", journal_entry_id AS "journalEntryId",
+         reversed_by AS "reversedBy", reversed_at AS "reversedAt", reversal_reason AS "reversalReason",
+         reversal_journal_entry_id AS "reversalJournalEntryId"
   FROM custody_vouchers`;
 
 async function loadLines(companyId: string, voucherId: string, tx: DbExecutor): Promise<CustodyVoucherLine[]> {
@@ -114,6 +121,7 @@ function mapVoucher(row: any, lines: CustodyVoucherLine[]): CustodyVoucher {
     totalAmount: toMoney(Number(row.totalAmount)),
     submittedAt: row.submittedAt instanceof Date ? row.submittedAt.toISOString() : row.submittedAt,
     decidedAt: row.decidedAt instanceof Date ? row.decidedAt.toISOString() : row.decidedAt,
+    reversedAt: row.reversedAt instanceof Date ? row.reversedAt.toISOString() : row.reversedAt,
     lines,
   };
 }
@@ -123,7 +131,7 @@ export class CustodyVoucherService {
     private custodyRepo: CustodyRepository = defaultCustodyRepository,
     private registerRepo: CashRegisterRepository = defaultCashRegisterRepository,
     private accountRepo: AccountRepository = defaultAccountRepository,
-    private journalService: Pick<JournalService, 'createDraftEntry' | 'postEntry'> = defaultJournalService,
+    private journalService: Pick<JournalService, 'createDraftEntry' | 'postEntry' | 'reverseEntry'> = defaultJournalService,
     private auditService: Pick<AuditService, 'record'> = defaultAuditService,
     private glResolver: Pick<CustodyGlResolver, 'resolveAndAssertUsable'> = defaultCustodyGlResolver
   ) {}
@@ -255,6 +263,79 @@ export class CustodyVoucherService {
           entityType: 'custody_vouchers',
           entityId: voucherId,
           metadata: { custodyId: v.custodyId, voucherNo: v.voucherNo },
+        },
+        { executor: tx }
+      );
+      return (await this.loadVoucher(companyId, voucherId, tx))!;
+    });
+  }
+
+  async reverseVoucher(
+    companyId: string,
+    voucherId: string,
+    reason: string,
+    actorId: string,
+    isPlatformAdmin = false
+  ): Promise<CustodyVoucher> {
+    if (!voucherId || !isUuid(voucherId)) throw new ValidationError('معرف الحافظة غير صالح');
+    const why = (reason || '').trim();
+    if (!why) throw new ValidationError('سبب العكس مطلوب');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const probe = await this.loadVoucher(companyId, voucherId, tx);
+      if (!probe) throw new NotFoundError('الحافظة غير موجودة');
+      const custody = await this.custodyRepo.findByIdForUpdate(companyId, probe.custodyId, tx);
+      if (!custody) throw new NotFoundError('العهدة النقدية غير موجودة');
+      const v = (await this.loadVoucher(companyId, voucherId, tx, true))!;
+      if (v.status !== 'approved') throw new ValidationError('لا يمكن عكس إلا حافظة معتمدة');
+      if (custody.status !== 'open') {
+        throw new ValidationError('لا يمكن عكس حافظة بعد تسوية العهدة نهائياً');
+      }
+      const register = await this.registerRepo.findById(companyId, custody.registerId, tx);
+      if (!register) throw new NotFoundError('الصندوق المرتبط بالعهدة غير موجود');
+
+      const reversal = await this.journalService.reverseEntry(
+        companyId,
+        v.journalEntryId!,
+        actorId,
+        `عكس حافظة عهدة ${v.voucherNo}: ${why}`,
+        isPlatformAdmin,
+        tx
+      );
+      for (const l of v.lines) {
+        await this.custodyRepo.insertMovement(
+          companyId,
+          {
+            custodyId: custody.id,
+            registerId: register.id,
+            movementType: 'reverse',
+            direction: 'none',
+            amount: l.amount,
+            expenseAccountId: l.expenseAccountId,
+            journalEntryId: reversal.id,
+            memo: `عكس حافظة ${v.voucherNo}`,
+            createdBy: actorId || null,
+          },
+          tx
+        );
+      }
+      await tx.query(
+        `UPDATE custody_vouchers SET status='reversed', reversed_by=$3, reversed_at=NOW(), reversal_reason=$4,
+           reversal_journal_entry_id=$5, updated_at=NOW() WHERE company_id=$1 AND id=$2`,
+        [companyId, voucherId, actorId, why, reversal.id]
+      );
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'CUSTODY_VOUCHER_REVERSE',
+          entityType: 'custody_vouchers',
+          entityId: voucherId,
+          metadata: {
+            custodyId: custody.id,
+            voucherNo: v.voucherNo,
+            total: v.totalAmount,
+            reversalJournalEntryId: reversal.id,
+          },
         },
         { executor: tx }
       );

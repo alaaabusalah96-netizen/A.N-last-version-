@@ -190,6 +190,11 @@
     "reason": "Per-company custody vouchers (partial settlement documents)"
   },
   {
+    "table": "custody_cash_counts",
+    "scope": "tenant",
+    "reason": "Per-company append-only physical cash counts of open custodies"
+  },
+  {
     "table": "custody_voucher_lines",
     "scope": "tenant",
     "reason": "Per-company custody voucher expense lines"

@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultCashRegisterService } from '../cash/cashRegisterService.js';
 import { defaultCustodyService } from '../cash/custodyService.js';
 import { defaultCustodyVoucherService } from '../cash/custodyVoucherService.js';
+import { defaultCustodyExtrasService } from '../cash/custodyExtrasService.js';
 import { defaultVoucherService } from '../cash/voucherService.js';
 import { CustodyStatus } from '../cash/cashTypes.js';
 import { VoucherStatus } from '../cash/voucherTypes.js';
@@ -366,6 +367,66 @@ cashRoutes.post(
       user.id
     );
     res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/custody-vouchers/:id/reverse',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    const voucher = await defaultCustodyVoucherService.reverseVoucher(
+      companyId,
+      req.params.id,
+      req.body?.reason,
+      user.id,
+      user.role === 'platform_admin'
+    );
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/custodies/:id/topup',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_DISBURSE, companyId);
+    const custody = await defaultCustodyExtrasService.topUpCustody(
+      companyId,
+      req.params.id,
+      req.body || {},
+      user.id,
+      user.role === 'platform_admin'
+    );
+    res.json({ status: 'ok', custody });
+  })
+);
+
+cashRoutes.post(
+  '/custodies/:id/cash-counts',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_SETTLE, companyId);
+    const cashCount = await defaultCustodyExtrasService.recordCashCount(companyId, req.params.id, req.body || {}, user.id);
+    res.status(201).json({ status: 'ok', cashCount });
+  })
+);
+
+cashRoutes.get(
+  '/custodies/:id/statement',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const statement = await defaultCustodyExtrasService.getStatement(companyId, req.params.id);
+    res.json({ status: 'ok', statement });
   })
 );
 

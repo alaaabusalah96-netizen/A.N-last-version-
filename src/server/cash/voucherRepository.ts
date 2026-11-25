@@ -50,6 +50,7 @@ function mapVoucherRow(kind: VoucherKind, row: any): CashVoucher {
 
 const MOVEMENT_LABELS_AR: Record<string, string> = {
   disburse: 'صرف عهدة',
+  topup: 'تعزيز عهدة',
   settle_expense: 'تسوية مصروف عهدة',
   settle_return: 'مرتجع نقدي من عهدة',
   reverse: 'عكس حركة عهدة',

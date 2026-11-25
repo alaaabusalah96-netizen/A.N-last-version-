@@ -88,7 +88,7 @@ interface CustodyMovement {
   id: string;
   custodyId: string;
   registerId: string;
-  movementType: 'disburse' | 'settle_expense' | 'settle_return' | 'reverse';
+  movementType: 'disburse' | 'topup' | 'settle_expense' | 'settle_return' | 'reverse';
   direction: 'out' | 'in' | 'none';
   amount: number;
   expenseAccountId: string | null;
@@ -233,6 +233,7 @@ const CUSTODY_STATUS_STYLES: Record<CustodyStatus, string> = {
 
 const MOVEMENT_TYPE_LABELS: Record<CustodyMovement['movementType'], string> = {
   disburse: 'صرف عهدة',
+  topup: 'تعزيز عهدة',
   settle_expense: 'تسوية مصروف',
   settle_return: 'مرتجع نقدي',
   reverse: 'عكس حركة',

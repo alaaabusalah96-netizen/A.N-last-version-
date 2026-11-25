@@ -84,7 +84,7 @@ export interface EmployeeCustodyMovementRow {
   registerId: string;
   registerCode: string;
   registerNameAr: string;
-  movementType: 'disburse' | 'settle_expense' | 'settle_return' | 'reverse';
+  movementType: 'disburse' | 'topup' | 'settle_expense' | 'settle_return' | 'reverse';
   movementLabelAr: string;
   direction: 'out' | 'in' | 'none';
   amount: number;

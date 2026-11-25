@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 215
+- **Total Mounted Endpoints**: 219
 - **Mounted Route Modules Parsed**: 16
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 207
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 211
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -57,15 +57,19 @@
 | `/api/cash` | `GET` | `/api/cash/custodies/:id` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/approve` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/cancel` | `true` | `PERMISSIONS.CUSTODY_APPROVE, PERMISSIONS.CUSTODY_REQUEST` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `POST` | `/api/cash/custodies/:id/cash-counts` | `true` | `PERMISSIONS.CUSTODY_SETTLE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/disburse` | `true` | `PERMISSIONS.CUSTODY_DISBURSE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/:id/movements` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/reject` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/settle` | `true` | `PERMISSIONS.CUSTODY_SETTLE` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/custodies/:id/statement` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `POST` | `/api/cash/custodies/:id/topup` | `true` | `PERMISSIONS.CUSTODY_DISBURSE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/:id/vouchers` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/vouchers` | `true` | `PERMISSIONS.CUSTODY_REQUEST` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/employees` | `true` | `PERMISSIONS.CUSTODY_REQUEST` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/approve` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/reject` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/reverse` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/payment-vouchers` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/payment-vouchers` | `true` | `PERMISSIONS.CASH_WRITE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/payment-vouchers/:id` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
