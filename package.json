@@ -165,7 +165,8 @@
     "migration": "tsx scripts/migrate.ts",
     "test:unit": "vitest run",
     "test:discovery": "vitest list --filesOnly",
-    "test:e2e-smoke": "playwright test"
+    "test:e2e-smoke": "playwright test",
+    "test:endpoint-matrix": "tsx scripts/verifyEndpointPermissionMatrix.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
