@@ -190,6 +190,16 @@
     "reason": "Per-company custody vouchers (partial settlement documents)"
   },
   {
+    "table": "custody_shortage_claims",
+    "scope": "tenant",
+    "reason": "Per-company append-only claims owed by an employee after a custody cash count shortage"
+  },
+  {
+    "table": "custody_shortage_repayments",
+    "scope": "tenant",
+    "reason": "Per-company append-only employee repayments against custody shortage claims"
+  },
+  {
     "table": "custody_cash_counts",
     "scope": "tenant",
     "reason": "Per-company append-only physical cash counts of open custodies"

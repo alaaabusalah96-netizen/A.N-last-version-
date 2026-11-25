@@ -54,6 +54,7 @@ const MOVEMENT_LABELS_AR: Record<string, string> = {
   settle_expense: 'تسوية مصروف عهدة',
   settle_return: 'مرتجع نقدي من عهدة',
   reverse: 'عكس حركة عهدة',
+  shortage_repay: 'سداد عجز عهدة',
 };
 
 export class VoucherRepository {
@@ -343,12 +344,16 @@ export class VoucherRepository {
             cm.id,
             CASE cm.movement_type
               WHEN 'disburse' THEN 'custody_disburse'
+              WHEN 'topup' THEN 'custody_disburse'
               WHEN 'settle_return' THEN 'custody_return'
+              WHEN 'shortage_repay' THEN 'custody_return'
               ELSE 'custody_reverse'
             END as source_type,
             CASE cm.movement_type
               WHEN 'disburse' THEN 'صرف عهدة'
+              WHEN 'topup' THEN 'تعزيز عهدة'
               WHEN 'settle_return' THEN 'مرتجع عهدة'
+              WHEN 'shortage_repay' THEN 'سداد عجز عهدة'
               ELSE 'عكس عهدة'
             END as movement_label_ar,
             (cm.created_at AT TIME ZONE 'UTC')::date as movement_date,

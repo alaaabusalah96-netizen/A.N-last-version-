@@ -23,6 +23,29 @@ export interface CustodyCashCount {
   countedAt: string;
 }
 
+export interface ShortageRepayment {
+  id: string;
+  amount: number;
+  journalEntryId: string;
+  memo: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface CustodyShortageClaim {
+  id: string;
+  custodyId: string;
+  cashCountId: string;
+  amount: number;
+  repaid: number;
+  outstanding: number;
+  status: 'open' | 'partly_repaid' | 'repaid';
+  memo: string | null;
+  createdBy: string;
+  createdAt: string;
+  repayments: ShortageRepayment[];
+}
+
 export interface CustodyStatement {
   custody: CustodyRecord;
   totals: {
@@ -37,6 +60,7 @@ export interface CustodyStatement {
   movements: CustodyMovement[];
   vouchers: CustodyVoucher[];
   cashCounts: CustodyCashCount[];
+  shortageClaims: CustodyShortageClaim[];
 }
 
 function parseMoney(value: unknown, label: string, allowZero = false): number {
@@ -188,6 +212,186 @@ export class CustodyExtrasService {
     });
   }
 
+  /**
+   * Turns a count shortage into a claim owed by the employee. Nothing is posted:
+   * the custody receivable already shows the employee owes the cash.
+   */
+  async createShortageClaim(
+    companyId: string,
+    custodyId: string,
+    countId: string,
+    input: { memo?: string | null },
+    actorId: string
+  ): Promise<CustodyShortageClaim> {
+    if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
+    if (!custodyId || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
+    if (!countId || !isUuid(countId)) throw new ValidationError('معرف الجرد غير صالح');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const custody = await this.custodyRepo.findByIdForUpdate(companyId, custodyId, tx);
+      if (!custody) throw new NotFoundError('العهدة النقدية غير موجودة');
+      if (custody.status !== 'open') throw new ValidationError('مطالبة العجز متاحة للعهدة المفتوحة فقط');
+      const cnt = await tx.query<{ variance: string }>(
+        `SELECT variance FROM custody_cash_counts WHERE company_id = $1 AND custody_id = $2 AND id = $3`,
+        [companyId, custodyId, countId]
+      );
+      if (!cnt.rows[0]) throw new NotFoundError('الجرد غير موجود لهذه العهدة');
+      const variance = toMoney(Number(cnt.rows[0].variance));
+      if (variance >= 0) throw new ValidationError('لا يوجد عجز في هذا الجرد');
+      const dup = await tx.query(`SELECT 1 FROM custody_shortage_claims WHERE company_id = $1 AND cash_count_id = $2`, [
+        companyId,
+        countId,
+      ]);
+      if (dup.rows.length > 0) throw new ValidationError('تم تسجيل مطالبة عجز لهذا الجرد من قبل');
+      const ins = await tx.query<{ id: string }>(
+        `INSERT INTO custody_shortage_claims (company_id, custody_id, cash_count_id, amount, memo, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [companyId, custodyId, countId, toMoney(-variance), input?.memo?.trim() || null, actorId]
+      );
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'CUSTODY_SHORTAGE_CLAIM',
+          entityType: 'custody_records',
+          entityId: custodyId,
+          metadata: { custodyNo: custody.custodyNo, countId, amount: toMoney(-variance) },
+        },
+        { executor: tx }
+      );
+      return (await this.loadClaims(companyId, custodyId, tx)).find((c) => c.id === ins.rows[0].id)!;
+    });
+  }
+
+  /** Employee repays part or all of a shortage in cash: Dr cash / Cr custody receivable. */
+  async repayShortage(
+    companyId: string,
+    claimId: string,
+    input: { amount: unknown; memo?: string | null },
+    actorId: string,
+    isPlatformAdmin = false
+  ): Promise<CustodyShortageClaim> {
+    if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
+    if (!claimId || !isUuid(claimId)) throw new ValidationError('معرف المطالبة غير صالح');
+    const amount = parseMoney(input?.amount, 'مبلغ السداد');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const claimRes = await tx.query<{ custody_id: string }>(
+        `SELECT custody_id FROM custody_shortage_claims WHERE company_id = $1 AND id = $2 FOR UPDATE`,
+        [companyId, claimId]
+      );
+      if (!claimRes.rows[0]) throw new NotFoundError('مطالبة العجز غير موجودة');
+      const custodyId = claimRes.rows[0].custody_id;
+      const custody = await this.custodyRepo.findByIdForUpdate(companyId, custodyId, tx);
+      if (!custody) throw new NotFoundError('العهدة النقدية غير موجودة');
+      if (custody.status !== 'open') throw new ValidationError('السداد متاح للعهدة المفتوحة فقط');
+      const claim = (await this.loadClaims(companyId, custodyId, tx)).find((c) => c.id === claimId)!;
+      if (amount > claim.outstanding) {
+        throw new ValidationError(`مبلغ السداد (${amount.toFixed(2)}) أكبر من المتبقي على المطالبة (${claim.outstanding.toFixed(2)})`);
+      }
+      const register = await this.registerRepo.lockForUpdate(companyId, custody.registerId, tx);
+      if (!register) throw new NotFoundError('الصندوق المرتبط بالعهدة غير موجود');
+      if (!register.isActive) throw new ValidationError(`الصندوق (${register.nameAr}) معطّل`);
+      const gl = await this.glResolver.resolveAndAssertUsable(companyId, tx);
+      if (gl.custodyReceivableAccountId === register.glAccountId) {
+        throw new ValidationError('حساب ذمة العهد يطابق حساب النقدية المرتبط بالصندوق');
+      }
+      const entryDate = await resolveCompanyToday(companyId, tx);
+      const docRef = custody.custodyNo || custodyId;
+      const draft = await this.journalService.createDraftEntry(
+        companyId,
+        {
+          entryDate,
+          memo: `سداد عجز عهدة رقم ${docRef}`,
+          lines: [
+            { accountId: register.glAccountId, debit: amount, credit: 0, lineMemo: `سداد عجز عهدة ${docRef} إلى صندوق ${register.code}` },
+            { accountId: gl.custodyReceivableAccountId, debit: 0, credit: amount, lineMemo: `سداد عجز عهدة ${docRef} - ذمة عهد الموظفين` },
+          ],
+        },
+        actorId,
+        isPlatformAdmin,
+        tx
+      );
+      const posted = await this.journalService.postEntry(companyId, draft.id, actorId, isPlatformAdmin, tx);
+      await this.custodyRepo.insertMovement(
+        companyId,
+        {
+          custodyId,
+          registerId: register.id,
+          movementType: 'shortage_repay',
+          direction: 'in',
+          amount,
+          expenseAccountId: null,
+          journalEntryId: posted.id,
+          memo: input?.memo?.trim() || `سداد عجز عهدة رقم ${docRef}`,
+          createdBy: actorId || null,
+        },
+        tx
+      );
+      await tx.query(
+        `INSERT INTO custody_shortage_repayments (company_id, claim_id, amount, journal_entry_id, memo, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [companyId, claimId, amount, posted.id, input?.memo?.trim() || null, actorId]
+      );
+      await this.auditService.record(
+        {
+          actorUserId: actorId || null,
+          companyId,
+          action: 'CUSTODY_SHORTAGE_REPAY',
+          entityType: 'custody_records',
+          entityId: custodyId,
+          metadata: { custodyNo: custody.custodyNo, claimId, amount, journalEntryId: posted.id },
+        },
+        { executor: tx }
+      );
+      return (await this.loadClaims(companyId, custodyId, tx)).find((c) => c.id === claimId)!;
+    });
+  }
+
+  private async loadClaims(companyId: string, custodyId: string, tx: DbExecutor): Promise<CustodyShortageClaim[]> {
+    const claims = await tx.query<any>(
+      `SELECT id, custody_id AS "custodyId", cash_count_id AS "cashCountId", amount, memo,
+              created_by AS "createdBy", created_at AS "createdAt"
+       FROM custody_shortage_claims WHERE company_id = $1 AND custody_id = $2 ORDER BY created_at, id`,
+      [companyId, custodyId]
+    );
+    const reps = await tx.query<any>(
+      `SELECT r.id, r.claim_id AS "claimId", r.amount, r.journal_entry_id AS "journalEntryId", r.memo,
+              r.created_by AS "createdBy", r.created_at AS "createdAt"
+       FROM custody_shortage_repayments r
+       JOIN custody_shortage_claims c ON c.id = r.claim_id AND c.company_id = r.company_id
+       WHERE r.company_id = $1 AND c.custody_id = $2 ORDER BY r.created_at, r.id`,
+      [companyId, custodyId]
+    );
+    const iso = (d: any) => (d instanceof Date ? d.toISOString() : d);
+    return claims.rows.map((c: any) => {
+      const repayments: ShortageRepayment[] = reps.rows
+        .filter((r: any) => r.claimId === c.id)
+        .map((r: any) => ({
+          id: r.id,
+          amount: toMoney(Number(r.amount)),
+          journalEntryId: r.journalEntryId,
+          memo: r.memo,
+          createdBy: r.createdBy,
+          createdAt: iso(r.createdAt),
+        }));
+      const amount = toMoney(Number(c.amount));
+      const repaid = toMoney(repayments.reduce((s, r) => s + r.amount, 0));
+      const outstanding = toMoney(amount - repaid);
+      return {
+        id: c.id,
+        custodyId: c.custodyId,
+        cashCountId: c.cashCountId,
+        amount,
+        repaid,
+        outstanding,
+        status: outstanding <= 0 ? 'repaid' : repaid > 0 ? 'partly_repaid' : 'open',
+        memo: c.memo,
+        createdBy: c.createdBy,
+        createdAt: iso(c.createdAt),
+        repayments,
+      } as CustodyShortageClaim;
+    });
+  }
+
   async getStatement(companyId: string, custodyId: string): Promise<CustodyStatement> {
     if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
     if (!custodyId || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
@@ -200,7 +404,7 @@ export class CustodyExtrasService {
         toMoney(movements.filter((m) => m.movementType === type).reduce((s, m) => s + m.amount, 0));
       const approved = sum('settle_expense');
       const reversed = sum('reverse');
-      const cashReturned = sum('settle_return');
+      const cashReturned = toMoney(sum('settle_return') + sum('shortage_repay'));
       const topUps = sum('topup');
       const countsRes = await tx.query<any>(
         `SELECT id, custody_id AS "custodyId", counted_amount AS "countedAmount", expected_amount AS "expectedAmount",
@@ -222,6 +426,7 @@ export class CustodyExtrasService {
         movements,
         vouchers,
         cashCounts: countsRes.rows.map(mapCount),
+        shortageClaims: await this.loadClaims(companyId, custodyId, tx),
       };
     });
   }

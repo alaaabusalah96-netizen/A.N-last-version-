@@ -55,7 +55,7 @@ export async function getCustodySettledTotals(
     `SELECT
        COALESCE(SUM(amount) FILTER (WHERE movement_type = 'settle_expense'), 0)
          - COALESCE(SUM(amount) FILTER (WHERE movement_type = 'reverse'), 0) AS expense,
-       COALESCE(SUM(amount) FILTER (WHERE movement_type = 'settle_return'), 0) AS cash_return
+       COALESCE(SUM(amount) FILTER (WHERE movement_type IN ('settle_return','shortage_repay')), 0) AS cash_return
      FROM custody_movements
      WHERE company_id = $1 AND custody_id = $2`,
     [companyId, custodyId]

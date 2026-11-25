@@ -487,7 +487,7 @@ export class CustodyRepository {
     movement: {
       custodyId: string;
       registerId: string;
-      movementType: 'disburse' | 'topup' | 'settle_expense' | 'settle_return' | 'reverse';
+      movementType: 'disburse' | 'topup' | 'settle_expense' | 'settle_return' | 'reverse' | 'shortage_repay';
       direction: 'out' | 'in' | 'none';
       amount: number;
       expenseAccountId: string | null;

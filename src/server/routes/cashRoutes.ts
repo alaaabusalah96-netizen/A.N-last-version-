@@ -418,6 +418,42 @@ cashRoutes.post(
   })
 );
 
+cashRoutes.post(
+  '/custodies/:id/cash-counts/:countId/shortage-claim',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_SETTLE, companyId);
+    const claim = await defaultCustodyExtrasService.createShortageClaim(
+      companyId,
+      req.params.id,
+      req.params.countId,
+      req.body || {},
+      user.id
+    );
+    res.status(201).json({ status: 'ok', claim });
+  })
+);
+
+cashRoutes.post(
+  '/custody-shortage-claims/:id/repay',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_SETTLE, companyId);
+    const claim = await defaultCustodyExtrasService.repayShortage(
+      companyId,
+      req.params.id,
+      req.body || {},
+      user.id,
+      user.role === 'platform_admin'
+    );
+    res.json({ status: 'ok', claim });
+  })
+);
+
 cashRoutes.get(
   '/custodies/:id/statement',
   requireAuth,
