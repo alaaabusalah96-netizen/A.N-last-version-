@@ -218,6 +218,7 @@ jobs:
         with:
           name: foundation-test-results
           path: .test-reports/
+          include-hidden-files: true
           retention-days: 7
 
   promote-last-green:
