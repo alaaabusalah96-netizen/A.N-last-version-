@@ -49,7 +49,7 @@ interface ClaimView {
   amount: number;
   repaid: number;
   outstanding: number;
-  status: 'open' | 'partly_repaid' | 'repaid';
+  status: 'open' | 'partly_repaid' | 'repaid' | 'settled';
   repayments: RepaymentView[];
 }
 
@@ -88,6 +88,7 @@ const CLAIM_STATUS_AR: Record<string, string> = {
   open: 'مفتوحة',
   partly_repaid: 'مسددة جزئياً',
   repaid: 'مسددة بالكامل',
+  settled: 'مسوّاة بتسوية معتمدة',
 };
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);

@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 227
+- **Total Mounted Endpoints**: 233
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 219
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 225
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -68,7 +68,13 @@
 | `/api/cash` | `GET` | `/api/cash/custodies/:id/vouchers` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/vouchers` | `true` | `PERMISSIONS.CUSTODY_REQUEST` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/employees` | `true` | `PERMISSIONS.CUSTODY_REQUEST` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/custody-settlement-policies` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `PUT` | `/api/cash/custody-settlement-policies/:treatment` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-shortage-claims/:id/repay` | `true` | `PERMISSIONS.CUSTODY_SETTLE` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/custody-shortage-claims/:id/settlements` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `POST` | `/api/cash/custody-shortage-claims/:id/settlements` | `true` | `PERMISSIONS.CUSTODY_SETTLE` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `POST` | `/api/cash/custody-shortage-settlements/:id/approve` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `POST` | `/api/cash/custody-shortage-settlements/:id/reject` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/approve` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/reject` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/reverse` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |

@@ -5,6 +5,7 @@ import { defaultCashRegisterService } from '../cash/cashRegisterService.js';
 import { defaultCustodyService } from '../cash/custodyService.js';
 import { defaultCustodyVoucherService } from '../cash/custodyVoucherService.js';
 import { defaultCustodyExtrasService } from '../cash/custodyExtrasService.js';
+import { defaultCustodyShortageSettlementService } from '../cash/custodyShortageSettlementService.js';
 import { defaultVoucherService } from '../cash/voucherService.js';
 import { CustodyStatus } from '../cash/cashTypes.js';
 import { VoucherStatus } from '../cash/voucherTypes.js';
@@ -762,4 +763,100 @@ cashRoutes.post(
   })
 );
 
+// ============================================================================
+// C13: shortage settlement (write-off / payroll deduction), approval engine
+// ============================================================================
 
+cashRoutes.post(
+  '/custody-shortage-claims/:id/settlements',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_SETTLE, companyId);
+    const settlement = await defaultCustodyShortageSettlementService.requestSettlement(
+      companyId,
+      req.params.id,
+      req.body || {},
+      user.id
+    );
+    res.status(201).json({ status: 'ok', settlement });
+  })
+);
+
+cashRoutes.get(
+  '/custody-shortage-claims/:id/settlements',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const settlements = await defaultCustodyShortageSettlementService.listForClaim(companyId, req.params.id);
+    res.json({ status: 'ok', settlements });
+  })
+);
+
+cashRoutes.post(
+  '/custody-shortage-settlements/:id/approve',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    const settlement = await defaultCustodyShortageSettlementService.approveSettlement(
+      companyId,
+      req.params.id,
+      user.id,
+      user.role === 'platform_admin',
+      (permission) => defaultRbacService.hasPermission(user, permission as PermissionCode, companyId)
+    );
+    res.json({ status: 'ok', settlement });
+  })
+);
+
+cashRoutes.post(
+  '/custody-shortage-settlements/:id/reject',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    const settlement = await defaultCustodyShortageSettlementService.rejectSettlement(
+      companyId,
+      req.params.id,
+      req.body?.reason,
+      user.id,
+      (permission) => defaultRbacService.hasPermission(user, permission as PermissionCode, companyId)
+    );
+    res.json({ status: 'ok', settlement });
+  })
+);
+
+cashRoutes.put(
+  '/custody-settlement-policies/:treatment',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.COMPANY_SETTINGS_WRITE, companyId);
+    const policy = await defaultCustodyShortageSettlementService.setPolicy(
+      companyId,
+      req.params.treatment,
+      req.body || {},
+      user.id
+    );
+    res.json({ status: 'ok', policy });
+  })
+);
+
+cashRoutes.get(
+  '/custody-settlement-policies',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const policies = await defaultCustodyShortageSettlementService.listPolicies(companyId);
+    res.json({ status: 'ok', policies });
+  })
+);

@@ -11,6 +11,7 @@ import { toMoney } from '../lib/numeric.js';
 import { resolveCompanyToday } from '../lib/calendarDate.js';
 import { getCustodySettledTotals, CustodyVoucherService, CustodyVoucher } from './custodyVoucherService.js';
 import { CustodyMovement, CustodyRecord } from './cashTypes.js';
+import { defaultCustodyShortageSettlementService, ShortageSettlementView } from './custodyShortageSettlementService.js';
 
 export interface CustodyCashCount {
   id: string;
@@ -39,11 +40,16 @@ export interface CustodyShortageClaim {
   amount: number;
   repaid: number;
   outstanding: number;
-  status: 'open' | 'partly_repaid' | 'repaid';
+  /** Settled by write-off or payroll deduction (posted only). Counted in `outstanding`. */
+  settled: number;
+  /** Reserved by settlements still waiting for approval. Not yet in `outstanding`, but not available for repayment. */
+  pendingSettlement: number;
+  status: 'open' | 'partly_repaid' | 'repaid' | 'settled';
   memo: string | null;
   createdBy: string;
   createdAt: string;
   repayments: ShortageRepayment[];
+  settlements: ShortageSettlementView[];
 }
 
 export interface CustodyStatement {
@@ -284,8 +290,9 @@ export class CustodyExtrasService {
       if (!custody) throw new NotFoundError('العهدة النقدية غير موجودة');
       if (custody.status !== 'open') throw new ValidationError('السداد متاح للعهدة المفتوحة فقط');
       const claim = (await this.loadClaims(companyId, custodyId, tx)).find((c) => c.id === claimId)!;
-      if (amount > claim.outstanding) {
-        throw new ValidationError(`مبلغ السداد (${amount.toFixed(2)}) أكبر من المتبقي على المطالبة (${claim.outstanding.toFixed(2)})`);
+      const repayable = toMoney(claim.outstanding - claim.pendingSettlement);
+      if (amount > repayable) {
+        throw new ValidationError(`مبلغ السداد (${amount.toFixed(2)}) أكبر من المتبقي على المطالبة (${repayable.toFixed(2)})`);
       }
       const register = await this.registerRepo.lockForUpdate(companyId, custody.registerId, tx);
       if (!register) throw new NotFoundError('الصندوق المرتبط بالعهدة غير موجود');
@@ -362,7 +369,8 @@ export class CustodyExtrasService {
       [companyId, custodyId]
     );
     const iso = (d: any) => (d instanceof Date ? d.toISOString() : d);
-    return claims.rows.map((c: any) => {
+    const out: CustodyShortageClaim[] = [];
+    for (const c of claims.rows as any[]) {
       const repayments: ShortageRepayment[] = reps.rows
         .filter((r: any) => r.claimId === c.id)
         .map((r: any) => ({
@@ -373,23 +381,30 @@ export class CustodyExtrasService {
           createdBy: r.createdBy,
           createdAt: iso(r.createdAt),
         }));
+      const settlements = await defaultCustodyShortageSettlementService.loadSettlements(companyId, c.id, tx);
       const amount = toMoney(Number(c.amount));
       const repaid = toMoney(repayments.reduce((s, r) => s + r.amount, 0));
-      const outstanding = toMoney(amount - repaid);
-      return {
+      const settled = toMoney(settlements.filter((x) => x.status === 'posted').reduce((s, x) => s + x.amount, 0));
+      const pendingSettlement = toMoney(settlements.filter((x) => x.status === 'pending').reduce((s, x) => s + x.amount, 0));
+      const outstanding = toMoney(amount - repaid - settled);
+      out.push({
         id: c.id,
         custodyId: c.custodyId,
         cashCountId: c.cashCountId,
         amount,
         repaid,
         outstanding,
-        status: outstanding <= 0 ? 'repaid' : repaid > 0 ? 'partly_repaid' : 'open',
+        settled,
+        pendingSettlement,
+        status: outstanding <= 0 ? (settled > 0 ? 'settled' : 'repaid') : repaid > 0 || settled > 0 ? 'partly_repaid' : 'open',
         memo: c.memo,
         createdBy: c.createdBy,
         createdAt: iso(c.createdAt),
         repayments,
-      } as CustodyShortageClaim;
-    });
+        settlements,
+      });
+    }
+    return out;
   }
 
   async getStatement(companyId: string, custodyId: string): Promise<CustodyStatement> {

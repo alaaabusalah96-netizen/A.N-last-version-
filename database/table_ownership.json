@@ -195,6 +195,21 @@
     "reason": "Per-company append-only claims owed by an employee after a custody cash count shortage"
   },
   {
+    "table": "custody_settlement_policies",
+    "scope": "tenant",
+    "reason": "Per-company versioned switch and account mapping for custody shortage treatments (append-only)"
+  },
+  {
+    "table": "custody_shortage_settlements",
+    "scope": "tenant",
+    "reason": "Per-company append-only requests to settle a custody shortage by write-off or payroll deduction"
+  },
+  {
+    "table": "custody_shortage_settlement_postings",
+    "scope": "tenant",
+    "reason": "Per-company append-only link from an approved shortage settlement to its journal entry"
+  },
+  {
     "table": "approval_policies",
     "scope": "tenant",
     "reason": "Per-company versioned approval step definitions per document type (append-only)"
