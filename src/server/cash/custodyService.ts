@@ -21,6 +21,7 @@ import {
 import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMoney } from '../lib/numeric.js';
+import { countPendingCustodyVouchers, getCustodySettledTotals } from './custodyVoucherService.js';
 import {
   assertOptionalCalendarDate,
   isValidCalendarDate,
@@ -503,10 +504,15 @@ export class CustodyService {
       }
       this.assertTransition(custody.status, 'settled');
 
-      const diff = toMoney(settledTotal - custody.amount);
+      if ((await countPendingCustodyVouchers(companyId, id, tx)) > 0) {
+        throw new ValidationError('توجد حوافظ معلقة على هذه العهدة؛ اعتمدها أو ارفضها قبل التسوية النهائية');
+      }
+      const prior = await getCustodySettledTotals(companyId, id, tx);
+      const remainingAmount = toMoney(custody.amount - prior.expense - prior.cashReturn);
+      const diff = toMoney(settledTotal - remainingAmount);
       if (diff !== 0) {
         throw new ValidationError(
-          `مجموع المصروفات (${expenseTotal.toFixed(2)}) والمرتجع النقدي (${cashReturn.toFixed(2)}) = ${settledTotal.toFixed(2)} لا يساوي مبلغ العهدة (${custody.amount.toFixed(2)}) — الفرق (${diff.toFixed(2)})`
+          `مجموع المصروفات (${expenseTotal.toFixed(2)}) والمرتجع النقدي (${cashReturn.toFixed(2)}) = ${settledTotal.toFixed(2)} لا يساوي الرصيد المتبقي من العهدة (${remainingAmount.toFixed(2)}) — الفرق (${diff.toFixed(2)})`
         );
       }
 
@@ -563,7 +569,7 @@ export class CustodyService {
       jeLines.push({
         accountId: gl.custodyReceivableAccountId,
         debit: 0,
-        credit: custody.amount,
+        credit: remainingAmount,
         lineMemo: `إقفال ذمة عهدة رقم ${docRef}`,
       });
 
@@ -624,8 +630,8 @@ export class CustodyService {
         id,
         actorId,
         posted.id,
-        expenseTotal,
-        cashReturn,
+        toMoney(prior.expense + expenseTotal),
+        toMoney(prior.cashReturn + cashReturn),
         input.memo?.trim() || null,
         tx
       );

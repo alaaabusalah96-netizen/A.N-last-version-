@@ -7,6 +7,11 @@ vi.mock('../../db/transactionManager.js', () => ({
   withTenantTransaction: vi.fn((_companyId: string, callback: (tx: unknown) => Promise<unknown>) => callback({})),
 }));
 
+vi.mock('../custodyVoucherService.js', () => ({
+  getCustodySettledTotals: vi.fn(async () => ({ expense: 0, cashReturn: 0 })),
+  countPendingCustodyVouchers: vi.fn(async () => 0),
+}));
+
 const COMP_ID = '11111111-1111-4111-8111-111111111111';
 const CUSTODY_ID = '22222222-2222-4222-8222-222222222222';
 const EMPLOYEE_ID = '33333333-3333-4333-8333-333333333333';

@@ -3,6 +3,7 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultCashRegisterService } from '../cash/cashRegisterService.js';
 import { defaultCustodyService } from '../cash/custodyService.js';
+import { defaultCustodyVoucherService } from '../cash/custodyVoucherService.js';
 import { defaultVoucherService } from '../cash/voucherService.js';
 import { CustodyStatus } from '../cash/cashTypes.js';
 import { VoucherStatus } from '../cash/voucherTypes.js';
@@ -306,6 +307,65 @@ cashRoutes.post(
       user.role === 'platform_admin'
     );
     res.json({ status: 'ok', custody });
+  })
+);
+
+// Custody Vouchers (حوافظ العهدة: تسوية جزئية مستقلة والعهدة تبقى مفتوحة)
+cashRoutes.get(
+  '/custodies/:id/vouchers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const vouchers = await defaultCustodyVoucherService.listVouchers(companyId, req.params.id);
+    res.json({ status: 'ok', vouchers });
+  })
+);
+
+cashRoutes.post(
+  '/custodies/:id/vouchers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_REQUEST, companyId);
+    const voucher = await defaultCustodyVoucherService.submitVoucher(companyId, req.params.id, req.body || {}, user.id);
+    res.status(201).json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/custody-vouchers/:id/approve',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    const voucher = await defaultCustodyVoucherService.approveVoucher(
+      companyId,
+      req.params.id,
+      user.id,
+      user.role === 'platform_admin'
+    );
+    res.json({ status: 'ok', voucher });
+  })
+);
+
+cashRoutes.post(
+  '/custody-vouchers/:id/reject',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    const voucher = await defaultCustodyVoucherService.rejectVoucher(
+      companyId,
+      req.params.id,
+      req.body?.reason,
+      user.id
+    );
+    res.json({ status: 'ok', voucher });
   })
 );
 

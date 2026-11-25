@@ -185,6 +185,16 @@
     "reason": "Per-company cash custody register movements"
   },
   {
+    "table": "custody_vouchers",
+    "scope": "tenant",
+    "reason": "Per-company custody vouchers (partial settlement documents)"
+  },
+  {
+    "table": "custody_voucher_lines",
+    "scope": "tenant",
+    "reason": "Per-company custody voucher expense lines"
+  },
+  {
     "table": "cash_receipt_vouchers",
     "scope": "tenant",
     "reason": "Per-company cash receipt vouchers posted directly to cash registers and GL"
