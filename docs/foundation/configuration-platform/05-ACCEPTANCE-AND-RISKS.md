@@ -43,5 +43,6 @@ Status words: VERIFIED = a registered test script passes in CI. PARTIAL = built 
 | B5 Accounting mapping | Event catalog mapping to accounts | verifyGlMappingEvents7 | VERIFIED |
 | B6 Config center | Draft, publish, rollback, change summary | verifyConfigCenter4, verifyConfigUi1 | VERIFIED |
 | C6 Custom fields | Fields survive versions, tenant isolation | verifyCustomFields8 | VERIFIED |
-| C1-C5, C7-C12 | See roadmap acceptance hints | none yet | NOT BUILT |
+| C1 Workflow engine | Generic approval engine (C1-a): versioned step policy, separation of duties, append-only decisions, audit | verifyApprovalEngine1 (A1-A14, live DB, mutation-checked) | PARTIAL: approval engine service verified; no HTTP API, no designer UI, not wired to any document yet; general state-transition engine NOT BUILT |
+| C2-C5, C7-C12 | See roadmap acceptance hints | none yet | NOT BUILT |
 | C13 Custody configuration | See roadmap acceptance hints | none yet | NOT BUILT |

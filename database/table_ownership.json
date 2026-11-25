@@ -195,6 +195,21 @@
     "reason": "Per-company append-only claims owed by an employee after a custody cash count shortage"
   },
   {
+    "table": "approval_policies",
+    "scope": "tenant",
+    "reason": "Per-company versioned approval step definitions per document type (append-only)"
+  },
+  {
+    "table": "approval_requests",
+    "scope": "tenant",
+    "reason": "Per-company approval requests pinned to the policy steps in force when requested (append-only)"
+  },
+  {
+    "table": "approval_decisions",
+    "scope": "tenant",
+    "reason": "Per-company append-only approve/reject decisions, one per step"
+  },
+  {
     "table": "custody_shortage_repayments",
     "scope": "tenant",
     "reason": "Per-company append-only employee repayments against custody shortage claims"

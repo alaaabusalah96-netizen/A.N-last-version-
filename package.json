@@ -135,6 +135,7 @@
     "test:cash-custody-lifecycle-1": "tsx scripts/verifyCashCustodyLifecycle1.ts",
     "test:cash-custody-ui-1": "tsx scripts/verifyCashCustodyUi1.ts",
     "test:cash-custody-ui-2": "tsx scripts/verifyCashCustodyUi2.ts",
+    "test:approval-engine-1": "tsx scripts/verifyApprovalEngine1.ts",
     "test:cash-vouchers-1": "tsx scripts/verifyCashVouchersReports1.ts",
     "test:cash-http-1": "tsx scripts/verifyCashHttp1.ts",
     "test:cash-period-report-1": "tsx scripts/verifyCashPeriodReport1.ts",
