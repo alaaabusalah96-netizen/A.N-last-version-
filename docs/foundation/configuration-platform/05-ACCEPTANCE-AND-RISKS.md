@@ -29,3 +29,19 @@ Every implementation package (A1–C12) must meet the following 9 points before 
 - **Bypassing RLS**: The configuration platform must NEVER create a way to bypass tenant isolation.
 - **Direct DB Access**: Users do not get direct access to the configuration schema outside of controlled API/UI.
 - **Demolishing Modules**: We will NOT rewrite the entire inventory or accounting core. We will extend them.
+
+## Per-Package Acceptance Tests and Verified Status (as of 25 Nov 2026)
+Status words: VERIFIED = a registered test script passes in CI. PARTIAL = built but part of the roadmap goal is missing. NOT BUILT. UNVERIFIED is never PASS.
+
+| Package | Proof required | Test script | Status |
+| --- | --- | --- | --- |
+| A1-A4 Registry, versioning, validation | RLS, immutable versions, publish/rollback, validation without eval | verifyWaveACompletion1 (S1-S17, T1-T6 live) | VERIFIED |
+| B1 Org Designer | Tree CRUD plus custom attributes and config overrides | verifyP1cOrgUnits1 (static checks) | PARTIAL: tree CRUD verified, custom attributes and overrides NOT BUILT |
+| B2 Dynamic roles | Role rules, cache invalidation, catalog parity | verifyDynamicRoles5 (R1-R13) | VERIFIED |
+| B3 Permission matrix UI | Matrix wired, 42 permissions parity | verifyDynamicRoles5 (R12, R13) | VERIFIED (UI checked statically, not in a browser) |
+| B4 Scope assignment | Scope isolation, escalation block, expiry, RLS | verifyUserScopeIsolation6 (S1-S10) | VERIFIED |
+| B5 Accounting mapping | Event catalog mapping to accounts | verifyGlMappingEvents7 | VERIFIED |
+| B6 Config center | Draft, publish, rollback, change summary | verifyConfigCenter4, verifyConfigUi1 | VERIFIED |
+| C6 Custom fields | Fields survive versions, tenant isolation | verifyCustomFields8 | VERIFIED |
+| C1-C5, C7-C12 | See roadmap acceptance hints | none yet | NOT BUILT |
+| C13 Custody configuration | See roadmap acceptance hints | none yet | NOT BUILT |

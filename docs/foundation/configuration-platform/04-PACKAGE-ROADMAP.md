@@ -154,3 +154,16 @@ Complex behaviors and extensibility.
 - **Out of scope**: Integration with external IAM (unless requested).
 - **Acceptance hints**: Two-man rule enforced for critical config changes.
 - **Depends on**: A3.
+
+---
+
+## Wave D: Cash & Custody Configuration
+Added 25 Nov 2026 under the Legal and Financial Soundness principle (see README).
+
+### C13 - Cash & Custody Settlement Configuration
+- **Goal**: Make custody settlement treatments configurable per company: shortage handling (employee claim, payroll deduction, approved write-off to an expense account), repayment methods, and who approves each.
+- **Builds on**: B5 (accounting mapping), C1 (workflow engine) for approval paths, custody P2a.
+- **User-visible outcome**: A finance admin picks the allowed treatments and approval steps without code. The default is the employee claim.
+- **Out of scope**: Payroll integration itself.
+- **Acceptance hints**: Each treatment produces the expected journal entry; a treatment not enabled is rejected; every approval is audited; the count itself never posts.
+- **Depends on**: B5, A3. Until C1 exists the approval path is a single permission gate.

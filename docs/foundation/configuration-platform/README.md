@@ -14,6 +14,9 @@ The platform follows a three-wave strategy to ensure stability and incremental v
 - **No Demolition**: Never destroy working hardcoded modules; instead, extend them to read from the configuration registry.
 - **Tenant Isolation**: Configuration data is strictly company-scoped and isolated at the database level using RLS.
 - **Immutability & Audit**: Published configurations are versioned and immutable. Every change is audited.
+- **Legal and Financial Soundness (Alaa, 25 Nov 2026)**: The ERP must be legally sound and financially reliable and follow accounting convention and standards. It must never alter a financial operation without a basis or standard. Any design choice not backed by a cited standard must be configurable.
+- **Many Treatments, Configured Not Coded**: Any operation that has several valid settlements or treatments supports all of them through configuration and customization without code, with approval paths. It is never hardcoded to a single view. Defaults follow standard practice and are documented with their source.
+- **Counts Never Post**: Only journal entries and expenses post to accounting. A physical count (جرد) is a control record and never posts by itself.
 - **Safety First**: No user-supplied executable code (SQL/JS) in the configuration registry. All logic is driven by metadata and safe engines.
 
 ## Documentation Index
