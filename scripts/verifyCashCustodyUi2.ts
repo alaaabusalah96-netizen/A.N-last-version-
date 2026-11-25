@@ -52,11 +52,14 @@ assert(/\{ amount: repayById\[c\.id\] \}/.test(panel), 'U3 repayment sends amoun
 assert(/lines: \[\{ expenseAccountId: vAccount, amount: vAmount/.test(panel), 'U3 voucher sends lines[].expenseAccountId/amount');
 assert(/\{ reason: reasonById\[v\.id\] \}/.test(panel), 'U3 reject/reverse send reason');
 
-// U4: the count never posts and the UI never offers a write-off or auto adjustment.
+// U4: the count never posts and the UI never adjusts automatically. Since C13 (owner decision) a write-off or payroll deduction is offered only as an approval request.
 assert(/لا يرحّل/.test(panel), 'U4 count labelled as non-posting');
-assert(!/write.?off|إعدام|شطب|auto.?adjust/i.test(panel), 'U4 no write-off or auto-adjust action in the panel');
+assert(!/auto.?adjust|تسوية تلقائية/i.test(panel), 'U4 no auto-adjust action in the panel');
+assert(/custody-shortage-claims\/\$\{c\.id\}\/settlements/.test(panel) && /لا قيد قبل الاعتماد/.test(panel), 'U4 settlement is only an approval request (no entry before approval)');
+assert(/custody-shortage-settlements\/\$\{st\.id\}\/approve/.test(panel) && /can\('custody:approve'\)/.test(panel), 'U4 settlement approval needs custody:approve');
+assert(/policies\.some\(\(pl\) => pl\.enabled\)/.test(panel), 'U4 settlement offered only when a treatment is enabled');
 assert(/!claimedCountIds\.has\(c\.id\)/.test(panel) && /c\.variance < 0/.test(panel), 'U4 claim offered only for negative variance without a claim');
-assert(/c\.outstanding > 0/.test(panel), 'U4 repay offered only while outstanding');
+assert(/c\.outstanding - \(c\.pendingSettlement \|\| 0\) > 0/.test(panel), 'U4 repay offered only while outstanding and not reserved');
 assert(/!\(reasonById\[v\.id\] \|\| ''\)\.trim\(\)/.test(panel), 'U4 reject/reverse require a reason');
 
 // U5: mounted in the custody drawer with account options and permission checker.

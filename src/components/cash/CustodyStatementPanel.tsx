@@ -43,12 +43,29 @@ interface RepaymentView {
   createdAt: string;
 }
 
+interface SettlementView {
+  id: string;
+  treatment: 'WRITE_OFF' | 'PAYROLL_DEDUCT';
+  amount: number;
+  reason: string;
+  status: 'pending' | 'rejected' | 'posted';
+}
+
+interface PolicyView {
+  treatment: 'WRITE_OFF' | 'PAYROLL_DEDUCT';
+  enabled: boolean;
+  ceiling: number | null;
+}
+
 interface ClaimView {
   id: string;
   cashCountId: string;
   amount: number;
   repaid: number;
   outstanding: number;
+  settled?: number;
+  pendingSettlement?: number;
+  settlements?: SettlementView[];
   status: 'open' | 'partly_repaid' | 'repaid' | 'settled';
   repayments: RepaymentView[];
 }
@@ -91,6 +108,17 @@ const CLAIM_STATUS_AR: Record<string, string> = {
   settled: 'مسوّاة بتسوية معتمدة',
 };
 
+const TREATMENT_AR: Record<string, string> = {
+  WRITE_OFF: 'إعدام العجز (تتحمله الشركة)',
+  PAYROLL_DEDUCT: 'خصم من راتب الموظف',
+};
+
+const SETTLEMENT_STATUS_AR: Record<string, string> = {
+  pending: 'بانتظار الاعتماد',
+  rejected: 'مرفوضة',
+  posted: 'معتمدة ومرحّلة',
+};
+
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 
 export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
@@ -111,6 +139,11 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
   const [countMemo, setCountMemo] = useState('');
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
   const [repayById, setRepayById] = useState<Record<string, string>>({});
+  const [policies, setPolicies] = useState<PolicyView[]>([]);
+  const [stTreatment, setStTreatment] = useState<Record<string, string>>({});
+  const [stAmount, setStAmount] = useState<Record<string, string>>({});
+  const [stReason, setStReason] = useState<Record<string, string>>({});
+  const [decisionReason, setDecisionReason] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,6 +155,13 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || data.error || 'تعذر تحميل كشف العهدة');
       setStatement(data.statement as StatementView);
+      try {
+        const pr = await apiFetch(`/api/cash/custody-settlement-policies?companyId=${encodeURIComponent(companyId)}`);
+        const pd = await pr.json().catch(() => ({}));
+        setPolicies(pr.ok && Array.isArray(pd.policies) ? (pd.policies as PolicyView[]) : []);
+      } catch {
+        setPolicies([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'تعذر تحميل كشف العهدة');
     } finally {
@@ -394,7 +434,48 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
                         {c.repayments.map((r) => `${String(r.createdAt).slice(0, 10)}: ${fmt(r.amount)}`).join(' | ')}
                       </div>
                     )}
-                    {c.outstanding > 0 && isOpen && can('custody:settle') && (
+                    {(c.settlements || []).length > 0 && (
+                      <div className="flex flex-col gap-1 border-t border-slate-800 pt-2" data-testid="claim-settlements">
+                        {(c.settlements || []).map((st) => (
+                          <div key={st.id} className="flex flex-wrap items-center gap-2">
+                            <span>{TREATMENT_AR[st.treatment]}: <b className="text-white">{fmt(st.amount)}</b></span>
+                            <span className="text-slate-400">{SETTLEMENT_STATUS_AR[st.status]} - {st.reason}</span>
+                            {st.status === 'pending' && can('custody:approve') && (
+                              <>
+                                <input className={input} placeholder="سبب الرفض" value={decisionReason[st.id] || ''}
+                                  onChange={(e) => setDecisionReason((prev) => ({ ...prev, [st.id]: e.target.value }))} />
+                                <button type="button" disabled={busy} className={`${btn} bg-emerald-600 text-white`}
+                                  onClick={() => void post(`/api/cash/custody-shortage-settlements/${st.id}/approve`, {}, 'تم اعتماد التسوية')}>اعتماد التسوية</button>
+                                <button type="button" disabled={busy || !(decisionReason[st.id] || '').trim()} className={`${btn} bg-rose-700 text-white`}
+                                  onClick={() => void post(`/api/cash/custody-shortage-settlements/${st.id}/reject`, { reason: decisionReason[st.id] }, 'تم رفض التسوية')}>رفض التسوية</button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {c.outstanding - (c.pendingSettlement || 0) > 0 && isOpen && can('custody:settle') && policies.some((pl) => pl.enabled) && (
+                      <div className="flex flex-wrap items-center gap-2" data-testid="settlement-request">
+                        <select className={input} value={stTreatment[c.id] || ''} onChange={(e) => setStTreatment((prev) => ({ ...prev, [c.id]: e.target.value }))}>
+                          <option value="">نوع التسوية</option>
+                          {policies.filter((pl) => pl.enabled).map((pl) => (
+                            <option key={pl.treatment} value={pl.treatment}>{TREATMENT_AR[pl.treatment]}</option>
+                          ))}
+                        </select>
+                        <input className={input} inputMode="decimal" placeholder="المبلغ" value={stAmount[c.id] || ''}
+                          onChange={(e) => setStAmount((prev) => ({ ...prev, [c.id]: e.target.value }))} />
+                        <input className={input} placeholder="سبب التسوية" value={stReason[c.id] || ''}
+                          onChange={(e) => setStReason((prev) => ({ ...prev, [c.id]: e.target.value }))} />
+                        <button type="button" className={`${btn} bg-sky-600 text-white`}
+                          disabled={busy || !stTreatment[c.id] || !(stAmount[c.id] || '').trim() || (stReason[c.id] || '').trim().length < 3}
+                          onClick={() => void post(`/api/cash/custody-shortage-claims/${c.id}/settlements`,
+                            { treatment: stTreatment[c.id], amount: stAmount[c.id], reason: stReason[c.id] },
+                            'تم رفع طلب التسوية للاعتماد (لا قيد قبل الاعتماد)')}>
+                          طلب تسوية للاعتماد
+                        </button>
+                      </div>
+                    )}
+                    {c.outstanding - (c.pendingSettlement || 0) > 0 && isOpen && can('custody:settle') && (
                       <div className="flex items-center gap-2">
                         <input className={input} inputMode="decimal" placeholder="مبلغ السداد النقدي"
                           value={repayById[c.id] || ''} onChange={(e) => setRepay(c.id, e.target.value)} />
