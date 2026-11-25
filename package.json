@@ -166,7 +166,9 @@
     "test:unit": "vitest run",
     "test:discovery": "vitest list --filesOnly",
     "test:e2e-smoke": "playwright test",
-    "test:endpoint-matrix": "tsx scripts/verifyEndpointPermissionMatrix.ts"
+    "test:endpoint-matrix": "tsx scripts/verifyEndpointPermissionMatrix.ts",
+    "perf:seed": "tsx scripts/perf/seedSynthetic.ts",
+    "perf:load": "tsx scripts/perf/loadModel.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
