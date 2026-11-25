@@ -17,6 +17,7 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { CustodyStatementPanel } from './CustodyStatementPanel.js';
 import { AccountOption, usableAccounts } from '../../lib/accountRules.js';
 import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
@@ -2181,6 +2182,15 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                 </div>
               </div>
             </div>
+
+            <CustodyStatementPanel
+              companyId={selectedCompanyId}
+              custodyId={detailCustody.id}
+              custodyStatus={detailCustody.status}
+              expenseAccounts={expenseAccountOptions}
+              can={can}
+              onChanged={() => void openCustodyDetail(detailCustody)}
+            />
 
             <div>
               <h5 className="text-xs font-bold text-slate-200 mb-2">سجل حركة العهدة</h5>
