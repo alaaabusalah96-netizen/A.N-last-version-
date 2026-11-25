@@ -120,7 +120,8 @@ export class ApprovalService {
     documentType: string,
     documentId: string,
     defaultPermission: string,
-    actorId: string
+    actorId: string,
+    options: { requirePolicy?: boolean } = {}
   ): Promise<ApprovalRequestView> {
     if (!companyId || !isUuid(companyId)) throw new ValidationError('معرف الشركة غير صالح');
     if (!documentType || !documentType.trim()) throw new ValidationError('نوع المستند مطلوب');
@@ -136,6 +137,9 @@ export class ApprovalService {
         `SELECT id, steps FROM approval_policies WHERE company_id = $1 AND document_type = $2 ORDER BY version DESC LIMIT 1`,
         [companyId, documentType]
       );
+      if (options.requirePolicy && !pol.rows[0]) {
+        throw new ValidationError('لا توجد سياسة موافقة منشورة لهذا النوع من المستندات');
+      }
       const policyId = pol.rows[0]?.id ?? null;
       const steps: ApprovalStep[] = pol.rows[0]?.steps ?? [{ stepNo: 1, permission: defaultPermission }];
       const ins = await tx.query<{ id: string }>(
@@ -211,6 +215,51 @@ export class ApprovalService {
       const r = await this.loadRequest(companyId, requestId, tx);
       if (!r) throw new NotFoundError('طلب الموافقة غير موجود');
       return r;
+    });
+  }
+
+  /** List requests, newest first. Status is derived, so the filter runs after loading (bounded scan). */
+  async listRequests(
+    companyId: string,
+    filter: { status?: ApprovalStatus; documentType?: string; documentId?: string; limit?: number } = {}
+  ): Promise<ApprovalRequestView[]> {
+    if (!companyId || !isUuid(companyId)) throw new ValidationError('معرف الشركة غير صالح');
+    if (filter.status && !['pending', 'approved', 'rejected'].includes(filter.status)) {
+      throw new ValidationError('حالة الطلب غير صالحة');
+    }
+    if (filter.documentId && !isUuid(filter.documentId)) throw new ValidationError('معرف المستند غير صالح');
+    const limit = Math.min(Math.max(Math.trunc(filter.limit || 50), 1), 100);
+    return await withTenantTransaction(companyId, async (tx) => {
+      const params: unknown[] = [companyId];
+      let where = 'company_id = $1';
+      if (filter.documentType) { params.push(filter.documentType); where += ` AND document_type = $${params.length}`; }
+      if (filter.documentId) { params.push(filter.documentId); where += ` AND document_id = $${params.length}`; }
+      const ids = await tx.query<{ id: string }>(
+        `SELECT id FROM approval_requests WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT 500`,
+        params
+      );
+      const out: ApprovalRequestView[] = [];
+      for (const row of ids.rows) {
+        const r = await this.loadRequest(companyId, row.id, tx);
+        if (!r) continue;
+        if (filter.status && r.status !== filter.status) continue;
+        out.push(r);
+        if (out.length >= limit) break;
+      }
+      return out;
+    });
+  }
+
+  /** Latest policy per document type. */
+  async listPolicies(companyId: string): Promise<Array<{ id: string; documentType: string; version: number; steps: ApprovalStep[] }>> {
+    if (!companyId || !isUuid(companyId)) throw new ValidationError('معرف الشركة غير صالح');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const r = await tx.query<any>(
+        `SELECT DISTINCT ON (document_type) id, document_type AS "documentType", version, steps
+           FROM approval_policies WHERE company_id = $1 ORDER BY document_type, version DESC`,
+        [companyId]
+      );
+      return r.rows.map((x: any) => ({ id: x.id, documentType: x.documentType, version: Number(x.version), steps: x.steps }));
     });
   }
 

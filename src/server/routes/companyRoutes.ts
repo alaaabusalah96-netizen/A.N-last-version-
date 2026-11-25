@@ -12,6 +12,7 @@ import { isUuid, isValidCompanyCode } from '../http/validators.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../http/errors.js';
 import { companySettingsRoutes } from './companySettingsRoutes.js';
 import { orgUnitRoutes } from './orgUnitRoutes.js';
+import { approvalRoutes } from './approvalRoutes.js';
 import { companyConfigRoutes } from './configRoutes.js';
 import { companyRoleRoutes } from './roleRoutes.js';
 import { customFieldRoutes } from './customFieldRoutes.js';
@@ -21,6 +22,7 @@ export const companyRoutes = Router();
 // Nest settings, org-units, roles, custom-fields and configuration-platform routes
 companyRoutes.use('/:companyId', companySettingsRoutes);
 companyRoutes.use('/:companyId', orgUnitRoutes);
+companyRoutes.use('/:companyId', approvalRoutes);
 companyRoutes.use('/:companyId', companyConfigRoutes);
 companyRoutes.use('/:companyId', companyRoleRoutes);
 companyRoutes.use('/:companyId', customFieldRoutes);

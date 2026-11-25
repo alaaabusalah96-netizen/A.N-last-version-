@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 221
-- **Mounted Route Modules Parsed**: 16
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 213
+- **Total Mounted Endpoints**: 227
+- **Mounted Route Modules Parsed**: 17
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 219
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -94,6 +94,12 @@
 | `/api/cash` | `GET` | `/api/cash/reports/register-movements` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/companies` | `GET` | `/api/companies` | `true` | `PERMISSIONS.COMPANY_READ` | `src/server/routes/companyRoutes.ts` |
 | `/api/companies` | `POST` | `/api/companies` | `true` | `requirePlatformAdmin` | `src/server/routes/companyRoutes.ts` |
+| `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/approvals/policies` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/approvalRoutes.ts` |
+| `/api/companies/:companyId` | `PUT` | `/api/companies/:companyId/approvals/policies/:documentType` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/approvalRoutes.ts` |
+| `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/approvals/requests` | `true` | `PERMISSIONS.COMPANY_READ` | `src/server/routes/approvalRoutes.ts` |
+| `/api/companies/:companyId` | `POST` | `/api/companies/:companyId/approvals/requests` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/approvalRoutes.ts` |
+| `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/approvals/requests/:requestId` | `true` | `PERMISSIONS.COMPANY_READ` | `src/server/routes/approvalRoutes.ts` |
+| `/api/companies/:companyId` | `POST` | `/api/companies/:companyId/approvals/requests/:requestId/decision` | `true` | `PERMISSIONS.COMPANY_READ` | `src/server/routes/approvalRoutes.ts` |
 | `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/config` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/configRoutes.ts` |
 | `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/config/draft` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/configRoutes.ts` |
 | `/api/companies/:companyId` | `PUT` | `/api/companies/:companyId/config/draft` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/configRoutes.ts` |
