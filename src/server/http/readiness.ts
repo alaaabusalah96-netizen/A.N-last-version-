@@ -3,6 +3,7 @@ import path from 'path';
 import { Request, Response } from 'express';
 import { getDefaultExecutor } from '../db/index.js';
 import { assertSafeDbRole } from '../db/roleGuard.js';
+import { redactSecrets, emitOpsAlert } from '../ops/opsAlerts.js';
 
 export function handleLiveness(_req: Request, res: Response): void {
   res.status(200).json({
@@ -31,6 +32,7 @@ export async function handleReadiness(_req: Request, res: Response): Promise<voi
     // 1. Database Health
     const health = await executor.health();
     if (!health.ok) {
+      emitOpsAlert({ severity: 'critical', event: 'readiness_db_unhealthy', requestId: (_req as any).requestId });
       res.status(503).json({ ready: false, reason: 'Database health check failed' });
       return;
     }
@@ -75,7 +77,9 @@ export async function handleReadiness(_req: Request, res: Response): Promise<voi
       version: process.env.APP_VERSION || '1.0.0',
     });
   } catch (err) {
-    console.error('[readiness] Readiness probe failed:', err);
+    const safeDetail = redactSecrets(err instanceof Error ? err.message : String(err));
+    console.error(`[readiness] Readiness probe failed: ${safeDetail}`);
+    emitOpsAlert({ severity: 'critical', event: 'readiness_failed', requestId: (_req as any).requestId, detail: safeDetail });
     res.status(503).json({ ready: false, reason: 'Readiness check failed' });
   }
 }

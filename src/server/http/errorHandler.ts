@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { AppError, CorsOriginError } from './errors.js';
+import { redactSecrets, emitOpsAlert } from '../ops/opsAlerts.js';
 
 export interface ExtendedRequest extends Request {
   requestId?: string;
@@ -21,9 +22,7 @@ export function requestIdMiddleware(req: ExtendedRequest, res: Response, next: N
 }
 
 function sanitizeErrorText(input: string): string {
-  return input
-    .replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, 'postgresql://[REDACTED]')
-    .replace(/(password|secret|token|apiKey|csrfSecret)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]');
+  return redactSecrets(input);
 }
 
 export function errorHandler(
@@ -56,6 +55,9 @@ export function errorHandler(
 
   // DB Unavailable / Tenant Context Required
   if (message.startsWith('DB_UNAVAILABLE') || message.startsWith('TENANT_CONTEXT_REQUIRED')) {
+    if (message.startsWith('DB_UNAVAILABLE')) {
+      emitOpsAlert({ severity: 'critical', event: 'db_unavailable', requestId, detail: safeMessage });
+    }
     res.status(503).json({
       error: 'Service Unavailable',
       code: 'DB_UNAVAILABLE',
@@ -102,6 +104,7 @@ export function errorHandler(
   }
 
   // Generic internal server error (never leak internal details)
+  emitOpsAlert({ severity: 'critical', event: 'internal_error', requestId, detail: safeMessage });
   res.status(500).json({
     error: 'Internal Server Error',
     code: 'INTERNAL',
