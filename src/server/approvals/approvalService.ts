@@ -263,6 +263,25 @@ export class ApprovalService {
     });
   }
 
+  /** True when the company has published a policy for this document type. */
+  async hasPolicy(companyId: string, documentType: string): Promise<boolean> {
+    if (!companyId || !isUuid(companyId)) throw new ValidationError('معرف الشركة غير صالح');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const r = await tx.query(
+        `SELECT 1 FROM approval_policies WHERE company_id = $1 AND document_type = $2 LIMIT 1`,
+        [companyId, documentType]
+      );
+      return r.rows.length > 0;
+    });
+  }
+
+  /** All requests of one document, oldest first. */
+  async requestsForDocument(companyId: string, documentType: string, documentId: string): Promise<ApprovalRequestView[]> {
+    if (!companyId || !isUuid(companyId)) throw new ValidationError('معرف الشركة غير صالح');
+    if (!documentId || !isUuid(documentId)) throw new ValidationError('معرف المستند غير صالح');
+    return await withTenantTransaction(companyId, async (tx) => this.findRequestsForDocument(companyId, documentType, documentId, tx));
+  }
+
   /** True only when the document has an approved request. Callers gate their action on this. */
   async isApproved(companyId: string, documentType: string, documentId: string): Promise<boolean> {
     return await withTenantTransaction(companyId, async (tx) => {

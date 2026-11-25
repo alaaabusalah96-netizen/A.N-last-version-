@@ -10,6 +10,11 @@ import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.j
 import { isUuid } from '../http/validators.js';
 import { toMoney } from '../lib/numeric.js';
 import { resolveCompanyToday } from '../lib/calendarDate.js';
+import { defaultApprovalService, ApprovalService, PermissionChecker } from '../approvals/approvalService.js';
+import { PERMISSIONS } from '../rbac/permissions.js';
+
+/** Approval-engine document type for custody vouchers (C1-c). */
+export const CUSTODY_VOUCHER_APPROVAL_TYPE = 'custody_voucher';
 
 export interface CustodyVoucherLine {
   lineNo: number;
@@ -133,8 +138,24 @@ export class CustodyVoucherService {
     private accountRepo: AccountRepository = defaultAccountRepository,
     private journalService: Pick<JournalService, 'createDraftEntry' | 'postEntry' | 'reverseEntry'> = defaultJournalService,
     private auditService: Pick<AuditService, 'record'> = defaultAuditService,
-    private glResolver: Pick<CustodyGlResolver, 'resolveAndAssertUsable'> = defaultCustodyGlResolver
+    private glResolver: Pick<CustodyGlResolver, 'resolveAndAssertUsable'> = defaultCustodyGlResolver,
+    private approvals: Pick<ApprovalService, 'hasPolicy' | 'requestApproval' | 'requestsForDocument' | 'decide'> = defaultApprovalService
   ) {}
+
+  /**
+   * C1-c. When the company published an approval policy for custody vouchers, the decision goes
+   * through the engine. Without a policy nothing changes: one CUSTODY_APPROVE gate, no engine records.
+   * Returns the engine request, creating it for a voucher submitted before the policy existed
+   * (requester = the voucher's submitter, so separation of duties still holds).
+   */
+  private async ensureApprovalRequest(companyId: string, v: { id: string; submittedBy: string }) {
+    const existing = await this.approvals.requestsForDocument(companyId, CUSTODY_VOUCHER_APPROVAL_TYPE, v.id);
+    const last = existing[existing.length - 1];
+    if (last) return last;
+    return await this.approvals.requestApproval(
+      companyId, CUSTODY_VOUCHER_APPROVAL_TYPE, v.id, PERMISSIONS.CUSTODY_APPROVE, v.submittedBy, { requirePolicy: true }
+    );
+  }
 
   private async assertExpenseAccount(companyId: string, accountId: string, idx: number, tx: DbExecutor) {
     const acc = await this.accountRepo.findById(companyId, accountId, tx);
@@ -204,6 +225,11 @@ export class CustodyVoucherService {
           [companyId, voucherId, i + 1, lines[i].expenseAccountId, lines[i].amount, lines[i].memo]
         );
       }
+      if (await this.approvals.hasPolicy(companyId, CUSTODY_VOUCHER_APPROVAL_TYPE)) {
+        await this.approvals.requestApproval(
+          companyId, CUSTODY_VOUCHER_APPROVAL_TYPE, voucherId, PERMISSIONS.CUSTODY_APPROVE, actorId, { requirePolicy: true }
+        );
+      }
       await this.auditService.record(
         {
           actorUserId: actorId || null,
@@ -242,7 +268,13 @@ export class CustodyVoucherService {
     });
   }
 
-  async rejectVoucher(companyId: string, voucherId: string, reason: string, actorId: string): Promise<CustodyVoucher> {
+  async rejectVoucher(
+    companyId: string,
+    voucherId: string,
+    reason: string,
+    actorId: string,
+    checkPermission?: PermissionChecker
+  ): Promise<CustodyVoucher> {
     if (!voucherId || !isUuid(voucherId)) throw new ValidationError('معرف الحافظة غير صالح');
     const why = (reason || '').trim();
     if (!why) throw new ValidationError('سبب الرفض مطلوب');
@@ -250,6 +282,13 @@ export class CustodyVoucherService {
       const v = await this.loadVoucher(companyId, voucherId, tx, true);
       if (!v) throw new NotFoundError('الحافظة غير موجودة');
       if (v.status !== 'submitted') throw new ValidationError('لا يمكن رفض حافظة تم البت فيها مسبقاً');
+      if (await this.approvals.hasPolicy(companyId, CUSTODY_VOUCHER_APPROVAL_TYPE)) {
+        if (!checkPermission) throw new ForbiddenError('مسار الموافقات يتطلب التحقق من صلاحية الخطوة');
+        const req = await this.ensureApprovalRequest(companyId, v);
+        if (req.status === 'pending') {
+          await this.approvals.decide(companyId, req.id, 'reject', why, actorId, checkPermission);
+        }
+      }
       await tx.query(
         `UPDATE custody_vouchers SET status='rejected', decided_by=$3, decided_at=NOW(), reject_reason=$4, updated_at=NOW()
          WHERE company_id=$1 AND id=$2`,
@@ -347,7 +386,8 @@ export class CustodyVoucherService {
     companyId: string,
     voucherId: string,
     actorId: string,
-    isPlatformAdmin = false
+    isPlatformAdmin = false,
+    checkPermission?: PermissionChecker
   ): Promise<CustodyVoucher> {
     if (!voucherId || !isUuid(voucherId)) throw new ValidationError('معرف الحافظة غير صالح');
     return await withTenantTransaction(companyId, async (tx) => {
@@ -362,6 +402,18 @@ export class CustodyVoucherService {
         throw new ForbiddenError('فصل المهام: لا يمكن لمقدّم الحافظة اعتمادها بنفسه');
       }
       if (custody.status !== 'open') throw new ValidationError('العهدة ليست مفتوحة');
+
+      // C1-c: with a published policy, every step is recorded in the engine; the voucher is
+      // posted only when the last step approves. A middle step leaves the voucher 'submitted'.
+      if (await this.approvals.hasPolicy(companyId, CUSTODY_VOUCHER_APPROVAL_TYPE)) {
+        if (!checkPermission) throw new ForbiddenError('مسار الموافقات يتطلب التحقق من صلاحية الخطوة');
+        const req = await this.ensureApprovalRequest(companyId, v);
+        let state = req.status;
+        if (state === 'pending') {
+          state = (await this.approvals.decide(companyId, req.id, 'approve', null, actorId, checkPermission)).status;
+        }
+        if (state !== 'approved') return (await this.loadVoucher(companyId, voucherId, tx))!;
+      }
 
       const done = await getCustodySettledTotals(companyId, custody.id, tx);
       const remaining = toMoney(custody.amount - done.expense - done.cashReturn);

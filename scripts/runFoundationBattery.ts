@@ -186,6 +186,7 @@ const scripts = [
   'scripts/verifyCashCustodyUi2.ts',
   'scripts/verifyApprovalEngine1.ts',
   'scripts/verifyApprovalHttp1.ts',
+  'scripts/verifyCustodyApproval1.ts',
   'scripts/verifyCashVouchersReports1.ts',
   'scripts/verifyCashHttp1.ts',
   'scripts/verifyCashPeriodReport1.ts',

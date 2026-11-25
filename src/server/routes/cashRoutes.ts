@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
-import { PERMISSIONS } from '../rbac/permissions.js';
+import { PERMISSIONS, PermissionCode } from '../rbac/permissions.js';
 import { defaultCashRegisterService } from '../cash/cashRegisterService.js';
 import { defaultCustodyService } from '../cash/custodyService.js';
 import { defaultCustodyVoucherService } from '../cash/custodyVoucherService.js';
@@ -347,7 +347,8 @@ cashRoutes.post(
       companyId,
       req.params.id,
       user.id,
-      user.role === 'platform_admin'
+      user.role === 'platform_admin',
+      (permission) => defaultRbacService.hasPermission(user, permission as PermissionCode, companyId)
     );
     res.json({ status: 'ok', voucher });
   })
@@ -364,7 +365,8 @@ cashRoutes.post(
       companyId,
       req.params.id,
       req.body?.reason,
-      user.id
+      user.id,
+      (permission) => defaultRbacService.hasPermission(user, permission as PermissionCode, companyId)
     );
     res.json({ status: 'ok', voucher });
   })
