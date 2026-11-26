@@ -52,6 +52,13 @@ assert(/\{ amount: repayById\[c\.id\] \}/.test(panel), 'U3 repayment sends amoun
 assert(/lines: toPayloadLines\(/.test(panel) && /expenseAccountId: l\.account, amount: l\.amount/.test(fs.readFileSync('src/lib/voucherLines.ts', 'utf8')), 'U3 voucher sends lines[].expenseAccountId/amount');
 assert(/\{ reason: reasonById\[v\.id\] \}/.test(panel), 'U3 reject/reverse send reason');
 
+// U3b: custody ceiling panel sends the field names the limit service reads, and is edit-gated by company settings permission.
+{
+  const limitPanel = fs.readFileSync('src/components/cash/CustodyLimitPanel.tsx', 'utf8');
+  assert(/method: 'PUT'/.test(limitPanel) && /employeeUserId: employeeId \|\| null, enabled, limitAmount:/.test(limitPanel), 'U3b limit panel sends employeeUserId/enabled/limitAmount via PUT');
+  assert(/can\('company:settings:write'\)/.test(fs.readFileSync('src/components/cash/CashCustodyWorkspace.tsx', 'utf8')), 'U3b limit panel edit is gated by company:settings:write');
+}
+
 // U4: the count never posts and the UI never adjusts automatically. Since C13 (owner decision) a write-off or payroll deduction is offered only as an approval request.
 assert(/لا يرحّل/.test(panel), 'U4 count labelled as non-posting');
 assert(!/auto.?adjust|تسوية تلقائية/i.test(panel), 'U4 no auto-adjust action in the panel');

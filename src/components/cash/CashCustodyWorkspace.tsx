@@ -19,6 +19,7 @@ import {
 import { apiFetch } from '../../lib/apiClient.js';
 import { CustodyStatementPanel } from './CustodyStatementPanel.js';
 import { CustodyShortageAgeingPanel } from './CustodyShortageAgeingPanel.js';
+import { CustodyLimitPanel } from './CustodyLimitPanel.js';
 import { AccountOption, usableAccounts } from '../../lib/accountRules.js';
 import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
@@ -1358,6 +1359,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
           </div>
         </div>
         <CustodyShortageAgeingPanel companyId={selectedCompanyId} />
+        <CustodyLimitPanel companyId={selectedCompanyId} employees={employees} canEdit={can('company:settings:write')} />
         </>
       )}
 
