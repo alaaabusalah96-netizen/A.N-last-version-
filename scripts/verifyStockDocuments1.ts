@@ -307,6 +307,45 @@ async function run() {
       user.id
     );
     await check('D15: single-line receive still posts its own journal entry', !!single.journalEntryId && single.journalEntryId !== jeId);
+
+    // D16: a pure read never starts a queued job
+    const q1 = await defaultStockDocumentService.createJob(
+      companyId,
+      { docType: 'issue', warehouseId: wh1.id, reason: 'قراءة فقط', lines: [{ itemId: items[1].id, qty: 1 }] },
+      user.id
+    );
+    const qBefore = await qtyOf(wh1.id, items[1].id);
+    const peek = await defaultStockDocumentService.readJob(companyId, q1.id);
+    await new Promise((r) => setTimeout(r, 300));
+    const peek2 = await defaultStockDocumentService.readJob(companyId, q1.id);
+    await check(
+      'D16: readJob does not start or change a queued job (authorize first, advance after)',
+      peek?.status === 'queued' && peek2?.status === 'queued' && (await qtyOf(wh1.id, items[1].id)) === qBefore
+    );
+
+    // D17: a done job is never reported as failed by stale recovery, even with an old start time
+    await withTenantTransaction(companyId, (tx) => tx.query(
+      "UPDATE inv_stock_document_jobs SET started_at = now() - interval '2 hours' WHERE company_id = $1 AND id = $2", [companyId, job.id]));
+    const stale = await defaultStockDocumentService.advanceJob(companyId, job.id);
+    await check('D17: finished job with an old start time still reports done', stale?.status === 'done');
+
+    // D18: posting and done are one transaction: a job recovered as failed cannot be followed by a posted document
+    const q2 = await defaultStockDocumentService.createJob(
+      companyId,
+      { docType: 'issue', warehouseId: wh1.id, reason: 'سباق', lines: [{ itemId: items[1].id, qty: 1 }] },
+      user.id
+    );
+    const claim2 = await defaultStockDocumentService.claimJob(companyId, q2.id);
+    await withTenantTransaction(companyId, (tx) => tx.query(
+      "UPDATE inv_stock_document_jobs SET started_at = now() - interval '2 hours' WHERE company_id = $1 AND id = $2", [companyId, q2.id]));
+    const rec = await defaultStockDocumentService.advanceJob(companyId, q2.id);
+    await defaultStockDocumentService.executeJob(companyId, q2.id, claim2!);
+    const after2 = await defaultStockDocumentService.readJob(companyId, q2.id);
+    await check(
+      'D18: late completion of a recovered (failed) job posts nothing and the job stays failed',
+      rec?.status === 'failed' && after2?.status === 'failed' && (await qtyOf(wh1.id, items[1].id)) === qBefore,
+      JSON.stringify({ rec: rec?.status, after: after2?.status })
+    );
   } catch (err) {
     console.error('[verifyStockDocuments1] Live test error:', err);
     await check('Live stock document suite execution', false, err instanceof Error ? err.message : String(err));

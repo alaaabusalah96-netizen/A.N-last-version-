@@ -99,7 +99,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
       }
 
       let units: OrgUnit[] = orgUnits;
-      const resOrgUnits = await apiFetch(`/api/companies/${companyId}/org-units`);
+      const resOrgUnits = await apiFetch(`/api/accounting/journals/org-units?companyId=${companyId}`);
       if (resOrgUnits.ok) {
         const dataOrg = await resOrgUnits.json();
         // The API answers with `units`; `orgUnits` is kept as a fallback for older responses.

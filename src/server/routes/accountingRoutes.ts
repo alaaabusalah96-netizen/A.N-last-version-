@@ -127,6 +127,21 @@ accountingRoutes.get(
   })
 );
 
+// GET /api/accounting/journals/org-units?companyId=...
+// Org units the caller may use on the journal screen (works with journals.read, no org:units:read needed).
+accountingRoutes.get(
+  '/journals/org-units',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_READ, companyId);
+    const { defaultOrgUnitService } = await import('../org/orgUnitService.js');
+    const units = await defaultOrgUnitService.listAccessibleUnits(companyId, user.id, user.role === 'platform_admin');
+    return res.status(200).json({ status: 'ok', units });
+  })
+);
+
 // GET /api/accounting/journals/:id?companyId=...
 accountingRoutes.get(
   '/journals/:id',

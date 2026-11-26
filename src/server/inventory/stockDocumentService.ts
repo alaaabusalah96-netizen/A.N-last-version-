@@ -119,7 +119,12 @@ export class StockDocumentService {
    * (balance check, costing, journal) inside ONE transaction, so the document is all or nothing and
    * the balance check is cumulative (lines are applied in order and later lines see earlier ones).
    */
-  async postDocument(companyId: string, input: StockDocumentInput, actorId?: string): Promise<StockDocumentResult> {
+  async postDocument(
+    companyId: string,
+    input: StockDocumentInput,
+    actorId?: string,
+    jobId?: string
+  ): Promise<StockDocumentResult> {
     this.validate(companyId, input);
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
@@ -243,7 +248,23 @@ export class StockDocumentService {
         { executor: tx }
       );
 
-      return { documentId, docNo, docType: input.docType, lineCount: input.lines.length, lines: out };
+      const result: StockDocumentResult = { documentId, docNo, docType: input.docType, lineCount: input.lines.length, lines: out };
+
+      if (jobId) {
+        // The job is marked done in the SAME transaction that posts the document, so "posted" and
+        // "done" can never disagree (a crash leaves both or neither).
+        const upd = await tx.query<any>(
+          `UPDATE inv_stock_document_jobs SET status = 'done', result = $3::jsonb, error_message = NULL, finished_at = now()
+            WHERE company_id = $1 AND id = $2 AND status = 'running' RETURNING id`,
+          [companyId, jobId, JSON.stringify(result)]
+        );
+        if (upd.rows.length === 0) {
+          // The job is no longer running (for example recovered as failed): do not leave a posted document behind it.
+          throw new Error('لم تعد مهمة الترحيل قيد التنفيذ، أُلغي الترحيل');
+        }
+      }
+
+      return result;
     });
   }
 
@@ -273,22 +294,23 @@ export class StockDocumentService {
     return claim ? { payload: claim.payload as StockDocumentInput, createdBy: claim.created_by || null } : null;
   }
 
-  /** Post a claimed job and store the outcome on it. Never throws. */
+  /**
+   * Post a claimed job. On success the job is marked done inside the posting transaction itself.
+   * Only a failure is recorded afterwards (nothing was posted in that case). Never throws.
+   */
   async executeJob(companyId: string, jobId: string, claim: { payload: StockDocumentInput; createdBy: string | null }): Promise<void> {
-    let result: StockDocumentResult | null = null;
-    let errMsg: string | null = null;
     try {
-      result = await this.postDocument(companyId, claim.payload, claim.createdBy || undefined);
+      await this.postDocument(companyId, claim.payload, claim.createdBy || undefined, jobId);
     } catch (err: any) {
-      errMsg = String(err?.message || err || 'فشل ترحيل المستند').slice(0, 1000);
+      const errMsg = String(err?.message || err || 'فشل ترحيل المستند').slice(0, 1000);
+      await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+        await tx.query(
+          `UPDATE inv_stock_document_jobs SET status = 'failed', result = NULL, error_message = $3, finished_at = now()
+            WHERE company_id = $1 AND id = $2 AND status = 'running'`,
+          [companyId, jobId, errMsg]
+        );
+      }).catch(() => undefined);
     }
-    await withTenantTransaction(companyId, async (tx: DbExecutor) => {
-      await tx.query(
-        `UPDATE inv_stock_document_jobs SET status = $3, result = $4::jsonb, error_message = $5, finished_at = now()
-          WHERE company_id = $1 AND id = $2`,
-        [companyId, jobId, errMsg ? 'failed' : 'done', result ? JSON.stringify(result) : null, errMsg]
-      );
-    });
   }
 
   /** Claim and post a queued job. Never throws: the outcome is stored on the job. */
@@ -297,30 +319,60 @@ export class StockDocumentService {
     if (claim) await this.executeJob(companyId, jobId, claim);
   }
 
-  /** Read a job. A queued job nobody started (CPU paused after the response) is started by the poll itself. */
-  async getJob(companyId: string, jobId: string): Promise<StockDocumentJob | null> {
-    const row = await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+  /** Pure read of a job row. It changes nothing, so callers can check permission before anything moves. */
+  async readJob(companyId: string, jobId: string): Promise<StockDocumentJob | null> {
+    const row = await this.readJobRow(companyId, jobId);
+    return row ? mapJob(row) : null;
+  }
+
+  private async readJobRow(companyId: string, jobId: string): Promise<any | null> {
+    return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       const r = await tx.query<any>('SELECT * FROM inv_stock_document_jobs WHERE company_id = $1 AND id = $2', [companyId, jobId]);
       return r.rows[0] || null;
     });
+  }
+
+  /**
+   * Move a job forward and return its current state: a queued job nobody started (CPU paused after the
+   * response) is started here, and a job stuck in running for too long is marked failed. Call it only
+   * after the caller was authorized. The state is always re-read when a conditional update did not win.
+   */
+  async advanceJob(companyId: string, jobId: string): Promise<StockDocumentJob | null> {
+    const row = await this.readJobRow(companyId, jobId);
     if (!row) return null;
     if (row.status === 'queued') {
       const claim = await this.claimJob(companyId, jobId);
-      if (claim) void this.executeJob(companyId, jobId, claim).catch(() => undefined);
-      return { ...mapJob(row), status: 'running' };
+      if (claim) {
+        void this.executeJob(companyId, jobId, claim).catch(() => undefined);
+        return { ...mapJob(row), status: 'running' };
+      }
+      const fresh = await this.readJobRow(companyId, jobId);
+      return fresh ? mapJob(fresh) : null;
     }
     if (row.status === 'running' && row.started_at && Date.now() - new Date(row.started_at).getTime() > JOB_STALE_MS) {
-      // The posting transaction is atomic: a process that died mid-way left nothing behind.
-      await withTenantTransaction(companyId, async (tx: DbExecutor) => {
-        await tx.query(
+      // Posting and "done" commit together, so a job still running after this long posted nothing.
+      const upd = await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+        const r = await tx.query<any>(
           `UPDATE inv_stock_document_jobs SET status = 'failed', error_message = $3, finished_at = now()
-            WHERE company_id = $1 AND id = $2 AND status = 'running'`,
+            WHERE company_id = $1 AND id = $2 AND status = 'running' RETURNING id`,
           [companyId, jobId, 'انقطعت المعالجة قبل الاكتمال ولم يُرحَّل شيء، أعد إرسال المستند']
         );
+        return r.rows.length;
       });
-      return { ...mapJob(row), status: 'failed', errorMessage: 'انقطعت المعالجة قبل الاكتمال ولم يُرحَّل شيء، أعد إرسال المستند' };
+      if (upd === 0) {
+        // Someone finished it first: report the real state, never a stale "failed".
+        const fresh = await this.readJobRow(companyId, jobId);
+        return fresh ? mapJob(fresh) : null;
+      }
+      const fresh = await this.readJobRow(companyId, jobId);
+      return fresh ? mapJob(fresh) : null;
     }
     return mapJob(row);
+  }
+
+  /** Read and advance in one call (service-level convenience; routes must authorize between the two). */
+  async getJob(companyId: string, jobId: string): Promise<StockDocumentJob | null> {
+    return await this.advanceJob(companyId, jobId);
   }
 }
 

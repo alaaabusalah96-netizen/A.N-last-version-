@@ -337,6 +337,24 @@ export class OrgUnitService {
   }
 
   /**
+   * Active org units the actor may read: everything for platform admins and unscoped users,
+   * otherwise only the units covered by the actor's effective scopes. Used by screens (for
+   * example the journal screen) that must offer a unit picker without requiring org:units:read.
+   */
+  async listAccessibleUnits(companyId: string, userId: string, isPlatformAdmin: boolean = false): Promise<OrgUnit[]> {
+    if (!companyId || !userId) throw new ValidationError('companyId and userId are required');
+    const units = (await this.orgRepo.listUnits(companyId)).filter((u) => u.isActive);
+    if (isPlatformAdmin) return units;
+    const scopes = await this.orgRepo.listUserScopes(companyId, userId);
+    if (scopes.length === 0) return units;
+    const allowed: OrgUnit[] = [];
+    for (const u of units) {
+      if (await this.assertUserOrgAccess(companyId, userId, u.id, 'read', false)) allowed.push(u);
+    }
+    return allowed;
+  }
+
+  /**
    * Application-layer scope check helper (ADR-03).
    * If a user has defined scopes, asserts whether target orgUnitId is authorized
    * against currently effective scopes (valid_from <= today <= valid_until and active unit).

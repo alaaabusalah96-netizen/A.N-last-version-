@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 238
+- **Total Mounted Endpoints**: 239
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 230
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 231
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -25,6 +25,7 @@
 | `/api/accounting` | `GET` | `/api/accounting/journals/:id` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_READ` | `src/server/routes/accountingRoutes.ts` |
 | `/api/accounting` | `POST` | `/api/accounting/journals/:id/post` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_POST` | `src/server/routes/accountingRoutes.ts` |
 | `/api/accounting` | `POST` | `/api/accounting/journals/:id/reverse` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_POST` | `src/server/routes/accountingRoutes.ts` |
+| `/api/accounting` | `GET` | `/api/accounting/journals/org-units` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_READ` | `src/server/routes/accountingRoutes.ts` |
 | `/api/accounting` | `GET` | `/api/accounting/periods` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_READ` | `src/server/routes/accountingRoutes.ts` |
 | `/api/accounting` | `POST` | `/api/accounting/periods` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_POST` | `src/server/routes/accountingRoutes.ts` |
 | `/api/accounting` | `POST` | `/api/accounting/periods/:id/close` | `true` | `PERMISSIONS.ACCOUNTING_JOURNALS_POST` | `src/server/routes/accountingRoutes.ts` |

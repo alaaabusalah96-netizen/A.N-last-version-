@@ -419,6 +419,19 @@ async function run() {
         s8Scopes.length === 1 && s8Scopes[0].orgUnitId === branchB.id && s8Scopes[0].accessLevel === 'approve'
       );
 
+      // S8b: the journal screen's unit picker list is limited to the user's scope (no org:units:read needed)
+      const s8bScoped = await runInTenant(companyAId, () =>
+        defaultOrgUnitService.listAccessibleUnits(companyAId!, scopedUserId, false)
+      );
+      const s8bAdmin = await runInTenant(companyAId, () =>
+        defaultOrgUnitService.listAccessibleUnits(companyAId!, platformAdminId, true)
+      );
+      await check(
+        'S8b: listAccessibleUnits returns only scoped units for a scoped user and all active units for platform_admin',
+        s8bScoped.some((u) => u.id === branchB.id) && s8bScoped.length < s8bAdmin.length && s8bAdmin.length >= 2,
+        `scoped=${s8bScoped.length} admin=${s8bAdmin.length}`
+      );
+
       // S9: Permission audit count for USER_SCOPE_SET matches successful saves for scopedUserId
       // Expected successful saves on scopedUserId = 3 (S2, S6, S8; S7 rolled back on ForbiddenError!)
       const auditRes = await runInTenant(companyAId, () =>

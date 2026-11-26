@@ -397,13 +397,17 @@ inventoryRoutes.get(
   wrap(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
     const companyId = (req.query.companyId as string) || '';
-    const job = await defaultStockDocumentService.getJob(companyId, req.params.jobId);
-    if (!job) throw new NotFoundError('مهمة الترحيل غير موجودة');
+    if (!companyId || !isUuid(companyId)) throw new ValidationError('Invalid or missing company ID format');
+    // 1) pure read, 2) authorize, 3) only then let the job move forward.
+    const existing = await defaultStockDocumentService.readJob(companyId, req.params.jobId);
+    if (!existing) throw new NotFoundError('مهمة الترحيل غير موجودة');
     await assertInventoryPermission(
       user,
-      job.docType === 'adjustment' ? PERMISSIONS.INVENTORY_VALUATION_ADJUST : PERMISSIONS.INVENTORY_MOVEMENT,
+      existing.docType === 'adjustment' ? PERMISSIONS.INVENTORY_VALUATION_ADJUST : PERMISSIONS.INVENTORY_MOVEMENT,
       companyId
     );
+    const job = await defaultStockDocumentService.advanceJob(companyId, req.params.jobId);
+    if (!job) throw new NotFoundError('مهمة الترحيل غير موجودة');
     return res.status(200).json({ status: 'ok', job });
   })
 );
