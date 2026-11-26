@@ -233,7 +233,7 @@ async function run() {
 
     const service = new SalesInvoiceService(
       fakeInvoiceRepo,
-      {} as any,
+      { findById: async () => ({ id: 'cust', isActive: true, creditLimit: 0 }) } as any,
       fakeJournalRepo,
       fakeJournalService,
       fakeAuditService

@@ -1358,7 +1358,7 @@ describe('Package 7B — PPV, MA Purchase Returns, Sales Returns, Reconciliation
       };
       const service2 = new SalesInvoiceService(
         reInvRepo,
-        {} as any,
+        { findById: vi.fn().mockResolvedValue({ id: 'cust-1', isActive: true, creditLimit: 0 }) } as any,
         { allocateSequenceNumber: vi.fn().mockResolvedValue('SINV-2') } as any,
         reInvJournalService,
         auditService
