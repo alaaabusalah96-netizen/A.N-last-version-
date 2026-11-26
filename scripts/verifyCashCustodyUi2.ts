@@ -74,4 +74,5 @@ assert(/<CustodyStatementPanel[\s\S]{0,400}expenseAccounts=\{expenseAccountOptio
 assert(/import \{ CustodyStatementPanel \}/.test(workspace), 'U5 imported');
 assert(/companyName=\{companies\.find\(\(c\) => c\.id === selectedCompanyId\)\?\.nameAr\}/.test(workspace), 'U5b voucher header uses the selected company name');
 assert(/companyName \|\| 'A\.N ERP'/.test(panel), 'U5c print falls back only when no company name');
+assert(workspace.includes("'مستوى الشركة'") && /<th[^>]*>الوحدة التنظيمية<\/th>/.test(workspace), 'U5d custody list has its own unit column with explicit company-level label');
 console.log('verifyCashCustodyUi2: ALL PASS');

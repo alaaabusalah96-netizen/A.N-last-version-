@@ -1203,6 +1203,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                     <th className="py-3.5 px-4">رقم العهدة</th>
                     <th className="py-3.5 px-4">الموظف</th>
                     <th className="py-3.5 px-4">الصندوق</th>
+                    <th className="py-3.5 px-4">الوحدة التنظيمية</th>
                     <th className="py-3.5 px-4">المبلغ</th>
                     <th className="py-3.5 px-4">الحالة</th>
                     <th className="py-3.5 px-4">تاريخ الطلب</th>
@@ -1212,13 +1213,13 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                 <tbody className="divide-y divide-slate-800/60 text-slate-200">
                   {loading && custodies.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <td colSpan={8} className="py-12 text-center text-slate-400">
                         جاري تحميل العهد...
                       </td>
                     </tr>
                   ) : custodies.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-500">
+                      <td colSpan={8} className="py-12 text-center text-slate-500">
                         لا توجد عهد مطابقة للبحث حالياً
                       </td>
                     </tr>
@@ -1239,9 +1240,9 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                         <td className="py-3.5 px-4 font-medium text-white">{c.employeeUsername || c.employeeUserId}</td>
                         <td className="py-3.5 px-4 text-slate-300">
                           {c.registerCode ? `${c.registerCode} · ${c.registerNameAr || ''}` : c.registerNameAr || c.registerId}
-                          {c.orgUnitId && unitLabel(c.orgUnitId) && (
-                            <div className="text-[10px] text-slate-500 mt-0.5" data-testid="custody-unit-label">{unitLabel(c.orgUnitId)}</div>
-                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300" data-testid="custody-unit-label">
+                          {c.orgUnitId && unitLabel(c.orgUnitId) ? unitLabel(c.orgUnitId) : 'مستوى الشركة'}
                         </td>
                         <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-emerald-300">
                           {Number(c.amount).toFixed(2)}
@@ -1909,6 +1910,9 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                       </option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    اختياري. تحدد الوحدة التي تُنسب إليها هذه العهدة في التقارير. اتركها "على مستوى الشركة" إذا لم تخص وحدة بعينها.
+                  </p>
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
