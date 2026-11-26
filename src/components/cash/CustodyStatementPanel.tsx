@@ -96,6 +96,8 @@ export interface CustodyStatementPanelProps {
   expenseAccounts: AccountOption[];
   can: (permission: string) => boolean;
   onChanged?: () => void;
+  /** Company name printed on the voucher header (selected company, Arabic name). */
+  companyName?: string;
 }
 
 const VOUCHER_STATUS_AR: Record<string, string> = {
@@ -126,7 +128,7 @@ const SETTLEMENT_STATUS_AR: Record<string, string> = {
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 
 export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
-  const { companyId, custodyId, custodyStatus, expenseAccounts, can, onChanged } = props;
+  const { companyId, custodyId, custodyStatus, expenseAccounts, can, onChanged, companyName } = props;
   const isOpen = custodyStatus === 'open';
   const [statement, setStatement] = useState<StatementView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -311,7 +313,7 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
                                 printCustodyVoucher(
                                   { voucherNo: v.voucherNo, status: v.status, totalAmount: v.totalAmount, memo: v.memo,
                                     lines: v.lines.map((l) => ({ expenseAccountName: accountName(l.expenseAccountId), amount: l.amount, memo: l.memo })) },
-                                  'A.N ERP'
+                                  companyName || 'A.N ERP'
                                 );
                               } catch (e) {
                                 setError(e instanceof Error ? e.message : 'تعذرت الطباعة');

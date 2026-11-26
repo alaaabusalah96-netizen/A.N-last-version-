@@ -72,4 +72,6 @@ assert(/!\(reasonById\[v\.id\] \|\| ''\)\.trim\(\)/.test(panel), 'U4 reject/reve
 // U5: mounted in the custody drawer with account options and permission checker.
 assert(/<CustodyStatementPanel[\s\S]{0,400}expenseAccounts=\{expenseAccountOptions\}[\s\S]{0,200}can=\{can\}/.test(workspace), 'U5 mounted in drawer with accounts and can()');
 assert(/import \{ CustodyStatementPanel \}/.test(workspace), 'U5 imported');
+assert(/companyName=\{companies\.find\(\(c\) => c\.id === selectedCompanyId\)\?\.nameAr\}/.test(workspace), 'U5b voucher header uses the selected company name');
+assert(/companyName \|\| 'A\.N ERP'/.test(panel), 'U5c print falls back only when no company name');
 console.log('verifyCashCustodyUi2: ALL PASS');

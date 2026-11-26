@@ -2237,6 +2237,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
               expenseAccounts={expenseAccountOptions}
               can={can}
               onChanged={() => void openCustodyDetail(detailCustody)}
+              companyName={companies.find((c) => c.id === selectedCompanyId)?.nameAr}
             />
 
             <div>
