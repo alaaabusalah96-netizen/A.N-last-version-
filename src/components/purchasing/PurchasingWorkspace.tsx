@@ -28,6 +28,21 @@ import {
   resolveTrustedMatchInvoice,
 } from './matchReportController.js';
 
+
+async function apiCall(path: string, init: RequestInit = {}): Promise<Response> {
+  const res = await apiFetch(path, init);
+  if (!res.ok) {
+    let data: any = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    throw new Error(data.message || data.error || `فشل تنفيذ الطلب (${res.status})`);
+  }
+  return res;
+}
+
 interface Company {
   id: string;
   code: string;
@@ -330,7 +345,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch('/api/purchasing/returns', {
+      await apiCall('/api/purchasing/returns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -366,7 +381,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/purchasing/returns/${id}/post`, {
+      await apiCall(`/api/purchasing/returns/${id}/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId: selectedCompanyId }),
@@ -385,7 +400,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/purchasing/returns/${id}?companyId=${selectedCompanyId}`, {
+      await apiCall(`/api/purchasing/returns/${id}?companyId=${selectedCompanyId}`, {
         method: 'DELETE',
       });
       setSuccess('تم حذف مسودة المرتجع بنجاح');
@@ -403,7 +418,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch('/api/purchasing/supplier-payments', {
+      await apiCall('/api/purchasing/supplier-payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -434,7 +449,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/purchasing/supplier-payments/${id}/post`, {
+      await apiCall(`/api/purchasing/supplier-payments/${id}/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId: selectedCompanyId }),
@@ -453,7 +468,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/purchasing/supplier-payments/${id}?companyId=${selectedCompanyId}`, {
+      await apiCall(`/api/purchasing/supplier-payments/${id}?companyId=${selectedCompanyId}`, {
         method: 'DELETE',
       });
       setSuccess('تم حذف مسودة سند السداد بنجاح');
@@ -1833,6 +1848,11 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                       <td className="py-3.5 px-4 text-center font-mono tabular-nums text-emerald-400">{item.paidPaymentTotal.toFixed(2)}</td>
                       <td className="py-3.5 px-4 text-center font-mono tabular-nums font-bold text-amber-300 text-sm">
                         {item.remainingOpenAmount.toFixed(2)}
+                        {item.supplierCreditAmount > 0 && (
+                          <div className="text-[10px] font-normal text-sky-300">
+                            رصيد دائن للمورد: {item.supplierCreditAmount.toFixed(2)}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
@@ -2699,7 +2719,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                   <option value="">-- اختر الصندوق المسدد منه --</option>
                   {cashRegisters.map((reg) => (
                     <option key={reg.id} value={reg.id}>
-                      {reg.nameAr || reg.name} ({reg.code}) {reg.balance !== undefined ? `| الرصيد: ${Number(reg.balance).toFixed(2)}` : ''}
+                      {reg.nameAr || reg.name} ({reg.code}) {Number.isFinite(Number(reg.currentBalance ?? reg.balance)) && (reg.currentBalance ?? reg.balance) !== null && (reg.currentBalance ?? reg.balance) !== undefined ? `| الرصيد: ${Number(reg.currentBalance ?? reg.balance).toFixed(2)}` : ''}
                     </option>
                   ))}
                 </select>

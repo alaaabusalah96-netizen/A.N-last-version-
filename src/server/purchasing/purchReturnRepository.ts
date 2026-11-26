@@ -321,7 +321,7 @@ export class PurchReturnRepository {
           gl.qty as "grnQty",
           COALESCE(gl.unit_cost, 0) as "unitCost",
           COALESCE(ret.returned_qty, 0) as "alreadyReturnedQty",
-          (gl.qty - COALESCE(ret.returned_qty, 0)) as "returnableQty"
+          LEAST(gl.qty - COALESCE(ret.returned_qty, 0), COALESCE(sb.qty, 0)) as "returnableQty"
         FROM purch_grn_lines gl
         INNER JOIN purch_grn g ON g.id = gl.grn_id AND g.company_id = gl.company_id
         INNER JOIN inv_items i ON i.id = gl.item_id AND i.company_id = gl.company_id
@@ -332,8 +332,10 @@ export class PurchReturnRepository {
           WHERE pr.company_id = $1 AND pr.status = 'posted'
           GROUP BY prl.grn_line_id
         ) ret ON ret.grn_line_id = gl.id
+        LEFT JOIN inv_stock_balances sb
+          ON sb.company_id = g.company_id AND sb.warehouse_id = g.warehouse_id AND sb.item_id = gl.item_id
         WHERE g.company_id = $1 AND g.status = 'posted' ${supplierFilter}
-          AND (gl.qty - COALESCE(ret.returned_qty, 0)) > 0
+          AND LEAST(gl.qty - COALESCE(ret.returned_qty, 0), COALESCE(sb.qty, 0)) > 0
         ORDER BY g.created_at ASC, gl.line_no ASC;
       `;
       const res = await executor.query<any>(sql, params);

@@ -21,6 +21,7 @@ export interface ApOpenItemRow {
   creditedReturnTotal: number;
   paidPaymentTotal: number;
   remainingOpenAmount: number;
+  supplierCreditAmount: number;
   paymentStatus: 'open' | 'partial' | 'paid';
   agingDays: number;
 }
@@ -34,6 +35,7 @@ export function computeApOpenAmounts(
   creditedReturnTotal: number;
   paidPaymentTotal: number;
   remainingOpenAmount: number;
+  supplierCreditAmount: number;
   paymentStatus: 'open' | 'partial' | 'paid';
 } {
   const invUnits = toMinorUnits(invoiceTotalRaw, MONEY_SCALE);
@@ -47,6 +49,9 @@ export function computeApOpenAmounts(
   const remainingOpenAmount =
     openUnits > BigInt(0) ? Number(fromMinorUnits(openUnits, MONEY_SCALE)) : 0;
 
+  const supplierCreditAmount =
+    openUnits < BigInt(0) ? Number(fromMinorUnits(-openUnits, MONEY_SCALE)) : 0;
+
   let paymentStatus: 'open' | 'partial' | 'paid' = 'open';
   if (remainingOpenAmount <= 0) {
     paymentStatus = 'paid';
@@ -59,6 +64,7 @@ export function computeApOpenAmounts(
     creditedReturnTotal,
     paidPaymentTotal,
     remainingOpenAmount,
+    supplierCreditAmount,
     paymentStatus,
   };
 }
@@ -146,6 +152,7 @@ export class ApOpenItemsService {
           creditedReturnTotal: amounts.creditedReturnTotal,
           paidPaymentTotal: amounts.paidPaymentTotal,
           remainingOpenAmount: amounts.remainingOpenAmount,
+          supplierCreditAmount: amounts.supplierCreditAmount,
           paymentStatus: amounts.paymentStatus,
           agingDays,
         });

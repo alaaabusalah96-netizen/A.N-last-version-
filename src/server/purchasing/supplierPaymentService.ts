@@ -220,7 +220,7 @@ export class SupplierPaymentService {
       const registerBalance = await this.registerService.getBalance(companyId, payment.registerId, tx);
       if (registerBalance.currentBalance < payment.amount) {
         throw new ValidationError(
-          `رصيد صندوق النقدية غيرsufficient (${registerBalance.currentBalance}) لتغطية مبلغ السداد (${payment.amount})`
+          `رصيد صندوق النقدية غير كافٍ (${registerBalance.currentBalance}) لتغطية مبلغ السداد (${payment.amount})`
         );
       }
 
