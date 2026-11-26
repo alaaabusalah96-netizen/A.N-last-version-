@@ -22,6 +22,13 @@ export class CompanySettingsRepository {
           inventory_adjustment_account_id as "inventoryAdjustmentAccountId",
           opening_balance_equity_account_id as "openingBalanceEquityAccountId",
           enforce_custody_separation as "enforceCustodySeparation",
+          vat_enabled as "vatEnabled",
+          default_vat_rate::float8 as "defaultVatRate",
+          prices_include_vat as "pricesIncludeVat",
+          vat_input_recoverable as "vatInputRecoverable",
+          vat_rounding_mode as "vatRoundingMode",
+          vat_payable_account_id as "vatPayableAccountId",
+          vat_input_account_id as "vatInputAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -52,6 +59,8 @@ export class CompanySettingsRepository {
           inventory_adjustment_account_id,
           opening_balance_equity_account_id,
           enforce_custody_separation,
+          vat_enabled, default_vat_rate, prices_include_vat, vat_input_recoverable, vat_rounding_mode,
+          vat_payable_account_id, vat_input_account_id,
           updated_at, 
           updated_by
         )
@@ -70,6 +79,8 @@ export class CompanySettingsRepository {
           $17,
           $19,
           COALESCE($21, TRUE),
+          COALESCE($22::boolean, FALSE), COALESCE($23::numeric, 0), COALESCE($24::boolean, FALSE), COALESCE($25::boolean, TRUE), COALESCE($26::text, 'line'),
+          $28::uuid, $30::uuid,
           NOW(), 
           $8
         )
@@ -87,6 +98,13 @@ export class CompanySettingsRepository {
           inventory_adjustment_account_id = CASE WHEN $18 THEN EXCLUDED.inventory_adjustment_account_id ELSE company_settings.inventory_adjustment_account_id END,
           opening_balance_equity_account_id = CASE WHEN $20 THEN EXCLUDED.opening_balance_equity_account_id ELSE company_settings.opening_balance_equity_account_id END,
           enforce_custody_separation = CASE WHEN $21::boolean IS NOT NULL THEN EXCLUDED.enforce_custody_separation ELSE company_settings.enforce_custody_separation END,
+          vat_enabled = CASE WHEN $22::boolean IS NOT NULL THEN EXCLUDED.vat_enabled ELSE company_settings.vat_enabled END,
+          default_vat_rate = CASE WHEN $23::numeric IS NOT NULL THEN EXCLUDED.default_vat_rate ELSE company_settings.default_vat_rate END,
+          prices_include_vat = CASE WHEN $24::boolean IS NOT NULL THEN EXCLUDED.prices_include_vat ELSE company_settings.prices_include_vat END,
+          vat_input_recoverable = CASE WHEN $25::boolean IS NOT NULL THEN EXCLUDED.vat_input_recoverable ELSE company_settings.vat_input_recoverable END,
+          vat_rounding_mode = CASE WHEN $26::text IS NOT NULL THEN EXCLUDED.vat_rounding_mode ELSE company_settings.vat_rounding_mode END,
+          vat_payable_account_id = CASE WHEN $27::boolean THEN EXCLUDED.vat_payable_account_id ELSE company_settings.vat_payable_account_id END,
+          vat_input_account_id = CASE WHEN $29::boolean THEN EXCLUDED.vat_input_account_id ELSE company_settings.vat_input_account_id END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -104,6 +122,13 @@ export class CompanySettingsRepository {
           inventory_adjustment_account_id as "inventoryAdjustmentAccountId",
           opening_balance_equity_account_id as "openingBalanceEquityAccountId",
           enforce_custody_separation as "enforceCustodySeparation",
+          vat_enabled as "vatEnabled",
+          default_vat_rate::float8 as "defaultVatRate",
+          prices_include_vat as "pricesIncludeVat",
+          vat_input_recoverable as "vatInputRecoverable",
+          vat_rounding_mode as "vatRoundingMode",
+          vat_payable_account_id as "vatPayableAccountId",
+          vat_input_account_id as "vatInputAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -130,6 +155,15 @@ export class CompanySettingsRepository {
         input.openingBalanceEquityAccountId === undefined ? null : input.openingBalanceEquityAccountId,
         input.openingBalanceEquityAccountId !== undefined,
         typeof input.enforceCustodySeparation === 'boolean' ? input.enforceCustodySeparation : null,
+        typeof input.vatEnabled === 'boolean' ? input.vatEnabled : null,
+        typeof input.defaultVatRate === 'number' ? input.defaultVatRate : null,
+        typeof input.pricesIncludeVat === 'boolean' ? input.pricesIncludeVat : null,
+        typeof input.vatInputRecoverable === 'boolean' ? input.vatInputRecoverable : null,
+        typeof input.vatRoundingMode === 'string' ? input.vatRoundingMode : null,
+        input.vatPayableAccountId !== undefined,
+        input.vatPayableAccountId === undefined ? null : input.vatPayableAccountId,
+        input.vatInputAccountId !== undefined,
+        input.vatInputAccountId === undefined ? null : input.vatInputAccountId,
       ]);
 
       return res.rows[0];

@@ -13,6 +13,13 @@ export interface CompanySettings {
   inventoryAdjustmentAccountId?: string | null;
   openingBalanceEquityAccountId?: string | null;
   enforceCustodySeparation?: boolean;
+  vatEnabled?: boolean;
+  defaultVatRate?: number;
+  pricesIncludeVat?: boolean;
+  vatInputRecoverable?: boolean;
+  vatRoundingMode?: 'line' | 'document';
+  vatPayableAccountId?: string | null;
+  vatInputAccountId?: string | null;
   updatedAt: string;
   updatedBy?: string | null;
 }
@@ -31,4 +38,11 @@ export interface UpsertCompanySettingsInput {
   inventoryAdjustmentAccountId?: string | null;
   openingBalanceEquityAccountId?: string | null;
   enforceCustodySeparation?: boolean;
+  vatEnabled?: boolean;
+  defaultVatRate?: number;
+  pricesIncludeVat?: boolean;
+  vatInputRecoverable?: boolean;
+  vatRoundingMode?: 'line' | 'document';
+  vatPayableAccountId?: string | null;
+  vatInputAccountId?: string | null;
 }
