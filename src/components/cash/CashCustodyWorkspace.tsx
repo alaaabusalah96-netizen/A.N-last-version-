@@ -1306,7 +1306,6 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
       {/* Tab 3: Open Custody Balances by Employee */}
       {activeTab === 'open_balances' && (
         <>
-        <CustodyShortageAgeingPanel companyId={selectedCompanyId} />
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full text-right text-xs">
@@ -1358,6 +1357,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
             </table>
           </div>
         </div>
+        <CustodyShortageAgeingPanel companyId={selectedCompanyId} />
         </>
       )}
 
