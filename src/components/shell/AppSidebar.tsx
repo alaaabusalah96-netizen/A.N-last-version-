@@ -1,3 +1,4 @@
+import { canAccessNav } from '../../lib/navAccess.js';
 import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, Wallet, SlidersHorizontal, Shield, Sliders, X, TrendingUp } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
@@ -98,7 +99,8 @@ export function AppSidebar({
       <div className="flex-1 px-3 py-2 space-y-1">
         <p className="px-3 pb-2 text-[11px] font-semibold text-slate-500 tracking-wider">القائمة الرئيسية</p>
 
-        <button
+        {canAccessNav('companies', userRole, permissions) && (
+<button
           onClick={() => onNavigate('companies')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'companies'
@@ -109,8 +111,10 @@ export function AppSidebar({
           <Building2 className="w-4 h-4 shrink-0" />
           <span>الشركات</span>
         </button>
+        )}
 
-        <button
+        {canAccessNav('accounting', userRole, permissions) && (
+<button
           onClick={() => onNavigate('accounting')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'accounting'
@@ -121,8 +125,10 @@ export function AppSidebar({
           <BookOpen className="w-4 h-4 shrink-0" />
           <span>المحاسبة</span>
         </button>
+        )}
 
-        <button
+        {canAccessNav('inventory', userRole, permissions) && (
+<button
           onClick={() => onNavigate('inventory')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'inventory'
@@ -133,8 +139,10 @@ export function AppSidebar({
           <Boxes className="w-4 h-4 shrink-0" />
           <span>المخزون</span>
         </button>
+        )}
 
-        <button
+        {canAccessNav('purchasing', userRole, permissions) && (
+<button
           onClick={() => onNavigate('purchasing')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'purchasing'
@@ -145,12 +153,10 @@ export function AppSidebar({
           <ShoppingBag className="w-4 h-4 shrink-0" />
           <span>المشتريات</span>
         </button>
+        )}
 
-        {(userRole === 'platform_admin' ||
-          userRole === 'company_admin' ||
-          permissions.length === 0 ||
-          permissions.includes('sales:read')) && (
-          <button
+        {canAccessNav('sales', userRole, permissions) && (
+<button
             onClick={() => onNavigate('sales')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
               activeNav === 'sales'
@@ -163,11 +169,8 @@ export function AppSidebar({
           </button>
         )}
 
-        {(userRole === 'platform_admin' ||
-          userRole === 'company_admin' ||
-          permissions.length === 0 ||
-          permissions.includes('cash:read')) && (
-          <button
+        {canAccessNav('cash', userRole, permissions) && (
+<button
             onClick={() => onNavigate('cash')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
               activeNav === 'cash'
@@ -180,7 +183,8 @@ export function AppSidebar({
           </button>
         )}
 
-        <button
+        {canAccessNav('users', userRole, permissions) && (
+<button
           onClick={() => onNavigate('users')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'users'
@@ -191,9 +195,10 @@ export function AppSidebar({
           <Users className="w-4 h-4 shrink-0" />
           <span>المستخدمون</span>
         </button>
+        )}
 
-        {(userRole === 'platform_admin' || userRole === 'company_admin' || permissions.includes('roles.read')) && (
-          <button
+        {canAccessNav('roles', userRole, permissions) && (
+<button
             onClick={() => onNavigate('roles')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
               activeNav === 'roles'
@@ -206,7 +211,8 @@ export function AppSidebar({
           </button>
         )}
 
-        <button
+        {canAccessNav('org_units', userRole, permissions) && (
+<button
           onClick={() => onNavigate('org_units')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'org_units'
@@ -217,8 +223,10 @@ export function AppSidebar({
           <Network className="w-4 h-4 shrink-0" />
           <span>الوحدات التنظيمية</span>
         </button>
+        )}
 
-        <button
+        {canAccessNav('company_settings', userRole, permissions) && (
+<button
           onClick={() => onNavigate('company_settings')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'company_settings'
@@ -229,8 +237,10 @@ export function AppSidebar({
           <Settings className="w-4 h-4 shrink-0" />
           <span>إعدادات الشركة</span>
         </button>
+        )}
 
-        <button
+        {canAccessNav('custom_fields', userRole, permissions) && (
+<button
           onClick={() => onNavigate('custom_fields')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'custom_fields'
@@ -241,8 +251,10 @@ export function AppSidebar({
           <Sliders className="w-4 h-4 shrink-0" />
           <span>الحقول الإضافية</span>
         </button>
+        )}
 
-        <button
+        {canAccessNav('config_platform', userRole, permissions) && (
+<button
           onClick={() => onNavigate('config_platform')}
           className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
             activeNav === 'config_platform'
@@ -253,9 +265,10 @@ export function AppSidebar({
           <SlidersHorizontal className="w-4 h-4 shrink-0" />
           <span>منصة الإعدادات</span>
         </button>
+        )}
 
-        {userRole === 'platform_admin' && (
-          <button
+        {canAccessNav('config_definitions', userRole, permissions) && (
+<button
             onClick={() => onNavigate('config_definitions')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
               activeNav === 'config_definitions'
