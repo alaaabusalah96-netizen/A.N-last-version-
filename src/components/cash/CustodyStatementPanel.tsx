@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountOption } from '../../lib/accountRules.js';
+import { printCustodyVoucher } from '../../lib/custodyVoucherPrint.js';
 
 /**
  * كشف حساب العهدة (حوافظ، تعزيز، جرد، مطالبة عجز وسداد).
@@ -300,6 +301,26 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
                       <td className="py-2 px-3">{fmt(v.totalAmount)}</td>
                       <td className="py-2 px-3">{v.lines.map((l) => `${accountName(l.expenseAccountId)}: ${fmt(l.amount)}`).join(' | ')}</td>
                       <td className="py-2 px-3">
+                        {v.status === 'approved' && (
+                          <button
+                            type="button"
+                            data-testid={`print-voucher-${v.voucherNo}`}
+                            className="mb-1 px-2 py-1 rounded bg-slate-700 text-white text-xs"
+                            onClick={() => {
+                              try {
+                                printCustodyVoucher(
+                                  { voucherNo: v.voucherNo, status: v.status, totalAmount: v.totalAmount, memo: v.memo,
+                                    lines: v.lines.map((l) => ({ expenseAccountName: accountName(l.expenseAccountId), amount: l.amount, memo: l.memo })) },
+                                  'A.N ERP'
+                                );
+                              } catch (e) {
+                                setError(e instanceof Error ? e.message : 'تعذرت الطباعة');
+                              }
+                            }}
+                          >
+                            طباعة
+                          </button>
+                        )}
                         {(v.status === 'submitted' || v.status === 'approved') && can('custody:approve') && (
                           <div className="flex items-center gap-2">
                             <input
