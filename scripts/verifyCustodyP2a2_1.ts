@@ -174,6 +174,14 @@ async function run() {
       (await regBalance()) === balBefore + 25 && (await receivableNet()) === 975 &&
       part.repayments.length === 1 && Boolean(part.repayments[0].journalEntryId));
 
+    // S3b: ageing of the open claim (35 outstanding, created today -> 0-30 bucket), isolation per company
+    const ag = await defaultCustodyExtrasService.getShortageAgeing(compA.id);
+    const agFar = await defaultCustodyExtrasService.getShortageAgeing(compA.id, new Date(Date.now() + 100 * 86400000).toISOString());
+    const agB = await defaultCustodyExtrasService.getShortageAgeing(compB.id);
+    await check('S3b: shortage ageing shows the 35 outstanding in 0-30 days, moves to over-90 100 days later, and company B sees nothing',
+      ag.total === 35 && ag.rows.length === 1 && ag.rows[0].b0_30 === 35 && ag.rows[0].claims === 1 &&
+      agFar.rows[0].over90 === 35 && agFar.rows[0].b0_30 === 0 && agB.rows.length === 0 && agB.total === 0);
+
     // S4
     await check('S4: repayment above the outstanding amount, zero, or 3 decimals is rejected',
       (await rejects(() => defaultCustodyExtrasService.repayShortage(compA.id, claim.id, { amount: 36 }, approver.id, false), ValidationError)) &&

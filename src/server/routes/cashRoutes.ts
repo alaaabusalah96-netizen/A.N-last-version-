@@ -489,6 +489,18 @@ cashRoutes.get(
 );
 
 cashRoutes.get(
+  '/reports/custody-shortage-ageing',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const report = await defaultCustodyExtrasService.getShortageAgeing(companyId, req.query.asOf ? String(req.query.asOf) : undefined);
+    res.json({ status: 'ok', report });
+  })
+);
+
+cashRoutes.get(
   '/custodies/:id/period-report',
   requireAuth,
   wrap(async (req: AuthenticatedRequest, res: Response) => {

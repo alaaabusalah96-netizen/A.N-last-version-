@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { CustodyStatementPanel } from './CustodyStatementPanel.js';
+import { CustodyShortageAgeingPanel } from './CustodyShortageAgeingPanel.js';
 import { AccountOption, usableAccounts } from '../../lib/accountRules.js';
 import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 
@@ -1304,6 +1305,8 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
 
       {/* Tab 3: Open Custody Balances by Employee */}
       {activeTab === 'open_balances' && (
+        <>
+        <CustodyShortageAgeingPanel companyId={selectedCompanyId} />
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full text-right text-xs">
@@ -1355,6 +1358,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* Tab 4: Receipt & Payment Vouchers (سندات) */}

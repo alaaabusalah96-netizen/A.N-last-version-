@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 241
+- **Total Mounted Endpoints**: 242
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 233
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 234
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -99,6 +99,7 @@
 | `/api/cash` | `GET` | `/api/cash/registers/:id/movements` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/registers/:id/post-opening-balance` | `true` | `PERMISSIONS.CASH_WRITE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/reports/custody-by-employee` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/reports/custody-shortage-ageing` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/reports/open-custodies` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/reports/register-movements` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/companies` | `GET` | `/api/companies` | `true` | `PERMISSIONS.COMPANY_READ` | `src/server/routes/companyRoutes.ts` |

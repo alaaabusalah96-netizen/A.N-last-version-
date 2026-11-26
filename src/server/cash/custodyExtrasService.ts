@@ -1,4 +1,5 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
+import { buildShortageAgeing, type AgeingRow } from './custodyShortageAgeing.js';
 import { buildPeriodReport, balanceAsOf, availableAfterReservation, type CustodyPeriodReport } from './custodyPeriodReport.js';
 import { DbExecutor } from '../db/types.js';
 import { CustodyRepository, defaultCustodyRepository } from './custodyRepository.js';
@@ -429,6 +430,30 @@ export class CustodyExtrasService {
       const sum = (type: string) => toMoney(movements.filter((m) => m.movementType === type).reduce((s, m) => s + m.amount, 0));
       const statementRemaining = toMoney(custody.amount - (sum('settle_expense') - sum('reverse')) - toMoney(sum('settle_return') + sum('shortage_repay')));
       return { ...report, asOfBalance: balanceAsOf(movements, to), statementRemaining, reconciled: allTime === statementRemaining };
+    });
+  }
+
+  /** Outstanding shortage claims of the whole company, aged per employee. Read-only. */
+  async getShortageAgeing(companyId: string, asOfIso?: string): Promise<{ asOf: string; rows: AgeingRow[]; total: number }> {
+    if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
+    const asOf = asOfIso ? new Date(asOfIso) : new Date();
+    if (Number.isNaN(asOf.getTime())) throw new ValidationError('تاريخ غير صالح');
+    return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const custodies = await tx.query<any>(
+        `SELECT DISTINCT k.id, k.employee_user_id AS "employeeUserId", COALESCE(u.username, '') AS "employeeUsername"
+         FROM custody_shortage_claims c
+         JOIN custody_records k ON k.id = c.custody_id AND k.company_id = c.company_id
+         LEFT JOIN platform_users u ON u.id = k.employee_user_id
+         WHERE c.company_id = $1`,
+        [companyId]
+      );
+      const inputs: Parameters<typeof buildShortageAgeing>[0] = [];
+      for (const k of custodies.rows as any[]) {
+        for (const cl of await this.loadClaims(companyId, k.id, tx)) {
+          inputs.push({ employeeUserId: k.employeeUserId, employeeUsername: k.employeeUsername, claimId: cl.id, createdAt: cl.createdAt, outstanding: cl.outstanding });
+        }
+      }
+      return { asOf: asOf.toISOString(), ...buildShortageAgeing(inputs, asOf) };
     });
   }
 
