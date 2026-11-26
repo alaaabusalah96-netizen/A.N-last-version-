@@ -1,3 +1,4 @@
+import { canAccessNav } from './lib/navAccess.js';
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { RefreshCw, Menu } from 'lucide-react';
 import { LoginForm } from './components/LoginForm.js';
@@ -122,6 +123,21 @@ export default function App() {
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
+
+  // A user must never sit on a section the menu hides from them: move to the first allowed one.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (canAccessNav(activeNav, currentUser.role, currentUser.permissions)) return;
+    const order: Array<typeof activeNav> = ['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'];
+    const first = order.find((k) => canAccessNav(k, currentUser.role, currentUser.permissions));
+    if (first) setActiveNav(first);
+  }, [currentUser, activeNav]);
+
+  const noSectionAllowed =
+    !!currentUser &&
+    !(['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'] as const).some((k) =>
+      canAccessNav(k, currentUser.role, currentUser.permissions)
+    );
 
   const handleNavigate = (nav: typeof activeNav) => {
     setActiveNav(nav);
@@ -269,7 +285,11 @@ export default function App() {
               />
             }
           >
-            {activeNav === 'companies' ? (
+            {noSectionAllowed ? (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-sm text-amber-100" data-testid="no-permissions">
+                حسابك لا يملك أي صلاحية على أقسام النظام حتى الآن. اطلب من مدير الشركة منحك دورًا مناسبًا ثم سجّل الدخول من جديد.
+              </div>
+            ) : activeNav === 'companies' ? (
               <CompaniesPanel userRole={currentUser.role} />
             ) : activeNav === 'accounting' ? (
               <AccountingWorkspace userRole={currentUser.role} />
@@ -294,7 +314,7 @@ export default function App() {
             ) : activeNav === 'custom_fields' ? (
               <CustomFieldsPanel />
             ) : (
-              <CompanySettingsPanel userRole={currentUser.role} />
+              <CompanySettingsPanel userRole={currentUser.role} permissions={currentUser.permissions || []} />
             )}
           </Suspense>
         </WorkspaceErrorBoundary>
