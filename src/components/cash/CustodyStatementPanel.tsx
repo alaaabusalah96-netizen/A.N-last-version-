@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { AccountOption } from '../../lib/accountRules.js';
+import { VoucherLineDraft, emptyLine, sumLinesMoney, linesReady, toPayloadLines, draftFromVoucher } from '../../lib/voucherLines.js';
 import { printCustodyVoucher } from '../../lib/custodyVoucherPrint.js';
 
 /**
@@ -133,8 +134,7 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
-  const [vAccount, setVAccount] = useState('');
-  const [vAmount, setVAmount] = useState('');
+  const [vLines, setVLines] = useState<VoucherLineDraft[]>([emptyLine()]);
   const [vMemo, setVMemo] = useState('');
   const [topUpAmount, setTopUpAmount] = useState('');
   const [topUpMemo, setTopUpMemo] = useState('');
@@ -200,11 +200,11 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
     e.preventDefault();
     const done = await post(
       `/api/cash/custodies/${custodyId}/vouchers`,
-      { lines: [{ expenseAccountId: vAccount, amount: vAmount, memo: vMemo.trim() || null }], memo: vMemo.trim() || null },
+      { lines: toPayloadLines(vLines), memo: vMemo.trim() || null },
       'تم تقديم الحافظة'
     );
     if (done) {
-      setVAmount('');
+      setVLines([emptyLine()]);
       setVMemo('');
     }
   };
@@ -343,7 +343,15 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
                             )}
                           </div>
                         )}
-                        {v.status === 'rejected' && <span className="text-slate-400">{v.rejectReason}</span>}
+                        {v.status === 'rejected' && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-400">{v.rejectReason}</span>
+                            {isOpen && can('custody:request') && (
+                              <button type="button" data-testid={`resubmit-${v.voucherNo}`} className={`${btn} bg-slate-700 text-white`}
+                                onClick={() => { setVLines(draftFromVoucher(v.lines)); setVMemo(v.memo || ''); }}>إعادة تقديم كحافظة جديدة</button>
+                            )}
+                          </div>
+                        )}
                         {v.status === 'reversed' && <span className="text-slate-400">{v.reversalReason}</span>}
                       </td>
                     </tr>
@@ -355,24 +363,41 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
 
           {isOpen && can('custody:request') && (
             <form onSubmit={submitVoucher} className="flex flex-wrap items-end gap-2 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-slate-400 text-xs">حساب المصروف</label>
-                <select className={input} value={vAccount} onChange={(e) => setVAccount(e.target.value)} required>
-                  <option value="">اختر</option>
-                  {expenseAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} {a.nameAr}</option>
-                  ))}
-                </select>
+              <div className="w-full space-y-2" data-testid="voucher-lines">
+                {vLines.map((l, i) => (
+                  <div key={i} className="flex flex-wrap items-end gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-400 text-xs">حساب المصروف</label>
+                      <select className={input} value={l.account} onChange={(e) => setVLines(vLines.map((x, k) => (k === i ? { ...x, account: e.target.value } : x)))} required>
+                        <option value="">اختر</option>
+                        {expenseAccounts.map((a) => (
+                          <option key={a.id} value={a.id}>{a.code} {a.nameAr}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-400 text-xs">المبلغ</label>
+                      <input className={input} inputMode="decimal" value={l.amount} onChange={(e) => setVLines(vLines.map((x, k) => (k === i ? { ...x, amount: e.target.value } : x)))} required />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-400 text-xs">بيان البند</label>
+                      <input className={input} value={l.memo} onChange={(e) => setVLines(vLines.map((x, k) => (k === i ? { ...x, memo: e.target.value } : x)))} />
+                    </div>
+                    {vLines.length > 1 && (
+                      <button type="button" className={`${btn} bg-slate-700 text-white`} onClick={() => setVLines(vLines.filter((_, k) => k !== i))}>حذف البند</button>
+                    )}
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-3">
+                  <button type="button" className={`${btn} bg-slate-700 text-white`} onClick={() => setVLines([...vLines, emptyLine()])}>إضافة بند</button>
+                  <span className="text-slate-300 text-xs">إجمالي الحافظة: <b data-testid="voucher-total">{fmt(sumLinesMoney(vLines))}</b></span>
+                </div>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-slate-400 text-xs">المبلغ</label>
-                <input className={input} inputMode="decimal" value={vAmount} onChange={(e) => setVAmount(e.target.value)} required />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-slate-400 text-xs">بيان</label>
+                <label className="text-slate-400 text-xs">بيان الحافظة</label>
                 <input className={input} value={vMemo} onChange={(e) => setVMemo(e.target.value)} />
               </div>
-              <button type="submit" disabled={busy} className={`${btn} bg-sky-600 text-white`}>تقديم حافظة</button>
+              <button type="submit" disabled={busy || !linesReady(vLines)} className={`${btn} bg-sky-600 text-white`}>تقديم حافظة</button>
             </form>
           )}
 
