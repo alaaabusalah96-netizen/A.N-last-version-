@@ -307,9 +307,11 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   );
 
   const fetchReturnableLines = async (supplierId: string) => {
+    setReturnGrnId('');
+    setReturnWarehouseId('');
+    setSelectedReturnLines([]);
     if (!supplierId || !selectedCompanyId) {
       setReturnableLines([]);
-      setSelectedReturnLines([]);
       return;
     }
     try {
@@ -318,20 +320,31 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
         const data = await res.json();
         const rows = data.returnableLines || [];
         setReturnableLines(rows);
-        setSelectedReturnLines(
-          rows.map((l: any) => ({
-            grnLineId: l.grnLineId,
-            qty: l.returnableQty,
-            unitCost: l.unitCost,
-            maxQty: l.returnableQty,
-            itemId: l.itemId,
-            itemNameAr: l.itemNameAr,
-          }))
-        );
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.message || data.error || 'تعذر تحميل بنود الاستلام القابلة للإرجاع');
       }
     } catch (err: any) {
       setError(err.message || 'فشل تحميل بنود المرتجعات المتاحة');
     }
+  };
+
+  // A return is made against ONE goods receipt (the server requires every line to belong to it).
+  // Picking the receipt also fixes the warehouse and loads only that receipt's lines.
+  const selectReturnGrn = (grnId: string) => {
+    setReturnGrnId(grnId);
+    const lines = (returnableLines as any[]).filter((l) => l.grnId === grnId);
+    setReturnWarehouseId(lines[0]?.warehouseId || '');
+    setSelectedReturnLines(
+      lines.map((l: any) => ({
+        grnLineId: l.grnLineId,
+        qty: l.returnableQty,
+        unitCost: l.unitCost,
+        maxQty: l.returnableQty,
+        itemId: l.itemId,
+        itemNameAr: l.itemNameAr,
+      }))
+    );
   };
 
   const handleCreateReturn = async (e: React.FormEvent) => {
@@ -1122,6 +1135,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
             <button
               onClick={() => {
                 setShowReturnModal(true);
+                setError(null);
                 setReturnSupplierId('');
                 setReturnGrnId('');
                 setReturnWarehouseId('');
@@ -2509,6 +2523,11 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
             </div>
 
             <form onSubmit={handleCreateReturn} className="flex flex-col gap-4">
+              {error && (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert" data-testid="return-modal-error">
+                  {error}
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">المورد *</label>
@@ -2530,19 +2549,24 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">المستودع المردود منه *</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">سند الاستلام (GRN) المردود منه *</label>
                   <select
                     required
-                    value={returnWarehouseId}
-                    onChange={(e) => setReturnWarehouseId(e.target.value)}
+                    value={returnGrnId}
+                    onChange={(e) => selectReturnGrn(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500 cursor-pointer"
+                    data-testid="return-grn-select"
                   >
-                    <option value="">-- اختر المستودع --</option>
-                    {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.nameAr} ({w.code})
-                      </option>
-                    ))}
+                    <option value="">-- اختر سند الاستلام --</option>
+                    {Array.from(new Map((returnableLines as any[]).map((l) => [l.grnId, l])).values()).map((l: any) => {
+                      const wh = warehouses.find((w) => w.id === l.warehouseId);
+                      return (
+                        <option key={l.grnId} value={l.grnId}>
+                          {l.grnNo || l.grnId}
+                          {wh ? ` - ${wh.nameAr}` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
@@ -2576,9 +2600,13 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                   <span className="text-xs font-bold text-slate-300">بنود استلام البضائع القابلة للإرجاع</span>
                   <span className="text-[11px] text-slate-400">حدد الكميات المراد إرجاعها إلى المورد</span>
                 </div>
-                {returnableLines.length === 0 ? (
+                {selectedReturnLines.length === 0 ? (
                   <div className="py-6 text-center text-slate-500 text-xs">
-                    {returnSupplierId ? 'لا توجد بنود استلام مرحّلة وقابلة للإرجاع لهذا المورد' : 'يرجى اختيار المورد أولاً لعرض البنود المتاحة للإرجاع'}
+                    {!returnSupplierId
+                      ? 'يرجى اختيار المورد أولاً لعرض البنود المتاحة للإرجاع'
+                      : returnableLines.length === 0
+                        ? 'لا توجد بنود استلام مرحّلة وقابلة للإرجاع لهذا المورد'
+                        : 'اختر سند الاستلام لعرض بنوده'}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2621,7 +2649,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading || !returnWarehouseId || selectedReturnLines.filter((l) => l.qty > 0).length === 0}
+                  disabled={actionLoading || !returnGrnId || !returnWarehouseId || selectedReturnLines.filter((l) => l.qty > 0).length === 0}
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة مرتجع'}
