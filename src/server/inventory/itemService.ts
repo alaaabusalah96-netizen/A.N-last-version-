@@ -3,7 +3,7 @@ import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { defaultCustomFieldService, CustomFieldService } from '../customization/customFieldService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
-import { Item, CreateItemInput } from './inventoryTypes.js';
+import { Item, CreateItemInput, UpdateItemInput } from './inventoryTypes.js';
 
 export class ItemService {
   constructor(
@@ -92,6 +92,43 @@ export class ItemService {
 
       return item;
     });
+  }
+
+  async updateItem(
+    companyId: string,
+    id: string,
+    input: UpdateItemInput,
+    actorId?: string
+  ): Promise<Item> {
+    if (!companyId || typeof companyId !== 'string') {
+      throw new ValidationError('companyId is required');
+    }
+    if (!id || typeof id !== 'string') {
+      throw new ValidationError('المعرف مطلوب');
+    }
+    if (input.nameAr !== undefined && (typeof input.nameAr !== 'string' || input.nameAr.trim().length === 0)) {
+      throw new ValidationError('الاسم بالعربية لا يمكن أن يكون فارغاً');
+    }
+    if (input.isActive !== undefined && typeof input.isActive !== 'boolean') {
+      throw new ValidationError('حالة التفعيل يجب أن تكون true أو false');
+    }
+    const existing = await this.itemRepo.findById(companyId, id);
+    if (!existing) {
+      throw new NotFoundError('الصنف المحدد غير موجود');
+    }
+    const updated = await this.itemRepo.update(companyId, id, input);
+    if (!updated) {
+      throw new NotFoundError('الصنف المحدد غير موجود');
+    }
+    await this.auditService.record({
+      actorUserId: actorId || null,
+      companyId,
+      action: 'ITEM_UPDATE',
+      entityType: 'inv_item',
+      entityId: id,
+      metadata: { code: updated.code, before: { nameAr: existing.nameAr, isActive: existing.isActive }, after: { nameAr: updated.nameAr, isActive: updated.isActive } },
+    });
+    return updated;
   }
 }
 

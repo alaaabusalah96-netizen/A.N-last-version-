@@ -1,6 +1,6 @@
 import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
-import { Item, CreateItemInput } from './inventoryTypes.js';
+import { Item, CreateItemInput, UpdateItemInput } from './inventoryTypes.js';
 
 export class ItemRepository {
   async listByCompany(companyId: string, customExecutor?: DbExecutor): Promise<Item[]> {
@@ -96,6 +96,44 @@ export class ItemRepository {
         input.uom ? input.uom.trim() : 'unit',
       ]);
       return res.rows[0];
+    };
+
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
+
+  async update(
+    companyId: string,
+    itemId: string,
+    input: UpdateItemInput,
+    customExecutor?: DbExecutor
+  ): Promise<Item | null> {
+    const run = async (executor: DbExecutor) => {
+      const sql = `
+        UPDATE inv_items SET
+          name_ar = COALESCE($3, name_ar),
+          name_en = CASE WHEN $4 THEN $5 ELSE name_en END,
+          is_active = COALESCE($6, is_active)
+        WHERE id = $1 AND company_id = $2
+        RETURNING
+          id,
+          company_id as "companyId",
+          code,
+          name_ar as "nameAr",
+          name_en as "nameEn",
+          uom,
+          is_active as "isActive",
+          created_at as "createdAt"
+      `;
+      const res = await executor.query<Item>(sql, [
+        itemId,
+        companyId,
+        input.nameAr !== undefined ? input.nameAr.trim() : null,
+        input.nameEn !== undefined,
+        input.nameEn ? input.nameEn.trim() : null,
+        typeof input.isActive === 'boolean' ? input.isActive : null,
+      ]);
+      return res.rows[0] || null;
     };
 
     if (customExecutor) return await run(customExecutor);

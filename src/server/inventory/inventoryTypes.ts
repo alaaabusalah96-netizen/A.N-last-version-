@@ -16,6 +16,18 @@ export interface CreateWarehouseInput {
   nameEn?: string;
 }
 
+export interface UpdateWarehouseInput {
+  nameAr?: string;
+  nameEn?: string | null;
+  isActive?: boolean;
+}
+
+export interface UpdateItemInput {
+  nameAr?: string;
+  nameEn?: string | null;
+  isActive?: boolean;
+}
+
 export interface Item {
   id: string;
   companyId: string;

@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 234
+- **Total Mounted Endpoints**: 236
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 226
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 228
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -158,6 +158,7 @@
 | `/api/inventory` | `GET` | `/api/inventory/items` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/items` | `true` | `PERMISSIONS.INVENTORY_WRITE` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/items/:id` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
+| `/api/inventory` | `PUT` | `/api/inventory/items/:id` | `true` | `PERMISSIONS.INVENTORY_WRITE` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/items/:id/costing-profile` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/items/:id/costing-profile` | `true` | `PERMISSIONS.INVENTORY_COSTING_ASSIGN` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/items/:id/movements` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
@@ -178,6 +179,7 @@
 | `/api/inventory` | `GET` | `/api/inventory/warehouse-valuations` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/warehouses` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/warehouses` | `true` | `PERMISSIONS.INVENTORY_WRITE` | `src/server/routes/inventoryRoutes.ts` |
+| `/api/inventory` | `PUT` | `/api/inventory/warehouses/:id` | `true` | `PERMISSIONS.INVENTORY_WRITE` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/purchasing` | `GET` | `/api/purchasing/ap/open-items` | `true` | `PERMISSIONS.PURCHASING_READ` | `src/server/routes/purchasingRoutes.ts` |
 | `/api/purchasing` | `GET` | `/api/purchasing/grn` | `true` | `PERMISSIONS.PURCHASING_READ` | `src/server/routes/purchasingRoutes.ts` |
 | `/api/purchasing` | `POST` | `/api/purchasing/grn` | `true` | `PERMISSIONS.PURCHASING_WRITE` | `src/server/routes/purchasingRoutes.ts` |

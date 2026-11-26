@@ -71,6 +71,22 @@ inventoryRoutes.post(
   })
 );
 
+
+inventoryRoutes.put(
+  '/warehouses/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_WRITE, companyId);
+    const id = req.params.id;
+    if (!isUuid(id)) throw new ValidationError('Invalid ID format');
+    const { nameAr, nameEn, isActive } = req.body || {};
+    const warehouse = await defaultWarehouseService.updateWarehouse(companyId, id, { nameAr, nameEn, isActive }, user.id);
+    return res.status(200).json({ status: 'ok', warehouse });
+  })
+);
+
 // 2. Items Master API
 inventoryRoutes.get(
   '/items',
@@ -109,6 +125,22 @@ inventoryRoutes.post(
     );
 
     return res.status(201).json({ status: 'ok', item });
+  })
+);
+
+
+inventoryRoutes.put(
+  '/items/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_WRITE, companyId);
+    const id = req.params.id;
+    if (!isUuid(id)) throw new ValidationError('Invalid ID format');
+    const { nameAr, nameEn, isActive } = req.body || {};
+    const item = await defaultItemService.updateItem(companyId, id, { nameAr, nameEn, isActive }, user.id);
+    return res.status(200).json({ status: 'ok', item });
   })
 );
 
