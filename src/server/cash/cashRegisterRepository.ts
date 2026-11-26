@@ -153,6 +153,21 @@ export class CashRegisterRepository {
     return mapRegister(res.rows[0]);
   }
 
+  async getOpeningEntryId(companyId: string, id: string, executor: DbExecutor): Promise<string | null> {
+    const res = await executor.query(
+      'SELECT opening_journal_entry_id AS "e" FROM cash_registers WHERE company_id = $1 AND id = $2',
+      [companyId, id]
+    );
+    return (res.rows[0] as { e?: string | null } | undefined)?.e ?? null;
+  }
+
+  async setOpeningEntryId(companyId: string, id: string, entryId: string, executor: DbExecutor): Promise<void> {
+    await executor.query(
+      'UPDATE cash_registers SET opening_journal_entry_id = $3, updated_at = NOW() WHERE company_id = $1 AND id = $2',
+      [companyId, id, entryId]
+    );
+  }
+
   async create(companyId: string, input: CreateCashRegisterInput, actorId: string | null, customExecutor?: DbExecutor): Promise<CashRegister> {
     const run = async (executor: DbExecutor) => {
       const sql = `

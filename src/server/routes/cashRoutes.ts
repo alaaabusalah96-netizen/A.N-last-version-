@@ -60,7 +60,7 @@ cashRoutes.post(
     const user = req.user!;
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
-    const register = await defaultCashRegisterService.createRegister(companyId, req.body, user.id);
+    const register = await defaultCashRegisterService.createRegister(companyId, req.body, user.id, user.role === 'platform_admin');
     res.status(201).json({ status: 'ok', register });
   })
 );
@@ -95,6 +95,25 @@ cashRoutes.patch(
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
     const register = await defaultCashRegisterService.updateRegister(companyId, id, req.body, user.id);
+    res.json({ status: 'ok', register });
+  })
+);
+
+// 4b. Post a missing opening-balance entry (registers created before openings were posted)
+cashRoutes.post(
+  '/registers/:id/post-opening-balance',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      throw new ValidationError('معرف الصندوق غير صالح');
+    }
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_WRITE, companyId);
+    const register = await defaultCashRegisterService.postOpeningBalance(
+      companyId, id, req.body?.offsetAccountId, user.id, user.role === 'platform_admin'
+    );
     res.json({ status: 'ok', register });
   })
 );

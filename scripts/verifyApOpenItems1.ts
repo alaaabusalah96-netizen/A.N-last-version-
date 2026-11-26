@@ -170,9 +170,14 @@ async function run() {
       userId
     );
 
+    const eqAcc = await defaultAccountService.createAccount(
+      companyAId,
+      { code: `EQ-${unique}`.slice(0, 20), nameAr: 'رأس المال', accountType: 'equity', isPostable: true },
+      userId
+    );
     const cashReg = await defaultCashRegisterService.createRegister(
       companyAId,
-      { code: `REG-${unique}`.slice(0, 20), nameAr: 'صندوق المدفوعات', glAccountId: cashAcc.id, openingBalance: 5000 },
+      { code: `REG-${unique}`.slice(0, 20), nameAr: 'صندوق المدفوعات', glAccountId: cashAcc.id, openingBalance: 5000, openingOffsetAccountId: eqAcc.id },
       userId
     );
 

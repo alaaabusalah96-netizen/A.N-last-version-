@@ -23,6 +23,8 @@ export interface CreateCashRegisterInput {
   nameEn?: string | null;
   glAccountId: string;
   openingBalance?: number;
+  /** Equity account credited by the opening entry. Defaults to the company's capital account (3100). */
+  openingOffsetAccountId?: string;
   memo?: string | null;
 }
 

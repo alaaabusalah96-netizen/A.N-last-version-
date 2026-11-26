@@ -7,14 +7,83 @@ import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMoney } from '../lib/numeric.js';
+import { defaultJournalService, JournalService } from '../accounting/journalService.js';
+import { resolveCompanyToday } from '../lib/calendarDate.js';
 
 export class CashRegisterService {
   constructor(
     private repo: CashRegisterRepository = defaultCashRegisterRepository,
-    private auditService: AuditService = defaultAuditService
+    private auditService: AuditService = defaultAuditService,
+    private journalService: Pick<JournalService, 'createDraftEntry' | 'postEntry'> = defaultJournalService
   ) {}
 
-  async createRegister(companyId: string, input: CreateCashRegisterInput, actorId?: string): Promise<CashRegister> {
+  /** Posts Dr register cash account / Cr equity offset for the register opening balance, once. */
+  private async postOpeningEntry(
+    companyId: string,
+    register: CashRegister,
+    offsetAccountId: string | undefined,
+    actorId: string | undefined,
+    isPlatformAdmin: boolean,
+    tx: DbExecutor
+  ): Promise<string> {
+    const amount = toMoney(register.openingBalance);
+    let offset = offsetAccountId ? await defaultAccountRepository.findById(companyId, offsetAccountId, tx) : null;
+    if (!offsetAccountId) offset = await defaultAccountRepository.findByCode(companyId, '3100', tx);
+    if (!offset) {
+      throw new ValidationError('حدد حساب حقوق الملكية المقابل للرصيد الافتتاحي (مثل رأس المال 3100)');
+    }
+    if (!offset.isActive || !offset.isPostable || offset.accountType !== 'equity') {
+      throw new ValidationError('الحساب المقابل للرصيد الافتتاحي يجب أن يكون حساب حقوق ملكية فرعياً نشطاً');
+    }
+    if (offset.id === register.glAccountId) {
+      throw new ValidationError('الحساب المقابل لا يمكن أن يطابق حساب الصندوق');
+    }
+    const entryDate = await resolveCompanyToday(companyId, tx);
+    const draft = await this.journalService.createDraftEntry(
+      companyId,
+      {
+        entryDate,
+        memo: `رصيد افتتاحي للصندوق ${register.code}`,
+        lines: [
+          { accountId: register.glAccountId, debit: amount, credit: 0, lineMemo: `رصيد افتتاحي - صندوق ${register.code}` },
+          { accountId: offset.id, debit: 0, credit: amount, lineMemo: `رصيد افتتاحي - صندوق ${register.code}` },
+        ],
+      },
+      actorId,
+      isPlatformAdmin,
+      tx
+    );
+    const posted = await this.journalService.postEntry(companyId, draft.id, actorId || '', isPlatformAdmin, tx);
+    await this.repo.setOpeningEntryId(companyId, register.id, posted.id, tx);
+    return posted.id;
+  }
+
+  /** For registers created before opening balances were posted: post the missing opening entry once. */
+  async postOpeningBalance(
+    companyId: string,
+    id: string,
+    offsetAccountId: string | undefined,
+    actorId?: string,
+    isPlatformAdmin: boolean = false
+  ): Promise<CashRegister> {
+    if (!companyId || !id || !isUuid(id)) throw new ValidationError('معرف الصندوق غير صالح');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const register = await this.repo.lockForUpdate(companyId, id, tx);
+      if (!register) throw new NotFoundError('الصندوق غير موجود');
+      if (!(register.openingBalance > 0)) throw new ValidationError('لا يوجد رصيد افتتاحي للترحيل');
+      if (await this.repo.getOpeningEntryId(companyId, id, tx)) {
+        throw new ValidationError('قيد الرصيد الافتتاحي مرحّل مسبقاً لهذا الصندوق');
+      }
+      const entryId = await this.postOpeningEntry(companyId, register, offsetAccountId, actorId, isPlatformAdmin, tx);
+      await this.auditService.record(
+        { actorUserId: actorId || '', companyId, action: 'CASH_REGISTER_OPENING_POST', entityType: 'cash_registers', entityId: id, metadata: { journalEntryId: entryId, amount: register.openingBalance } },
+        { executor: tx }
+      );
+      return register;
+    });
+  }
+
+  async createRegister(companyId: string, input: CreateCashRegisterInput, actorId?: string, isPlatformAdmin: boolean = false): Promise<CashRegister> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('معرف الشركة مطلوب');
     }
@@ -69,6 +138,9 @@ export class CashRegisterService {
       }
 
       const register = await this.repo.create(companyId, input, actorId || null, tx);
+      if (register.openingBalance > 0) {
+        await this.postOpeningEntry(companyId, register, input.openingOffsetAccountId, actorId, isPlatformAdmin, tx);
+      }
 
       await this.auditService.record(
         {

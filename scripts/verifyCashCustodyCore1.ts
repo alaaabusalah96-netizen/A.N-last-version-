@@ -8,6 +8,7 @@ import { getDefaultExecutor, closeAllExecutors } from '../src/server/db/index.js
 import { withTenantTransaction } from '../src/server/db/transactionManager.js';
 import { CompanyRepository } from '../src/server/org/companyRepository.js';
 import { UserRepository } from '../src/server/auth/userRepository.js';
+import { PeriodService } from '../src/server/accounting/periodService.js';
 import { AccountService } from '../src/server/accounting/accountService.js';
 import { defaultCashRegisterService } from '../src/server/cash/cashRegisterService.js';
 import { defaultCompanySettingsService } from '../src/server/org/companySettingsService.js';
@@ -226,6 +227,17 @@ async function run() {
     const { accounts: accountsA } = await accountService.seedDefaultCoa(compA.id);
     const { accounts: accountsB } = await accountService.seedDefaultCoa(compB.id);
 
+    {
+      const now = new Date();
+      const y = now.getUTCFullYear();
+      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+      const last = new Date(Date.UTC(y, now.getUTCMonth() + 1, 0)).getUTCDate();
+      await new PeriodService().createPeriod(
+        compA.id,
+        { code: `${y}-${m}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(last).padStart(2, '0')}` },
+        userA.id
+      );
+    }
     const cashAccountA = accountsA.find((a) => a.code === '1100')!; // asset, postable
     const receivableAccountA = accountsA.find((a) => a.code === '1200')!; // asset, postable
     const liabilityAccountA = accountsA.find((a) => a.code === '2100')!; // liability, postable
@@ -254,6 +266,16 @@ async function run() {
     );
     const c6Ok = Boolean(regA.id) && regA.openingBalance === 500 && regA.glAccountId === cashAccountA.id;
     await check('C6: Creating cash register on valid asset postable GL account succeeds and returns id', c6Ok);
+    {
+      const bal = await withTenantTransaction(compA.id, async (tx) => {
+        const r = await tx.query(
+          `SELECT COALESCE(SUM(l.debit - l.credit),0)::float AS bal FROM journal_lines l WHERE l.company_id = $1 AND l.account_id = $2`,
+          [compA.id, cashAccountA.id]
+        );
+        return Number((r.rows[0] as { bal: number }).bal);
+      });
+      await check('C6b: register opening balance 500 is posted to the ledger on the cash account (Dr cash / Cr capital)', bal === 500, `ledger=${bal}`);
+    }
 
     // C7: Create cash register with revenue account -> ValidationError
     let c7Rejected = false;
@@ -409,10 +431,15 @@ async function run() {
         await client.connect();
         await client.query('BEGIN');
         await client.query('ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries DISABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines DISABLE TRIGGER trg_journal_lines_immutability');
 
         await client.query('DELETE FROM custody_movements WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM custody_records WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM cash_registers WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM journal_lines WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('UPDATE journal_entries SET reversed_by_entry_id = NULL WHERE company_id = ANY($1::uuid[])', [companyIds]);
+        await client.query('DELETE FROM journal_entries WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM company_settings WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounting_periods WHERE company_id = ANY($1::uuid[])', [companyIds]);
         await client.query('DELETE FROM accounting_sequences WHERE company_id = ANY($1::uuid[])', [companyIds]);
@@ -424,6 +451,8 @@ async function run() {
           await client.query('DELETE FROM platform_users WHERE id = ANY($1::uuid[])', [userIds]);
         }
         await client.query('ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable');
+        await client.query('ALTER TABLE journal_entries ENABLE TRIGGER trg_journal_entries_immutability');
+        await client.query('ALTER TABLE journal_lines ENABLE TRIGGER trg_journal_lines_immutability');
         await client.query('COMMIT');
         console.log(`[cleanup] Test companies and cash/custody records purged cleanly.`);
       } catch (cleanupErr) {
