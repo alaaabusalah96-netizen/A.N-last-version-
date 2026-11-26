@@ -1,3 +1,4 @@
+import { assertWithinCustodyLimit } from './custodyLimitService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { CustodyRepository, defaultCustodyRepository } from './custodyRepository.js';
 import { CashRegisterRepository, defaultCashRegisterRepository } from './cashRegisterRepository.js';
@@ -207,6 +208,7 @@ export class CustodyService {
         throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن طلب عهدة عليه`);
       }
 
+      await assertWithinCustodyLimit(companyId, input.employeeUserId, amount, tx);
       const requestDate = requestedDate ?? (await resolveCompanyToday(companyId, tx));
       const custodyNo = await this.journalRepo.allocateSequenceNumber(companyId, 'custody', 'CUS', tx);
       const created = await this.custodyRepo.create(

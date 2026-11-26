@@ -205,6 +205,11 @@
     "reason": "Per-company append-only claims owed by an employee after a custody cash count shortage"
   },
   {
+    "table": "custody_limit_policies",
+    "scope": "tenant",
+    "reason": "Per-company or per-employee versioned ceiling on custody held at one time (append-only)"
+  },
+  {
     "table": "custody_settlement_policies",
     "scope": "tenant",
     "reason": "Per-company versioned switch and account mapping for custody shortage treatments (append-only)"

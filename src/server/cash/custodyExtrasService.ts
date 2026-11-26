@@ -1,3 +1,4 @@
+import { assertWithinCustodyLimit } from './custodyLimitService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { buildShortageAgeing, type AgeingRow } from './custodyShortageAgeing.js';
 import { buildPeriodReport, balanceAsOf, availableAfterReservation, type CustodyPeriodReport } from './custodyPeriodReport.js';
@@ -119,6 +120,7 @@ export class CustodyExtrasService {
       if (!custody) throw new NotFoundError('العهدة النقدية غير موجودة');
       if (custody.status !== 'open') throw new ValidationError('لا يمكن تعزيز إلا عهدة مفتوحة (مصروفة وغير مسوّاة)');
 
+      await assertWithinCustodyLimit(companyId, custody.employeeUserId, amount, tx);
       const register = await this.registerRepo.lockForUpdate(companyId, custody.registerId, tx);
       if (!register) throw new NotFoundError('الصندوق المرتبط بالعهدة غير موجود');
       if (!register.isActive) throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن الصرف منه`);

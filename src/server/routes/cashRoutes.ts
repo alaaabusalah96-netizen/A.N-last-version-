@@ -1,3 +1,4 @@
+import { defaultCustodyLimitService } from '../cash/custodyLimitService.js';
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS, PermissionCode } from '../rbac/permissions.js';
@@ -905,6 +906,30 @@ cashRoutes.get(
     const companyId = (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
     const policies = await defaultCustodyShortageSettlementService.listPolicies(companyId);
+    res.json({ status: 'ok', policies });
+  })
+);
+
+cashRoutes.put(
+  '/custody-limit-policies',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = req.body?.companyId || (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.COMPANY_SETTINGS_WRITE, companyId);
+    const policy = await defaultCustodyLimitService.setPolicy(companyId, req.body || {}, user.id);
+    res.json({ status: 'ok', policy });
+  })
+);
+
+cashRoutes.get(
+  '/custody-limit-policies',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const policies = await defaultCustodyLimitService.listPolicies(companyId);
     res.json({ status: 'ok', policies });
   })
 );
