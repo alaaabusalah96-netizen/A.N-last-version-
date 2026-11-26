@@ -151,6 +151,20 @@ export class PeriodService {
         throw new ValidationError(`الفترة المحاسبية (${existing.code}) مفتوحة بالفعل`);
       }
 
+      const closedYearRes = await tx.query<{ fiscal_year_code: string }>(
+        `SELECT fiscal_year_code
+         FROM fin_fiscal_year_closes
+         WHERE company_id = $1 AND start_date <= $3::date AND end_date >= $2::date
+         LIMIT 1`,
+        [companyId, existing.startDate, existing.endDate]
+      );
+      if (closedYearRes.rows.length > 0) {
+        throw new ValidationError(
+          `لا يمكن إعادة فتح الفترة (${existing.code}) لأنها ضمن سنة مالية مقفلة (${closedYearRes.rows[0].fiscal_year_code}). ` +
+            'إعادة الفتح بعد إقفال السنة تُخلّ بقيد الإقفال والأرصدة؛ يلزم إلغاء إقفال السنة أولاً بصلاحية خاصة مع عكس قيد الإقفال.'
+        );
+      }
+
       const updated = await this.periodRepo.setClosed(companyId, periodId, false, actorId, tx);
       if (!updated) {
         throw new NotFoundError('تعذر إعادة فتح الفترة المحاسبية');

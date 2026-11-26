@@ -244,7 +244,7 @@ describe('AN-FINANCE-EXT-1 Unit Tests (Banking / Year Close / Operational Report
   describe('YearCloseService & PeriodService preservation', () => {
     it('posts balanced P&L closing entry into Retained Earnings before closing periods', async () => {
       const periodRepo = {
-        setClosed: vi.fn().mockResolvedValue({ id: PERIOD_ID, code: '2026-ALL', isClosed: true }),
+        setClosed: vi.fn().mockResolvedValue({ id: PERIOD_ID, code: '2025-ALL', isClosed: true }),
       } as any;
       const accountRepo = {
         findById: vi.fn().mockResolvedValue({
@@ -269,7 +269,7 @@ describe('AN-FINANCE-EXT-1 Unit Tests (Banking / Year Close / Operational Report
       } as any;
       periodRepo.setClosed.mockImplementation(async () => {
         callOrder.push('closePeriod');
-        return { id: PERIOD_ID, code: '2026-ALL', isClosed: true };
+        return { id: PERIOD_ID, code: '2025-ALL', isClosed: true };
       });
       const auditService = { record: vi.fn().mockResolvedValue(undefined) } as any;
 
@@ -281,9 +281,9 @@ describe('AN-FINANCE-EXT-1 Unit Tests (Banking / Year Close / Operational Report
             {
               id: PERIOD_ID,
               companyId: COMP_ID,
-              code: '2026-ALL',
-              startDate: '2026-01-01',
-              endDate: '2026-12-31',
+              code: '2025-ALL',
+              startDate: '2025-01-01',
+              endDate: '2025-12-31',
               isClosed: false,
             },
           ],
@@ -294,14 +294,16 @@ describe('AN-FINANCE-EXT-1 Unit Tests (Banking / Year Close / Operational Report
             { accountId: EXP_ACC_ID, accountCode: '5100', accountNameAr: 'مصروفات', accountType: 'expense', d: '600.00', c: '0.00' },
           ],
         }) // pnl rows
+        .mockResolvedValueOnce({ rows: [] }) // overlapping close check
+        .mockResolvedValueOnce({ rows: [] }) // company timezone
         .mockResolvedValueOnce({
           rows: [
             {
               id: 'yc-1',
               companyId: COMP_ID,
-              fiscalYearCode: 'FY-2026',
-              startDate: '2026-01-01',
-              endDate: '2026-12-31',
+              fiscalYearCode: 'FY-2025',
+              startDate: '2025-01-01',
+              endDate: '2025-12-31',
               retainedEarningsAccountId: RE_ACC_ID,
               closingJournalEntryId: JE_ID,
               totalRevenue: '1500.00',
@@ -317,9 +319,9 @@ describe('AN-FINANCE-EXT-1 Unit Tests (Banking / Year Close / Operational Report
       const res = await svc.executeYearClose(
         COMP_ID,
         {
-          fiscalYearCode: 'FY-2026',
-          startDate: '2026-01-01',
-          endDate: '2026-12-31',
+          fiscalYearCode: 'FY-2025',
+          startDate: '2025-01-01',
+          endDate: '2025-12-31',
           retainedEarningsAccountId: RE_ACC_ID,
         },
         ACTOR_ID
@@ -349,6 +351,45 @@ describe('AN-FINANCE-EXT-1 Unit Tests (Banking / Year Close / Operational Report
       expect(auditService.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'PERIOD_CLOSE', entityId: PERIOD_ID })
       );
+    });
+  });
+
+  describe('Year-close guards', () => {
+    it('blocks reopening a period that lies inside a closed fiscal year', async () => {
+      const periodRepo = {
+        findByIdForUpdate: vi.fn().mockResolvedValue({
+          id: PERIOD_ID, code: '2025-12', isClosed: true, startDate: '2025-12-01', endDate: '2025-12-31',
+        }),
+        setClosed: vi.fn(),
+      } as any;
+      const auditService = { record: vi.fn() } as any;
+      mockTx.query.mockResolvedValueOnce({ rows: [{ fiscal_year_code: 'FY-2025' }] });
+      const svc = new PeriodService(periodRepo, auditService);
+      await expect(svc.reopenPeriod(COMP_ID, PERIOD_ID, ACTOR_ID)).rejects.toThrow(/سنة مالية مقفلة/);
+      expect(periodRepo.setClosed).not.toHaveBeenCalled();
+    });
+
+    it('rejects closing a fiscal year that has not ended yet', async () => {
+      const accountRepo = {
+        findById: vi.fn().mockResolvedValue({
+          id: RE_ACC_ID, code: '3200', nameAr: 'x', accountType: 'equity', isPostable: true, isActive: true,
+        }),
+      } as any;
+      mockTx.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ cnt: 0 }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] });
+      const svc = new YearCloseService({} as any, accountRepo, {} as any, { record: vi.fn() } as any);
+      await expect(
+        svc.executeYearClose(
+          COMP_ID,
+          { fiscalYearCode: 'FY-2999', startDate: '2999-01-01', endDate: '2999-12-31', retainedEarningsAccountId: RE_ACC_ID },
+          ACTOR_ID
+        )
+      ).rejects.toThrow(/لم تنتهِ بعد/);
     });
   });
 

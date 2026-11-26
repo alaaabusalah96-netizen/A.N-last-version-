@@ -9,7 +9,7 @@ import { AccountingPeriod } from './periodTypes.js';
 import { ValidationError, NotFoundError, ConflictError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMinorUnits, fromMinorUnits } from '../lib/numeric.js';
-import { assertValidCalendarDate } from '../lib/calendarDate.js';
+import { assertValidCalendarDate, resolveCompanyToday } from '../lib/calendarDate.js';
 
 function assertDate(value: string, field: string): string {
   return assertValidCalendarDate(value, field);
@@ -118,6 +118,24 @@ export class YearCloseService {
         closedAt: typeof r.closedAt === 'string' ? r.closedAt : new Date(r.closedAt).toISOString(),
       }));
     });
+  }
+
+  private async findOverlappingClose(
+    companyId: string,
+    fiscalYearCode: string,
+    startDate: string,
+    endDate: string,
+    tx: DbExecutor
+  ): Promise<string | null> {
+    const res = await tx.query<{ fiscal_year_code: string }>(
+      `SELECT fiscal_year_code
+       FROM fin_fiscal_year_closes
+       WHERE company_id = $1 AND fiscal_year_code <> $2
+         AND start_date <= $4::date AND end_date >= $3::date
+       LIMIT 1`,
+      [companyId, fiscalYearCode, startDate, endDate]
+    );
+    return res.rows[0]?.fiscal_year_code ?? null;
   }
 
   private async gatherPnlAndPeriods(
@@ -266,6 +284,18 @@ export class YearCloseService {
       if (data.existingCloseId) {
         blockingReasons.push(`السنة المالية (${code}) مغلقة مسبقاً`);
       }
+      const overlap = await this.findOverlappingClose(companyId, code, startDate, endDate, tx);
+      if (overlap) {
+        blockingReasons.push(
+          `الفترة من ${startDate} إلى ${endDate} تتقاطع مع سنة مالية مقفلة مسبقاً (${overlap})`
+        );
+      }
+      const today = await resolveCompanyToday(companyId, tx);
+      if (endDate > today) {
+        blockingReasons.push(
+          `السنة المالية لم تنتهِ بعد (تاريخ النهاية ${endDate} بعد تاريخ اليوم ${today}); لا يجوز إقفالها قبل انتهائها`
+        );
+      }
       if (data.draftEntriesCount > 0) {
         blockingReasons.push(`يوجد ${data.draftEntriesCount} قيد مسودة غير مرحل ضمن نطاق السنة المالية`);
       }
@@ -354,7 +384,19 @@ export class YearCloseService {
       const data = await this.gatherPnlAndPeriods(companyId, fiscalYearCode, startDate, endDate, true, tx);
 
       if (data.existingCloseId) {
-        throw new ConflictError(`تم إقفال السنة المالية (${fiscalYearCode}) مسبقاً`);
+        throw new ConflictError(`تم إقفال السنة المالية (${fiscalYearCode}) مسبقاً ولا يمكن إقفالها مرة أخرى`);
+      }
+      const overlap = await this.findOverlappingClose(companyId, fiscalYearCode, startDate, endDate, tx);
+      if (overlap) {
+        throw new ConflictError(
+          `الفترة من ${startDate} إلى ${endDate} تتقاطع مع سنة مالية مقفلة مسبقاً (${overlap}) ولا يمكن إقفالها مرة أخرى`
+        );
+      }
+      const todayDate = await resolveCompanyToday(companyId, tx);
+      if (endDate > todayDate) {
+        throw new ValidationError(
+          `السنة المالية لم تنتهِ بعد (تاريخ النهاية ${endDate} بعد تاريخ اليوم ${todayDate}); لا يجوز إقفالها قبل انتهائها`
+        );
       }
 
       if (data.draftEntriesCount > 0) {
