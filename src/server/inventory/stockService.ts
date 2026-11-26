@@ -30,6 +30,22 @@ import { defaultAccountRepository, AccountRepository } from '../accounting/accou
 import { defaultJournalService } from '../accounting/journalService.js';
 import { assertOptionalCalendarDate, resolveCompanyToday } from '../lib/calendarDate.js';
 
+
+// Per-transaction memo: inside one multi-line document the same company settings, GL accounts and
+// "today" are read once instead of once per line (the transaction object is the cache key).
+const txMemo = new WeakMap<object, Map<string, Promise<any>>>();
+function memoPerTx<T>(tx: object, key: string, load: () => Promise<T>): Promise<T> {
+  let m = txMemo.get(tx);
+  if (!m) { m = new Map(); txMemo.set(tx, m); }
+  let v = m.get(key);
+  if (!v) {
+    v = load();
+    m.set(key, v);
+    v.catch(() => m!.delete(key));
+  }
+  return v as Promise<T>;
+}
+
 export class StockService {
   constructor(
     private stockRepo: StockRepository = defaultStockRepository,
@@ -85,6 +101,16 @@ export class StockService {
   }
 
   private async resolveInventoryAccountingAccounts(
+    companyId: string,
+    overrideContraAccountId: string | undefined,
+    tx: DbExecutor
+  ): Promise<{ inventoryAccountId: string; contraAccountId: string }> {
+    return await memoPerTx(tx, `gl:${companyId}:${overrideContraAccountId || ''}`, () =>
+      this.resolveInventoryAccountingAccountsUncached(companyId, overrideContraAccountId, tx)
+    );
+  }
+
+  private async resolveInventoryAccountingAccountsUncached(
     companyId: string,
     overrideContraAccountId: string | undefined,
     tx: DbExecutor
@@ -167,7 +193,7 @@ export class StockService {
     const requestedEntryDate = assertOptionalCalendarDate(input.entryDate, 'تاريخ الحركة');
 
     return await withTenantTransaction(companyId, async (tx) => {
-      const entryDate = requestedEntryDate ?? (await resolveCompanyToday(companyId, tx));
+      const entryDate = requestedEntryDate ?? (await memoPerTx(tx, `today:${companyId}`, () => resolveCompanyToday(companyId, tx)));
       const warehouse = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
       if (!warehouse) throw new NotFoundError('المستودع المحدد غير موجود');
       if (!warehouse.isActive) throw new ValidationError('المستودع المحدد غير نشط');
@@ -307,7 +333,7 @@ export class StockService {
     const requestedEntryDate = assertOptionalCalendarDate(input.entryDate, 'تاريخ الحركة');
 
     return await withTenantTransaction(companyId, async (tx) => {
-      const entryDate = requestedEntryDate ?? (await resolveCompanyToday(companyId, tx));
+      const entryDate = requestedEntryDate ?? (await memoPerTx(tx, `today:${companyId}`, () => resolveCompanyToday(companyId, tx)));
       const warehouse = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
       if (!warehouse) throw new NotFoundError('المستودع المحدد غير موجود');
       if (!warehouse.isActive) throw new ValidationError('المستودع المحدد غير نشط');
@@ -503,7 +529,7 @@ export class StockService {
     };
 
     return await withTenantTransaction(companyId, async (tx) => {
-      const entryDate = requestedEntryDate ?? (await resolveCompanyToday(companyId, tx));
+      const entryDate = requestedEntryDate ?? (await memoPerTx(tx, `today:${companyId}`, () => resolveCompanyToday(companyId, tx)));
       const warehouse = await this.warehouseRepo.findById(companyId, input.warehouseId, tx);
       if (!warehouse) throw new NotFoundError('المستودع المحدد غير موجود');
       if (!warehouse.isActive) throw new ValidationError('المستودع المحدد غير نشط');

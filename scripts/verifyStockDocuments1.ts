@@ -223,6 +223,54 @@ async function run() {
     const other = await withTenantTransaction(comp2.id, (tx) => tx.query<any>('SELECT count(*)::int AS n FROM inv_stock_documents'));
     const own = await withTenantTransaction(companyId, (tx) => tx.query<any>('SELECT count(*)::int AS n FROM inv_stock_documents'));
     await check('D8: RLS: company 2 sees no documents while company 1 sees its 4', other.rows[0].n === 0 && own.rows[0].n === 4);
+
+    // D9: named-field validation messages (fail before any DB work)
+    const msgOf = async (input: any) => {
+      try { await defaultStockDocumentService.postDocument(companyId, input, user.id); return ''; } catch (e: any) { return String(e?.message || e); }
+    };
+    const mReceipt = await msgOf({ docType: 'receipt', warehouseId: wh1.id, reason: 'x', lines: [{ itemId: items[0].id, qty: 1, unitCost: 5 }] });
+    const mAdj = await msgOf({ docType: 'adjustment', warehouseId: wh1.id, reason: 'x', lines: [{ itemId: items[0].id, qty: 1 }] });
+    await check(
+      'D9: missing costSource / direction are rejected with the field and line named',
+      mReceipt.includes('السطر 1') && mReceipt.includes('costSource') && mAdj.includes('السطر 1') && mAdj.includes('direction'),
+      `${mReceipt} | ${mAdj}`
+    );
+
+    // D10: background job for a large document: queued -> done, same posting engine, balances move
+    const before0 = await qtyOf(wh1.id, items[0].id);
+    const job = await defaultStockDocumentService.createJob(
+      companyId,
+      { docType: 'issue', warehouseId: wh1.id, reason: 'صرف خلفي', lines: items.slice(0, 55).map((it) => ({ itemId: it.id, qty: 1 })) },
+      user.id
+    );
+    void defaultStockDocumentService.runJob(companyId, job.id);
+    let jobState = await defaultStockDocumentService.getJob(companyId, job.id);
+    for (let i = 0; i < 90 && jobState && jobState.status !== 'done' && jobState.status !== 'failed'; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      jobState = await defaultStockDocumentService.getJob(companyId, job.id);
+    }
+    await check(
+      'D10: background job posts a 55-line document once (done, result, balance reduced by 1)',
+      !!jobState && jobState.status === 'done' && jobState.result?.lineCount === 55 && (await qtyOf(wh1.id, items[0].id)) === before0 - 1,
+      JSON.stringify({ s: jobState?.status, e: jobState?.errorMessage })
+    );
+    // second runJob on a finished job is a no-op (claim is exclusive)
+    await defaultStockDocumentService.runJob(companyId, job.id);
+    await check('D11: re-running a finished job posts nothing again', (await qtyOf(wh1.id, items[0].id)) === before0 - 1);
+
+    // D12: a failing job ends as failed with the line named and posts nothing
+    const bad = await defaultStockDocumentService.createJob(
+      companyId,
+      { docType: 'issue', warehouseId: wh1.id, reason: 'x', lines: [...items.slice(0, 54).map((it) => ({ itemId: it.id, qty: 1 })), { itemId: items[0].id, qty: 100000 }] },
+      user.id
+    );
+    await defaultStockDocumentService.runJob(companyId, bad.id);
+    const badState = await defaultStockDocumentService.getJob(companyId, bad.id);
+    await check(
+      'D12: failing background job is marked failed with the line named and nothing is posted',
+      badState?.status === 'failed' && (badState.errorMessage || '').includes('السطر 55') && (await qtyOf(wh1.id, items[0].id)) === before0 - 1,
+      badState?.errorMessage || ''
+    );
   } catch (err) {
     console.error('[verifyStockDocuments1] Live test error:', err);
     await check('Live stock document suite execution', false, err instanceof Error ? err.message : String(err));
@@ -247,7 +295,7 @@ async function run() {
         for (const t of [
           'inv_valuation_reconciliations', 'inv_ma_source_events', 'inv_ma_source_balances', 'inv_cost_layers',
           'inv_valuation_movements', 'inv_valuation_balances', 'inv_item_costing_profiles', 'inv_costing_profiles',
-          'journal_lines', 'journal_entries', 'inv_stock_movements', 'inv_stock_documents', 'inv_stock_balances',
+          'journal_lines', 'journal_entries', 'inv_stock_movements', 'inv_stock_document_jobs', 'inv_stock_documents', 'inv_stock_balances',
           'company_settings', 'accounting_periods', 'accounting_sequences', 'accounts', 'inv_items', 'inv_warehouses', 'audit_logs',
         ]) {
           await del(t);

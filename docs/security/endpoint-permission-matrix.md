@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 237
+- **Total Mounted Endpoints**: 238
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 229
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 230
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -155,6 +155,7 @@
 | `/api/inventory` | `GET` | `/api/inventory/costing-profiles` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/costing-profiles` | `true` | `PERMISSIONS.INVENTORY_COSTING_PROFILE_WRITE` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/documents` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST, PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
+| `/api/inventory` | `GET` | `/api/inventory/documents/jobs/:jobId` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST, PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/issue` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/items` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/items` | `true` | `PERMISSIONS.INVENTORY_WRITE` | `src/server/routes/inventoryRoutes.ts` |

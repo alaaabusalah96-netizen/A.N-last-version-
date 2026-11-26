@@ -124,6 +124,8 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
       }
       if (needsCost) body.costSource = costSource;
       if (docType === 'adjustment') body.adjustmentType = adjustmentType;
+      const large = real.length > 50;
+      if (large) body.async = true;
       const res = await apiFetch('/api/inventory/documents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,6 +133,23 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'فشل ترحيل المستند');
+      if (res.status === 202 && data.jobId) {
+        // Large document: posted in the background, poll until it finishes (up to 10 minutes).
+        const started = Date.now();
+        while (Date.now() - started < 10 * 60 * 1000) {
+          await new Promise((r) => setTimeout(r, 2500));
+          const pr = await apiFetch(`/api/inventory/documents/jobs/${data.jobId}?companyId=${encodeURIComponent(companyId)}`);
+          const pd = await pr.json();
+          if (!pr.ok) throw new Error(pd.message || pd.error || 'تعذر قراءة حالة الترحيل');
+          const job = pd.job;
+          if (job?.status === 'done' && job.result) {
+            onDone(`تم ترحيل ${TYPE_LABEL[docType]} رقم ${job.result.docNo} بعدد ${job.result.lineCount} سطر`);
+            return;
+          }
+          if (job?.status === 'failed') throw new Error(job.errorMessage || 'فشل ترحيل المستند');
+        }
+        throw new Error('ما زال الترحيل جاريًا. لا تعد الإرسال، راجع الحركات بعد دقائق قبل أي محاولة أخرى.');
+      }
       onDone(`تم ترحيل ${TYPE_LABEL[docType]} رقم ${data.docNo} بعدد ${data.lineCount} سطر`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء ترحيل المستند');

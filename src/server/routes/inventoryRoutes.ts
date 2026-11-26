@@ -352,9 +352,7 @@ inventoryRoutes.post(
     const b = req.body || {};
     if (!Array.isArray(b.lines)) throw new ValidationError('lines يجب أن تكون مصفوفة');
     const num = (v: any) => (v !== undefined && v !== null && v !== '' ? Number(v) : undefined);
-    const result = await defaultStockDocumentService.postDocument(
-      companyId,
-      {
+    const docInput = {
         docType,
         warehouseId: b.warehouseId,
         sourceWarehouseId: b.sourceWarehouseId,
@@ -377,9 +375,34 @@ inventoryRoutes.post(
           adjustmentType: l?.adjustmentType,
           expenseAccountId: l?.expenseAccountId,
         })),
-      },
-      user.id
-    );
+      };
+    const wantsAsync = b.async === true || b.async === 'true' || String(req.query.async || '') === 'true';
+    if (wantsAsync) {
+      const job = await defaultStockDocumentService.createJob(companyId, docInput, user.id);
+      setImmediate(() => {
+        void defaultStockDocumentService.runJob(companyId, job.id).catch(() => undefined);
+      });
+      return res.status(202).json({ status: 'accepted', jobId: job.id, jobStatus: job.status, lineCount: job.lineCount });
+    }
+    const result = await defaultStockDocumentService.postDocument(companyId, docInput, user.id);
     return res.status(201).json({ status: 'ok', ...result });
+  })
+);
+
+// Poll a background document job (queued / running / done / failed).
+inventoryRoutes.get(
+  '/documents/jobs/:jobId',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    const job = await defaultStockDocumentService.getJob(companyId, req.params.jobId);
+    if (!job) throw new NotFoundError('مهمة الترحيل غير موجودة');
+    await assertInventoryPermission(
+      user,
+      job.docType === 'adjustment' ? PERMISSIONS.INVENTORY_VALUATION_ADJUST : PERMISSIONS.INVENTORY_MOVEMENT,
+      companyId
+    );
+    return res.status(200).json({ status: 'ok', job });
   })
 );

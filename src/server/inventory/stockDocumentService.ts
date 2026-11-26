@@ -44,17 +44,34 @@ export interface StockDocumentResult {
   lines: Array<{ lineNo: number; itemId: string; movementIds: string[]; journalEntryId: string | null }>;
 }
 
+
+export const ASYNC_STOCK_DOCUMENT_MIN_LINES = 50;
+
+export interface StockDocumentJob {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  docType: StockDocumentType;
+  lineCount: number;
+  result: StockDocumentResult | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+const JOB_STALE_MS = 15 * 60 * 1000;
+
+function mapJob(r: any): StockDocumentJob {
+  return {
+    id: r.id, status: r.status, docType: r.doc_type, lineCount: r.line_count,
+    result: r.result ?? null, errorMessage: r.error_message ?? null, createdAt: new Date(r.created_at).toISOString(),
+  };
+}
+
 const PREFIX: Record<StockDocumentType, string> = { receipt: 'SR', issue: 'SI', adjustment: 'SA', transfer: 'ST' };
 
 export class StockDocumentService {
   constructor(private stock: StockService = defaultStockService) {}
 
-  /**
-   * Post a multi-line stock document. Every line goes through the same single-line engine
-   * (balance check, costing, journal) inside ONE transaction, so the document is all or nothing and
-   * the balance check is cumulative (lines are applied in order and later lines see earlier ones).
-   */
-  async postDocument(companyId: string, input: StockDocumentInput, actorId?: string): Promise<StockDocumentResult> {
+  private validate(companyId: string, input: StockDocumentInput): void {
     if (!companyId) throw new ValidationError('companyId is required');
     if (!input || !(input.docType in PREFIX)) throw new ValidationError('نوع المستند غير صالح');
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
@@ -73,7 +90,36 @@ export class StockDocumentService {
     input.lines.forEach((l, i) => {
       if (!l || typeof l.itemId !== 'string' || !l.itemId) throw new ValidationError(`السطر ${i + 1}: الصنف مطلوب`);
       if (!(Number(l.qty) > 0)) throw new ValidationError(`السطر ${i + 1}: الكمية يجب أن تكون أكبر من الصفر`);
+      const n = i + 1;
+      const reason = (l.reason || input.reason || input.memo || l.memo || '').trim();
+      const costSource = (l.costSource || input.costSource || '').trim();
+      const hasCost = l.unitCost !== undefined && l.unitCost !== null && Number(l.unitCost) > 0;
+      if (input.docType === 'receipt') {
+        if (!reason) throw new ValidationError(`السطر ${n}: السبب (reason) مطلوب، في رأس المستند أو في السطر`);
+        if (!costSource) throw new ValidationError(`السطر ${n}: مصدر التكلفة (costSource) مطلوب للاستلام، في رأس المستند أو في السطر`);
+        if (!hasCost) throw new ValidationError(`السطر ${n}: تكلفة الوحدة (unitCost) مطلوبة وأكبر من الصفر للاستلام`);
+      } else if (input.docType === 'adjustment') {
+        if (l.direction !== 'increase' && l.direction !== 'decrease') {
+          throw new ValidationError(`السطر ${n}: الاتجاه (direction) مطلوب في كل سطر تسوية: increase أو decrease`);
+        }
+        if (!reason) throw new ValidationError(`السطر ${n}: السبب (reason) مطلوب للتسوية، في رأس المستند أو في السطر`);
+        if (l.direction === 'increase') {
+          if (!costSource) throw new ValidationError(`السطر ${n}: مصدر التكلفة (costSource) مطلوب للتسوية بالزيادة`);
+          if (!hasCost) throw new ValidationError(`السطر ${n}: تكلفة الوحدة (unitCost) مطلوبة وأكبر من الصفر للتسوية بالزيادة`);
+        }
+      } else if (input.docType === 'issue') {
+        if (!reason) throw new ValidationError(`السطر ${n}: السبب (reason) مطلوب للصرف، في رأس المستند أو في السطر`);
+      }
     });
+  }
+
+  /**
+   * Post a multi-line stock document. Every line goes through the same single-line engine
+   * (balance check, costing, journal) inside ONE transaction, so the document is all or nothing and
+   * the balance check is cumulative (lines are applied in order and later lines see earlier ones).
+   */
+  async postDocument(companyId: string, input: StockDocumentInput, actorId?: string): Promise<StockDocumentResult> {
+    this.validate(companyId, input);
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`stockdoc:${companyId}`]);
@@ -169,6 +215,71 @@ export class StockDocumentService {
 
       return { documentId, docNo, docType: input.docType, lineCount: input.lines.length, lines: out };
     });
+  }
+
+  /** Queue a large document. The document is validated first so obvious input errors fail immediately. */
+  async createJob(companyId: string, input: StockDocumentInput, actorId?: string): Promise<StockDocumentJob> {
+    this.validate(companyId, input);
+    return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const r = await tx.query<any>(
+        `INSERT INTO inv_stock_document_jobs (company_id, doc_type, payload, line_count, created_by)
+         VALUES ($1,$2,$3::jsonb,$4,$5) RETURNING *`,
+        [companyId, input.docType, JSON.stringify(input), input.lines.length, actorId || null]
+      );
+      return mapJob(r.rows[0]);
+    });
+  }
+
+  /** Claim a queued job (only one caller wins) and post it. Never throws: the outcome is stored on the job. */
+  async runJob(companyId: string, jobId: string): Promise<void> {
+    const claim = await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const r = await tx.query<any>(
+        `UPDATE inv_stock_document_jobs SET status = 'running', started_at = now()
+          WHERE company_id = $1 AND id = $2 AND status = 'queued' RETURNING payload, created_by`,
+        [companyId, jobId]
+      );
+      return r.rows[0] || null;
+    });
+    if (!claim) return;
+    let result: StockDocumentResult | null = null;
+    let errMsg: string | null = null;
+    try {
+      result = await this.postDocument(companyId, claim.payload as StockDocumentInput, claim.created_by || undefined);
+    } catch (err: any) {
+      errMsg = String(err?.message || err || 'فشل ترحيل المستند').slice(0, 1000);
+    }
+    await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      await tx.query(
+        `UPDATE inv_stock_document_jobs SET status = $3, result = $4::jsonb, error_message = $5, finished_at = now()
+          WHERE company_id = $1 AND id = $2`,
+        [companyId, jobId, errMsg ? 'failed' : 'done', result ? JSON.stringify(result) : null, errMsg]
+      );
+    });
+  }
+
+  /** Read a job. A queued job nobody started (CPU paused after the response) is started by the poll itself. */
+  async getJob(companyId: string, jobId: string): Promise<StockDocumentJob | null> {
+    const row = await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const r = await tx.query<any>('SELECT * FROM inv_stock_document_jobs WHERE company_id = $1 AND id = $2', [companyId, jobId]);
+      return r.rows[0] || null;
+    });
+    if (!row) return null;
+    if (row.status === 'queued') {
+      void this.runJob(companyId, jobId).catch(() => undefined);
+      return { ...mapJob(row), status: 'running' };
+    }
+    if (row.status === 'running' && row.started_at && Date.now() - new Date(row.started_at).getTime() > JOB_STALE_MS) {
+      // The posting transaction is atomic: a process that died mid-way left nothing behind.
+      await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+        await tx.query(
+          `UPDATE inv_stock_document_jobs SET status = 'failed', error_message = $3, finished_at = now()
+            WHERE company_id = $1 AND id = $2 AND status = 'running'`,
+          [companyId, jobId, 'انقطعت المعالجة قبل الاكتمال ولم يُرحَّل شيء، أعد إرسال المستند']
+        );
+      });
+      return { ...mapJob(row), status: 'failed', errorMessage: 'انقطعت المعالجة قبل الاكتمال ولم يُرحَّل شيء، أعد إرسال المستند' };
+    }
+    return mapJob(row);
   }
 }
 
