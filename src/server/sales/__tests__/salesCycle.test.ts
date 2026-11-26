@@ -258,7 +258,7 @@ describe('AN-SALES-CYCLE-1 Domain Services Unit Tests', () => {
 
       const service = new SalesInvoiceService(
         invoiceRepo,
-        {} as any,
+        { findById: vi.fn().mockResolvedValue({ id: CUST_ID, isActive: true, creditLimit: 0 }) } as any,
         journalRepo,
         journalService,
         auditService
@@ -275,6 +275,31 @@ describe('AN-SALES-CYCLE-1 Domain Services Unit Tests', () => {
       ]);
       expect(journalService.postEntry).toHaveBeenCalledWith(COMP_ID, JE_ID, ACTOR_ID, false, mockTx);
       expect(invoiceRepo.markPosted).toHaveBeenCalledWith(COMP_ID, INV_ID, 'SINV-00001', JE_ID, ACTOR_ID, mockTx);
+    });
+  });
+
+  describe('SalesInvoiceService credit limit', () => {
+    it('rejects posting an invoice that pushes the customer over the credit limit (Arabic message)', async () => {
+      const invoiceRepo = {
+        findByIdForUpdate: vi.fn().mockResolvedValue({ id: INV_ID, status: 'draft' }),
+        findById: vi.fn().mockResolvedValue({
+          id: INV_ID,
+          companyId: COMP_ID,
+          customerId: CUST_ID,
+          invoiceDate: '2026-11-15',
+          totalAmount: 60000,
+          status: 'draft',
+          lines: [{ id: 'sil-1', itemId: ITEM_ID, deliveryLineId: null, qty: 1, unitPrice: 60000 }],
+        }),
+        markPosted: vi.fn(),
+      } as any;
+      const customerRepo = {
+        findById: vi.fn().mockResolvedValue({ id: CUST_ID, isActive: true, creditLimit: 50000 }),
+      } as any;
+      mockTx.query.mockResolvedValueOnce({ rows: [{ open_total: '0' }] });
+      const service = new SalesInvoiceService(invoiceRepo, customerRepo, {} as any, {} as any, { record: vi.fn() } as any);
+      await expect(service.postInvoice(COMP_ID, INV_ID, ACTOR_ID)).rejects.toThrow(/تجاوز حد الائتمان/);
+      expect(invoiceRepo.markPosted).not.toHaveBeenCalled();
     });
   });
 

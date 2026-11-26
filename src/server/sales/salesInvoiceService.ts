@@ -370,6 +370,35 @@ export class SalesInvoiceService {
         throw new ValidationError('تم ترحيل تكلفة البضاعة المباعة (COGS) لهذه الفاتورة مسبقاً ولا يمكن تكرارها');
       }
 
+      // Customer credit limit (0 / unset = no limit). Exposure = open posted receivables + this invoice.
+      const customerForLimit = await this.customerRepo.findById(companyId, invoice.customerId, tx);
+      const creditLimit = Number(customerForLimit?.creditLimit ?? 0);
+      if (creditLimit > 0) {
+        const openRes = await tx.query<any>(
+          `SELECT COALESCE(SUM(
+              GREATEST(0, i.total_amount - COALESCE(col.total, 0) - COALESCE(ret.total, 0))
+            ), 0)::text AS open_total
+           FROM sales_invoices i
+           LEFT JOIN (
+             SELECT invoice_id, SUM(amount) AS total FROM sales_collections
+             WHERE company_id = $1 AND status = 'posted' GROUP BY invoice_id
+           ) col ON col.invoice_id = i.id
+           LEFT JOIN (
+             SELECT invoice_id, SUM(total_amount) AS total FROM sales_returns
+             WHERE company_id = $1 AND status = 'posted' GROUP BY invoice_id
+           ) ret ON ret.invoice_id = i.id
+           WHERE i.company_id = $1 AND i.customer_id = $2 AND i.status = 'posted' AND i.id <> $3`,
+          [companyId, invoice.customerId, invoice.id]
+        );
+        const openTotal = Number(openRes.rows[0]?.open_total ?? 0);
+        const exposure = Math.round((openTotal + Number(invoice.totalAmount)) * 100) / 100;
+        if (exposure > creditLimit) {
+          throw new ValidationError(
+            `تجاوز حد الائتمان للعميل: الحد المسموح ${creditLimit.toFixed(2)}، الرصيد المفتوح ${openTotal.toFixed(2)}، قيمة الفاتورة ${Number(invoice.totalAmount).toFixed(2)}، الإجمالي ${exposure.toFixed(2)}. لا يمكن ترحيل الفاتورة قبل تحصيل مبلغ أو رفع حد الائتمان من بيانات العميل.`
+          );
+        }
+      }
+
       // Re-verify linked delivery line remaining quantity under FOR UPDATE & compute frozen COGS (exact cumulative target formula)
       let totalCogsUnits = 0n;
       const lineCogsAllocations: Array<{
