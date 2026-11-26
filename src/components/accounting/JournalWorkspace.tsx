@@ -65,6 +65,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
   const [filterOrgUnitId, setFilterOrgUnitId] = useState<string>('');
+  const [scopedUser, setScopedUser] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -89,32 +90,50 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
     setLoading(true);
     setError(null);
     try {
-      // 1. Load journals with optional orgUnitId filter
-      let url = `/api/accounting/journals?companyId=${companyId}`;
-      if (filterOrgUnitId) {
-        url += `&orgUnitId=${filterOrgUnitId}`;
-      }
-      const resJournals = await apiFetch(url);
-      if (!resJournals.ok) {
-        const data = await resJournals.json();
-        throw new Error(data.message || data.error || 'فشل في تحميل قيود اليومية');
-      }
-      const dataJournals = await resJournals.json();
-      setEntries(dataJournals.journals || []);
-
-      // 2. Load accounts for dropdowns
+      // Accounts and org units load first and independently of the entries list, so a refusal on
+      // the entries list (for example a scoped user who must choose a unit) never hides the pickers.
       const resAccounts = await apiFetch(`/api/accounting/accounts?companyId=${companyId}`);
       if (resAccounts.ok) {
         const dataAccounts = await resAccounts.json();
         setAccounts((dataAccounts.accounts || []).filter((a: Account) => a.isPostable && a.isActive));
       }
 
-      // 3. Load org units
+      let units: OrgUnit[] = orgUnits;
       const resOrgUnits = await apiFetch(`/api/companies/${companyId}/org-units`);
       if (resOrgUnits.ok) {
         const dataOrg = await resOrgUnits.json();
-        setOrgUnits((dataOrg.orgUnits || []).filter((u: OrgUnit) => u.isActive));
+        // The API answers with `units`; `orgUnits` is kept as a fallback for older responses.
+        units = ((dataOrg.units || dataOrg.orgUnits || []) as OrgUnit[]).filter((u: OrgUnit) => u.isActive);
+        setOrgUnits(units);
       }
+
+      let url = `/api/accounting/journals?companyId=${companyId}`;
+      if (filterOrgUnitId) {
+        url += `&orgUnitId=${filterOrgUnitId}`;
+      }
+      const resJournals = await apiFetch(url);
+      if (!resJournals.ok) {
+        const data = await resJournals.json().catch(() => ({}));
+        const msg: string = data.message || data.error || '';
+        if (/orgUnitId/i.test(msg) && /scoped/i.test(msg)) {
+          // Scoped user: the server needs one unit. Pick the first available unit automatically.
+          setScopedUser(true);
+          setEntries([]);
+          if (units.length > 0 && !filterOrgUnitId) {
+            setFilterOrgUnitId(units[0].id);
+            setNewOrgUnitId(units[0].id);
+            return;
+          }
+          throw new Error(
+            units.length === 0
+              ? 'حسابك مقيّد بوحدة تنظيمية ولا يمكن تحميل قائمة الوحدات المسموحة لك. اطلب من مدير الشركة منحك صلاحية عرض الوحدات التنظيمية.'
+              : 'اختر الوحدة التنظيمية لعرض القيود'
+          );
+        }
+        throw new Error(msg || 'فشل في تحميل قيود اليومية');
+      }
+      const dataJournals = await resJournals.json();
+      setEntries(dataJournals.journals || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء تحميل البيانات');
     } finally {
@@ -317,7 +336,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
                 onChange={(e) => setFilterOrgUnitId(e.target.value)}
                 className="bg-transparent text-slate-200 focus:outline-none text-xs cursor-pointer"
               >
-                <option value="" className="bg-slate-900 text-slate-200">كل الوحدات التنظيمية</option>
+                {!scopedUser && <option value="" className="bg-slate-900 text-slate-200">كل الوحدات التنظيمية</option>}
                 {orgUnits.map((ou) => (
                   <option key={ou.id} value={ou.id} className="bg-slate-900 text-slate-200">
                     {ou.code} — {ou.nameAr}
@@ -644,7 +663,7 @@ export function JournalWorkspace({ companyId, canWrite, canPost }: JournalWorksp
                     onChange={(e) => setNewOrgUnitId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="">(غير محدد - على مستوى الشركة)</option>
+                    {!scopedUser && <option value="">(غير محدد - على مستوى الشركة)</option>}
                     {orgUnits.map((ou) => (
                       <option key={ou.id} value={ou.id}>
                         {ou.code} — {ou.nameAr}
