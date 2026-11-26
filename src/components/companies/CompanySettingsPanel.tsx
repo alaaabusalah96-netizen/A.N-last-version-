@@ -24,6 +24,13 @@ interface CompanySettings {
   inventoryAdjustmentAccountId: string | null;
   openingBalanceEquityAccountId: string | null;
   enforceCustodySeparation?: boolean;
+  vatEnabled?: boolean;
+  defaultVatRate?: number;
+  pricesIncludeVat?: boolean;
+  vatInputRecoverable?: boolean;
+  vatRoundingMode?: 'line' | 'document';
+  vatPayableAccountId?: string | null;
+  vatInputAccountId?: string | null;
 }
 
 interface CompanySettingsPanelProps {
@@ -396,6 +403,95 @@ export function CompanySettingsPanel({ userRole, permissions = [] }: CompanySett
               <p className="text-xs text-slate-400">
                 عند التفعيل لا يجوز لمقدّم طلب العهدة اعتمادها أو صرفها بنفسه، ويسري ذلك حتى على مدير المنصة. تعطيله قرار صريح من الشركة ويُسجَّل في سجل التدقيق.
               </p>
+            </div>
+
+            {/* VAT configuration */}
+            <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <label className="flex items-center gap-3 text-sm font-bold text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.vatEnabled === true}
+                  onChange={(e) => updateField('vatEnabled', e.target.checked)}
+                  disabled={isReadOnly}
+                />
+                تفعيل ضريبة القيمة المضافة (معطّلة افتراضياً)
+              </label>
+              <p className="text-xs text-slate-400">
+                عند التعطيل لا تُحتسب أي ضريبة في المبيعات أو المشتريات. التفعيل يتطلب تحديد حساب ضريبة المخرجات. النسب والمعالجة قابلة للضبط حسب قوانين بلد الشركة.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400">النسبة الافتراضية للضريبة (%)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={settings.defaultVatRate ?? 0}
+                    onChange={(e) => updateField('defaultVatRate', e.target.value === '' ? 0 : Number(e.target.value))}
+                    disabled={isReadOnly}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400">طريقة تقريب الضريبة</label>
+                  <select
+                    value={settings.vatRoundingMode || 'line'}
+                    onChange={(e) => updateField('vatRoundingMode', e.target.value)}
+                    disabled={isReadOnly}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  >
+                    <option value="line">على مستوى كل بند</option>
+                    <option value="document">على مستوى المستند</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400">حساب ضريبة المخرجات (التزام)</label>
+                  <select
+                    value={settings.vatPayableAccountId || ''}
+                    onChange={(e) => updateField('vatPayableAccountId', e.target.value || null)}
+                    disabled={isReadOnly}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  >
+                    <option value="">— غير محدد —</option>
+                    {usableAccounts(accounts, { allowedTypes: ['liability'], requirePostable: true }).map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400">حساب ضريبة المدخلات (أصل)</label>
+                  <select
+                    value={settings.vatInputAccountId || ''}
+                    onChange={(e) => updateField('vatInputAccountId', e.target.value || null)}
+                    disabled={isReadOnly}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  >
+                    <option value="">— غير محدد —</option>
+                    {usableAccounts(accounts, { allowedTypes: ['asset'], requirePostable: true }).map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-3 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.pricesIncludeVat === true}
+                  onChange={(e) => updateField('pricesIncludeVat', e.target.checked)}
+                  disabled={isReadOnly}
+                />
+                الأسعار شاملة الضريبة
+              </label>
+              <label className="flex items-center gap-3 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.vatInputRecoverable !== false}
+                  onChange={(e) => updateField('vatInputRecoverable', e.target.checked)}
+                  disabled={isReadOnly}
+                />
+                ضريبة المدخلات قابلة للاسترداد (عند التعطيل تُضاف إلى تكلفة المشتريات)
+              </label>
             </div>
 
             {/* Notifications */}
