@@ -3,6 +3,7 @@ import { DbExecutor } from '../db/types.js';
 import { CashRegisterRepository, defaultCashRegisterRepository } from './cashRegisterRepository.js';
 import { CashRegister, CashRegisterBalance, CreateCashRegisterInput, UpdateCashRegisterInput, CustodyMovement } from './cashTypes.js';
 import { defaultAccountRepository } from '../accounting/accountRepository.js';
+import { defaultCompanySettingsRepository } from '../org/companySettingsRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
@@ -123,6 +124,24 @@ export class CashRegisterService {
       }
       if (account.accountType !== 'asset') {
         throw new ValidationError(`حساب الصندوق يجب أن يكون من نوع الأصول (asset) وليس ${account.accountType}`);
+      }
+
+      // 1b. A cash register must not sit on an account that the system uses for another role
+      // (customers, custody receivable, inventory, suppliers...): money would be mixed with that role.
+      const settings = await defaultCompanySettingsRepository.getByCompanyId(companyId, tx);
+      const roleAccountIds = [
+        settings?.inventoryAccountId,
+        settings?.purchasesClearingAccountId,
+        settings?.custodyReceivableAccountId,
+        settings?.accountsPayableAccountId,
+        settings?.inventoryAdjustmentAccountId,
+        settings?.openingBalanceEquityAccountId,
+        settings?.vatPayableAccountId,
+        settings?.vatInputAccountId,
+      ].filter(Boolean);
+      const looksLikeReceivable = account.code === '1200' || account.code === '1300' || /(عملاء|ذمم|ذمة|عهد|مدينون)/.test(account.nameAr || '');
+      if (roleAccountIds.includes(account.id) || looksLikeReceivable) {
+        throw new ValidationError('هذا الحساب مخصص لدور آخر في النظام (عملاء أو عهد أو مخزون أو موردين...) ولا يصلح كحساب صندوق نقدي. اختر حساب نقدية أو بنك.');
       }
 
       // 2. Verify code uniqueness in company

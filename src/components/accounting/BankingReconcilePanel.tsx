@@ -134,7 +134,7 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
     bankName: '',
     accountNumber: '',
     iban: '',
-    currencyCode: 'SAR',
+    currencyCode: '', // empty = the company's default currency (resolved by the server)
     glAccountId: '',
     openingBalance: '0.00',
   });
@@ -845,6 +845,7 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
                   <input
                     type="text"
                     value={newBankForm.currencyCode}
+                    placeholder="عملة الشركة الافتراضية"
                     onChange={(e) => setNewBankForm({ ...newBankForm, currencyCode: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono"
                   />

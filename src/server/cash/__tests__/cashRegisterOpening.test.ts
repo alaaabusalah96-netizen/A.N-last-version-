@@ -11,6 +11,7 @@ vi.mock('../../accounting/accountRepository.js', () => ({
   defaultAccountRepository: { findById: (...a: unknown[]) => findById(...a), findByCode: (...a: unknown[]) => findByCode(...a) },
 }));
 vi.mock('../../lib/calendarDate.js', () => ({ resolveCompanyToday: vi.fn(async () => '2026-11-26') }));
+vi.mock('../../org/companySettingsRepository.js', () => ({ defaultCompanySettingsRepository: { getByCompanyId: vi.fn(async () => null) } }));
 
 const C = '11111111-1111-4111-8111-111111111111';
 const CASH = '77777777-7777-4777-8777-777777777777';

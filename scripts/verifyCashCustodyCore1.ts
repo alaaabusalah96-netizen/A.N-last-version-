@@ -294,6 +294,32 @@ async function run() {
     }
     await check('C7: Creating cash register on revenue account throws ValidationError', c7Rejected);
 
+    // C7b: a receivable / custody-receivable account is not a cash account, even though it is an asset
+    const arAccountA = accountsA.find((a) => a.code === '1200')!;
+    let c7bRejected = false;
+    let c7bMsg = '';
+    try {
+      await defaultCashRegisterService.createRegister(
+        compA.id,
+        { code: `AR-CASH-${unique}`.slice(0, 30), nameAr: 'صندوق على حساب العملاء', glAccountId: arAccountA.id },
+        userA.id
+      );
+    } catch (err) {
+      if (err instanceof ValidationError) { c7bRejected = true; c7bMsg = err.message; }
+    }
+    await check('C7b: cash register on the customers receivable account (1200) is rejected', c7bRejected && c7bMsg.includes('مخصص لدور آخر'), c7bMsg);
+    let c7cRejected = false;
+    try {
+      await defaultCashRegisterService.createRegister(
+        compA.id,
+        { code: `CU-CASH-${unique}`.slice(0, 30), nameAr: 'صندوق على ذمم العهد', glAccountId: custodyRecAccountA.id },
+        userA.id
+      );
+    } catch (err) {
+      if (err instanceof ValidationError) c7cRejected = true;
+    }
+    await check('C7c: cash register on an employee-custody receivable account is rejected', c7cRejected);
+
     // C8: Create cash register with non-postable header account -> ValidationError
     let c8Rejected = false;
     try {

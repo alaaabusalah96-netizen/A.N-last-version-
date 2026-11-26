@@ -98,6 +98,11 @@ async function run() {
     await pool.end();
   }
 
+  // New bank account currency must come from the company default, not a hardcoded SAR in the UI or the service.
+  const panelSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/accounting/BankingReconcilePanel.tsx'), 'utf8');
+  assert(!/currencyCode:\s*'SAR'/.test(panelSrc), "Bank panel must not hardcode 'SAR' as the default currency");
+  const svcSrc = fs.readFileSync(path.join(process.cwd(), 'src/server/banking/bankAccountService.ts'), 'utf8');
+  assert(svcSrc.includes('defaultCurrencyCode'), 'Bank account service resolves the default currency from company settings');
   console.log('PASS: verifyBankReconcile1 static and loopback DB checks passed.');
 }
 

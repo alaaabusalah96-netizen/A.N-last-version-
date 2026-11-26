@@ -12,6 +12,9 @@ export interface AccountRoleFieldRule {
   labelAr?: string;
   allowedTypes: readonly string[];
   requirePostable?: boolean;
+  /** Accounts whose code or Arabic name matches are hidden (they belong to another system role). */
+  excludeCodes?: readonly string[];
+  excludeNamePattern?: RegExp;
 }
 
 /**
@@ -61,6 +64,9 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     labelAr: 'حساب النقدية',
     allowedTypes: ['asset'],
     requirePostable: true,
+    // Receivables (1200) and employee custody receivable (1300) are not cash; the server rejects them too.
+    excludeCodes: ['1200', '1300'],
+    excludeNamePattern: /(عملاء|ذمم|ذمة|عهد|مدينون)/,
   },
   custody_expense_account: {
     field: 'custody_expense_account',
@@ -93,7 +99,9 @@ export function usableAccounts(
     (a) =>
       a.isActive !== false &&
       (!requirePostable || a.isPostable === true) &&
-      (rule.allowedTypes.length === 0 || rule.allowedTypes.includes(String(a.accountType)))
+      (rule.allowedTypes.length === 0 || rule.allowedTypes.includes(String(a.accountType))) &&
+      !(rule.excludeCodes && rule.excludeCodes.includes(a.code)) &&
+      !(rule.excludeNamePattern && rule.excludeNamePattern.test(a.nameAr || ''))
   );
 }
 

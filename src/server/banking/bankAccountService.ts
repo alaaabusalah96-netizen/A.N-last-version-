@@ -4,6 +4,7 @@ import { defaultAccountRepository, AccountRepository } from '../accounting/accou
 import { defaultCashRegisterRepository, CashRegisterRepository } from '../cash/cashRegisterRepository.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { ValidationError, NotFoundError, ConflictError } from '../http/errors.js';
+import { defaultCompanySettingsRepository } from '../org/companySettingsRepository.js';
 import { isUuid } from '../http/validators.js';
 import { toMinorUnits } from '../lib/numeric.js';
 import { BankAccount, CreateBankAccountInput, UpdateBankAccountInput } from './bankingTypes.js';
@@ -92,7 +93,13 @@ export class BankAccountService {
         throw new ConflictError(`حساب الأستاذ العام مرتبط مسبقاً بصندوق نقدي (${existingRegister.nameAr})`);
       }
 
-      const created = await this.repo.create(companyId, input, actorId || null, tx);
+      // Currency: use what the user typed, otherwise the company's default currency (never a hardcoded one).
+      let effectiveInput = input;
+      if (!input.currencyCode || String(input.currencyCode).trim() === '') {
+        const settings = await defaultCompanySettingsRepository.getByCompanyId(companyId, tx);
+        effectiveInput = { ...input, currencyCode: settings?.defaultCurrencyCode || undefined };
+      }
+      const created = await this.repo.create(companyId, effectiveInput, actorId || null, tx);
 
       await this.auditService.record(
         {
