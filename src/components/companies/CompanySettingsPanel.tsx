@@ -1,3 +1,4 @@
+import { canWriteCompanySettings } from '../../lib/navAccess.js';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, Save, RefreshCw, AlertCircle, CheckCircle, Globe, DollarSign, Clock, Calendar } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
@@ -27,9 +28,10 @@ interface CompanySettings {
 
 interface CompanySettingsPanelProps {
   userRole: string;
+  permissions?: string[];
 }
 
-export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
+export function CompanySettingsPanel({ userRole, permissions = [] }: CompanySettingsPanelProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [settings, setSettings] = useState<CompanySettings | null>(null);
@@ -39,7 +41,7 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const isReadOnly = userRole === 'company_user';
+  const isReadOnly = !canWriteCompanySettings(userRole, permissions);
 
   const fetchCompanies = useCallback(async () => {
     try {
@@ -160,6 +162,11 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
           </div>
         ) : settings ? (
           <form onSubmit={handleSave} className="space-y-8">
+            {isReadOnly && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+                عرض فقط: ليست لديك صلاحية تعديل إعدادات الشركة (company:settings:write). اطلبها من مدير الشركة.
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* Currency */}
               <div className="space-y-2">
