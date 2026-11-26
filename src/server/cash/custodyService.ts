@@ -7,6 +7,7 @@ import { defaultAccountRepository, AccountRepository } from '../accounting/accou
 import { defaultJournalRepository, JournalRepository } from '../accounting/journalRepository.js';
 import { defaultJournalService, JournalService } from '../accounting/journalService.js';
 import { defaultAuditService, AuditService } from '../audit/auditService.js';
+import { defaultOrgUnitRepository, OrgUnitRepository } from '../org/orgUnitRepository.js';
 import { defaultMembershipStore, MembershipStore } from '../org/membershipStore.js';
 import { defaultUserRepository, UserRepository } from '../auth/userRepository.js';
 import {
@@ -84,7 +85,8 @@ export class CustodyService {
     private membershipStore: Pick<MembershipStore, 'getMembership' | 'listByCompany'> = defaultMembershipStore,
     private userRepo: Pick<UserRepository, 'findById'> = defaultUserRepository,
     private glResolver: Pick<CustodyGlResolver, 'resolveAndAssertUsable'> = defaultCustodyGlResolver,
-    private settingsRepo: Pick<CompanySettingsRepository, 'getByCompanyId'> = defaultCompanySettingsRepository
+    private settingsRepo: Pick<CompanySettingsRepository, 'getByCompanyId'> = defaultCompanySettingsRepository,
+    private orgUnitRepo: Pick<OrgUnitRepository, 'findById'> = defaultOrgUnitRepository
   ) {}
 
   /**
@@ -208,6 +210,15 @@ export class CustodyService {
         throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن طلب عهدة عليه`);
       }
 
+      let orgUnitId: string | null = null;
+      if (input.orgUnitId) {
+        if (!isUuid(input.orgUnitId)) throw new ValidationError('معرف الوحدة التنظيمية غير صالح');
+        const unit = await this.orgUnitRepo.findById(companyId, input.orgUnitId, tx);
+        if (!unit) throw new NotFoundError('الوحدة التنظيمية غير موجودة في هذه الشركة');
+        if (!unit.isActive) throw new ValidationError('الوحدة التنظيمية معطّلة ولا يمكن تسجيل عهدة عليها');
+        orgUnitId = unit.id;
+      }
+
       await assertWithinCustodyLimit(companyId, input.employeeUserId, amount, tx);
       const requestDate = requestedDate ?? (await resolveCompanyToday(companyId, tx));
       const custodyNo = await this.journalRepo.allocateSequenceNumber(companyId, 'custody', 'CUS', tx);
@@ -222,6 +233,7 @@ export class CustodyService {
           requestDate,
           requestedBy: actorId || null,
           memo: input.memo?.trim() || null,
+          orgUnitId,
         },
         tx
       );

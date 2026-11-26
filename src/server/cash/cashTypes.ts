@@ -47,6 +47,7 @@ export type CustodyStatus = 'pending' | 'approved' | 'rejected' | 'open' | 'sett
 
 export interface CustodyRecord {
   id: string;
+  orgUnitId?: string | null;
   companyId: string;
   custodyNo: string | null;
   employeeUserId: string;
@@ -83,11 +84,13 @@ export interface CustodyListFilters {
   status?: CustodyStatus;
   employeeUserId?: string;
   registerId?: string;
+  orgUnitId?: string;
   from?: string;
   to?: string;
 }
 
 export interface CreateCustodyInput {
+  orgUnitId?: string | null;
   employeeUserId: string;
   registerId: string;
   amount: number;

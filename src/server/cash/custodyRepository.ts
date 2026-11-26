@@ -24,6 +24,7 @@ function mapCustodyRow(row: any): CustodyRecord {
     employeeUserId: row.employeeUserId,
     employeeUsername: row.employeeUsername ?? null,
     registerId: row.registerId,
+    orgUnitId: row.orgUnitId ?? null,
     registerCode: row.registerCode ?? null,
     registerNameAr: row.registerNameAr ?? null,
     amount: toMoney(row.amount),
@@ -90,6 +91,7 @@ export class CustodyRepository {
       requestDate: string;
       requestedBy: string | null;
       memo: string | null;
+      orgUnitId?: string | null;
     },
     tx: DbExecutor
   ): Promise<CustodyRecord> {
@@ -104,15 +106,17 @@ export class CustodyRepository {
         status,
         request_date,
         requested_by,
-        memo
+        memo,
+        org_unit_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7::date, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7::date, $8, $9, $10)
       RETURNING
         id,
         company_id as "companyId",
         custody_no as "custodyNo",
         employee_user_id as "employeeUserId",
         register_id as "registerId",
+        org_unit_id as "orgUnitId",
         amount,
         purpose,
         status,
@@ -145,6 +149,7 @@ export class CustodyRepository {
       data.requestDate,
       data.requestedBy,
       data.memo,
+      data.orgUnitId ?? null,
     ]);
     return mapCustodyRow(res.rows[0]);
   }
@@ -159,6 +164,7 @@ export class CustodyRepository {
           c.employee_user_id as "employeeUserId",
           emp.username as "employeeUsername",
           c.register_id as "registerId",
+          c.org_unit_id as "orgUnitId",
           cr.code as "registerCode",
           cr.name_ar as "registerNameAr",
           c.amount,
@@ -207,6 +213,7 @@ export class CustodyRepository {
         custody_no as "custodyNo",
         employee_user_id as "employeeUserId",
         register_id as "registerId",
+        org_unit_id as "orgUnitId",
         amount,
         purpose,
         status,
@@ -258,6 +265,10 @@ export class CustodyRepository {
         params.push(filters.registerId);
         whereParts.push(`c.register_id = $${params.length}`);
       }
+      if (filters.orgUnitId) {
+        params.push(filters.orgUnitId);
+        whereParts.push(`c.org_unit_id = $${params.length}`);
+      }
       if (filters.from) {
         params.push(filters.from);
         whereParts.push(`c.request_date >= $${params.length}::date`);
@@ -275,6 +286,7 @@ export class CustodyRepository {
           c.employee_user_id as "employeeUserId",
           emp.username as "employeeUsername",
           c.register_id as "registerId",
+          c.org_unit_id as "orgUnitId",
           cr.code as "registerCode",
           cr.name_ar as "registerNameAr",
           c.amount,

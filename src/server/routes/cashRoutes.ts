@@ -10,6 +10,7 @@ import { defaultCustodyShortageSettlementService } from '../cash/custodyShortage
 import { defaultVoucherService } from '../cash/voucherService.js';
 import { CustodyStatus } from '../cash/cashTypes.js';
 import { VoucherStatus } from '../cash/voucherTypes.js';
+import { defaultOrgUnitService } from '../org/orgUnitService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -33,6 +34,28 @@ async function assertCashPermission(
   const allowed = await defaultRbacService.hasPermission(user!, permission, companyId);
   if (!allowed) {
     throw new ForbiddenError(`Access denied: Missing required permission '${permission}' for this company`);
+  }
+}
+
+// Custody belongs to a company org unit. A user with org scopes needs read / write / approve on that unit
+// (descendants included). Users without scopes keep company-wide access; platform admins bypass.
+async function assertCustodyUnitAccess(
+  user: AuthenticatedRequest['user'],
+  companyId: string,
+  custodyId: string,
+  level: 'read' | 'write' | 'approve'
+): Promise<void> {
+  if (!custodyId || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
+  const custody = await defaultCustodyService.getCustody(companyId, custodyId);
+  const ok = await defaultOrgUnitService.assertUserOrgAccess(
+    companyId,
+    user!.id,
+    custody.orgUnitId ?? null,
+    level,
+    user!.role === 'platform_admin'
+  );
+  if (!ok) {
+    throw new ForbiddenError('ليس لديك صلاحية على الوحدة التنظيمية الخاصة بهذه العهدة');
   }
 }
 
@@ -202,13 +225,24 @@ cashRoutes.get(
     const from = typeof req.query.from === 'string' && req.query.from ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' && req.query.to ? req.query.to : undefined;
 
-    const custodies = await defaultCustodyService.listCustodies(companyId, {
+    const orgUnitId = typeof req.query.orgUnitId === 'string' && req.query.orgUnitId ? req.query.orgUnitId : undefined;
+    const all = await defaultCustodyService.listCustodies(companyId, {
+      orgUnitId,
       status,
       employeeUserId,
       registerId,
       from,
       to,
     });
+    const unitOk = new Map<string, boolean>();
+    const custodies = [];
+    for (const c of all) {
+      const key = c.orgUnitId ?? '';
+      if (!unitOk.has(key)) {
+        unitOk.set(key, await defaultOrgUnitService.assertUserOrgAccess(companyId, user.id, c.orgUnitId ?? null, 'read', user.role === 'platform_admin'));
+      }
+      if (unitOk.get(key) || c.employeeUserId === user.id) custodies.push(c);
+    }
     res.json({ status: 'ok', custodies });
   })
 );
@@ -225,6 +259,7 @@ cashRoutes.get(
     }
     const companyId = (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    await assertCustodyUnitAccess(user, companyId, req.params.id, 'read');
     const custody = await defaultCustodyService.getCustody(companyId, id);
     res.json({ status: 'ok', custody });
   })
@@ -238,6 +273,9 @@ cashRoutes.post(
     const user = req.user!;
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CUSTODY_REQUEST, companyId);
+    if (!(await defaultOrgUnitService.assertUserOrgAccess(companyId, user.id, req.body?.orgUnitId || null, 'write', user.role === 'platform_admin'))) {
+      throw new ForbiddenError('ليس لديك صلاحية كتابة على الوحدة التنظيمية المحددة للعهدة');
+    }
     const custody = await defaultCustodyService.requestCustody(companyId, req.body || {}, user.id);
     res.status(201).json({ status: 'ok', custody });
   })
@@ -255,6 +293,7 @@ cashRoutes.post(
     }
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    await assertCustodyUnitAccess(user, companyId, req.params.id, 'approve');
     const custody = await defaultCustodyService.approveCustody(
       companyId,
       id,
@@ -277,6 +316,7 @@ cashRoutes.post(
     }
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CUSTODY_APPROVE, companyId);
+    await assertCustodyUnitAccess(user, companyId, req.params.id, 'approve');
     const custody = await defaultCustodyService.rejectCustody(
       companyId,
       id,
@@ -299,6 +339,7 @@ cashRoutes.post(
     }
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CUSTODY_DISBURSE, companyId);
+    await assertCustodyUnitAccess(user, companyId, req.params.id, 'write');
     const custody = await defaultCustodyService.disburseCustody(
       companyId,
       id,
@@ -321,6 +362,7 @@ cashRoutes.post(
     }
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CUSTODY_SETTLE, companyId);
+    await assertCustodyUnitAccess(user, companyId, req.params.id, 'write');
     const custody = await defaultCustodyService.settleCustody(
       companyId,
       id,
@@ -418,6 +460,7 @@ cashRoutes.post(
     const user = req.user!;
     const companyId = req.body?.companyId || (req.query.companyId as string) || '';
     await assertCashPermission(user, PERMISSIONS.CUSTODY_DISBURSE, companyId);
+    await assertCustodyUnitAccess(user, companyId, req.params.id, 'write');
     const custody = await defaultCustodyExtrasService.topUpCustody(
       companyId,
       req.params.id,
@@ -545,6 +588,7 @@ cashRoutes.post(
     if (!canRequest && !canApprove) {
       throw new ForbiddenError(`Access denied: Missing required permission '${PERMISSIONS.CUSTODY_REQUEST}' for this company`);
     }
+    await assertCustodyUnitAccess(user, companyId, id, 'write');
     const custody = await defaultCustodyService.cancelCustody(
       companyId,
       id,

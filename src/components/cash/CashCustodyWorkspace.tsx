@@ -61,6 +61,7 @@ interface CustodyRecord {
   employeeUserId: string;
   employeeUsername?: string | null;
   registerId: string;
+  orgUnitId?: string | null;
   registerCode?: string | null;
   registerNameAr?: string | null;
   amount: number;
@@ -298,6 +299,23 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [reqEmployeeUserId, setReqEmployeeUserId] = useState('');
   const [reqRegisterId, setReqRegisterId] = useState('');
+  const [reqOrgUnitId, setReqOrgUnitId] = useState('');
+  const [orgUnits, setOrgUnits] = useState<{ id: string; code: string; nameAr: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    setOrgUnits([]);
+    if (!selectedCompanyId) return;
+    (async () => {
+      try {
+        const r = await apiFetch(`/api/accounting/journals/org-units?companyId=${encodeURIComponent(selectedCompanyId)}`);
+        if (!r.ok) return;
+        const d = await r.json().catch(() => ({}));
+        if (alive) setOrgUnits(((d.units || d.orgUnits || []) as any[]).filter((u) => u.isActive !== false));
+      } catch { /* units are optional for display */ }
+    })();
+    return () => { alive = false; };
+  }, [selectedCompanyId]);
+  const unitLabel = (id?: string | null) => { const u = orgUnits.find((x) => x.id === id); return u ? `${u.nameAr} (${u.code})` : ''; };
   const [reqAmount, setReqAmount] = useState('');
   const [reqPurpose, setReqPurpose] = useState('');
   const [reqDate, setReqDate] = useState(() => getLocalTodayDateString());
@@ -599,6 +617,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
           companyId: selectedCompanyId,
           employeeUserId: reqEmployeeUserId,
           registerId: reqRegisterId,
+          orgUnitId: reqOrgUnitId || undefined,
           amount: Number(reqAmount),
           purpose: reqPurpose.trim(),
           requestDate: reqDate || undefined,
@@ -612,6 +631,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
       setShowRequestModal(false);
       setReqEmployeeUserId('');
       setReqRegisterId('');
+      setReqOrgUnitId('');
       setReqAmount('');
       setReqPurpose('');
       setReqMemo('');
@@ -1219,6 +1239,9 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                         <td className="py-3.5 px-4 font-medium text-white">{c.employeeUsername || c.employeeUserId}</td>
                         <td className="py-3.5 px-4 text-slate-300">
                           {c.registerCode ? `${c.registerCode} · ${c.registerNameAr || ''}` : c.registerNameAr || c.registerId}
+                          {c.orgUnitId && unitLabel(c.orgUnitId) && (
+                            <div className="text-[10px] text-slate-500 mt-0.5" data-testid="custody-unit-label">{unitLabel(c.orgUnitId)}</div>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-emerald-300">
                           {Number(c.amount).toFixed(2)}
@@ -1870,6 +1893,24 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                     ))}
                 </select>
               </div>
+              {orgUnits.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">الوحدة التنظيمية</label>
+                  <select
+                    name="orgUnitId"
+                    value={reqOrgUnitId}
+                    onChange={(e) => setReqOrgUnitId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">-- على مستوى الشركة --</option>
+                    {orgUnits.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nameAr} ({u.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">المبلغ *</label>
