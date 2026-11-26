@@ -1,3 +1,4 @@
+import { buildReservedRoleResolver, reservedRoleMessage } from '../accounting/reservedRoleAccounts.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { CashRegisterRepository, defaultCashRegisterRepository } from './cashRegisterRepository.js';
@@ -128,20 +129,9 @@ export class CashRegisterService {
 
       // 1b. A cash register must not sit on an account that the system uses for another role
       // (customers, custody receivable, inventory, suppliers...): money would be mixed with that role.
-      const settings = await defaultCompanySettingsRepository.getByCompanyId(companyId, tx);
-      const roleAccountIds = [
-        settings?.inventoryAccountId,
-        settings?.purchasesClearingAccountId,
-        settings?.custodyReceivableAccountId,
-        settings?.accountsPayableAccountId,
-        settings?.inventoryAdjustmentAccountId,
-        settings?.openingBalanceEquityAccountId,
-        settings?.vatPayableAccountId,
-        settings?.vatInputAccountId,
-      ].filter(Boolean);
-      const looksLikeReceivable = account.code === '1200' || account.code === '1300' || /(عملاء|ذمم|ذمة|عهد|مدينون)/.test(account.nameAr || '');
-      if (roleAccountIds.includes(account.id) || looksLikeReceivable) {
-        throw new ValidationError('هذا الحساب مخصص لدور آخر في النظام (عملاء أو عهد أو مخزون أو موردين...) ولا يصلح كحساب صندوق نقدي. اختر حساب نقدية أو بنك.');
+      const reservedRole = (await buildReservedRoleResolver(companyId, tx))(account);
+      if (reservedRole) {
+        throw new ValidationError(reservedRoleMessage(account, reservedRole, 'cash'));
       }
 
       // 2. Verify code uniqueness in company

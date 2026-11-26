@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 239
+- **Total Mounted Endpoints**: 240
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 231
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 232
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -142,6 +142,7 @@
 | `/api/companies/:companyId` | `PUT` | `/api/companies/:companyId/roles/:roleId/permissions` | `true` | `PERMISSIONS.ROLES_WRITE` | `src/server/routes/roleRoutes.ts` |
 | `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/settings` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/companySettingsRoutes.ts` |
 | `/api/companies/:companyId` | `PUT` | `/api/companies/:companyId/settings` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/companySettingsRoutes.ts` |
+| `/api/companies/:companyId` | `PUT` | `/api/companies/:companyId/settings/mapping` | `true` | `PERMISSIONS.ACCOUNTING_MAPPING_WRITE` | `src/server/routes/companySettingsRoutes.ts` |
 | `/api/companies/:companyId` | `GET` | `/api/companies/:companyId/users/:userId/scopes` | `true` | `PERMISSIONS.ORG_UNITS_READ` | `src/server/routes/orgUnitRoutes.ts` |
 | `/api/companies/:companyId` | `PUT` | `/api/companies/:companyId/users/:userId/scopes` | `true` | `PERMISSIONS.ORG_UNITS_WRITE` | `src/server/routes/orgUnitRoutes.ts` |
 | `/api/companies` | `GET` | `/api/companies/:id` | `true` | `PERMISSIONS.COMPANY_READ` | `src/server/routes/companyRoutes.ts` |

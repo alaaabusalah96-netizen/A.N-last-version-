@@ -10,6 +10,7 @@ import { ValidationError, ForbiddenError, NotFoundError } from '../http/errors.j
 import { defaultReportsService } from '../accounting/reportsService.js';
 import { defaultYearCloseService } from '../accounting/yearCloseService.js';
 import { defaultOperationalReportsService } from '../accounting/operationalReportsService.js';
+import { buildReservedRoleResolver } from '../accounting/reservedRoleAccounts.js';
 import { GL_EVENT_CATALOG } from '../accounting/glEventCatalog.js';
 
 export const accountingRoutes = Router();
@@ -44,7 +45,10 @@ accountingRoutes.get(
 
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_ACCOUNTS_READ, companyId);
 
-    const accounts = await defaultAccountService.listAccounts(companyId);
+    const listed = await defaultAccountService.listAccounts(companyId);
+    // reservedRole: the system role that owns the account (null if free). Pickers for cash boxes and banks hide these.
+    const resolveRole = await buildReservedRoleResolver(companyId);
+    const accounts = listed.map((a: any) => ({ ...a, reservedRole: resolveRole(a) }));
     return res.status(200).json({ status: 'ok', accounts });
   })
 );

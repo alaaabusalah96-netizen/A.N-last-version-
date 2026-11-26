@@ -152,6 +152,7 @@
     "test:purch-price-exception-guards-1": "tsx scripts/verifyPurchPriceExceptionDbGuards1.ts",
     "test:stock-movement-sign-1": "tsx scripts/verifyStockMovementSign1.ts",
     "test:bank-reconcile-1": "tsx scripts/verifyBankReconcile1.ts",
+    "test:cogs-mapping": "tsx scripts/verifyCogsMapping.ts",
     "test:year-close-1": "tsx scripts/verifyYearClose1.ts",
     "test:reports-ops-1": "tsx scripts/verifyReportsOps1.ts",
     "test:db-modes-scope-1": "tsx scripts/verifyDbModesScope1.ts",
@@ -178,7 +179,8 @@
     "test:e2e-smoke": "playwright test",
     "test:endpoint-matrix": "tsx scripts/verifyEndpointPermissionMatrix.ts",
     "perf:seed": "tsx scripts/perf/seedSynthetic.ts",
-    "perf:load": "tsx scripts/perf/loadModel.ts"
+    "perf:load": "tsx scripts/perf/loadModel.ts",
+    "test:reserved-roles": "tsx scripts/verifyReservedRoleAccounts.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

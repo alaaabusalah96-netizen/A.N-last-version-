@@ -27,6 +27,7 @@ export const PERMISSIONS = {
   ACCOUNTING_JOURNALS_READ: 'accounting.journals.read',
   ACCOUNTING_JOURNALS_WRITE: 'accounting.journals.write',
   ACCOUNTING_JOURNALS_POST: 'accounting.journals.post',
+  ACCOUNTING_MAPPING_WRITE: 'accounting.mapping.write',
 
   // Organizational Units permissions
   ORG_UNITS_READ: 'org:units:read',
@@ -103,6 +104,7 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.ACCOUNTING_JOURNALS_READ, labelAr: 'عرض القيود اليومية والتقارير', group: 'المحاسبة' },
   { code: PERMISSIONS.ACCOUNTING_JOURNALS_WRITE, labelAr: 'إنشاء وتعديل مسودات القيود', group: 'المحاسبة' },
   { code: PERMISSIONS.ACCOUNTING_JOURNALS_POST, labelAr: 'ترحيل القيود المحاسبية', group: 'المحاسبة' },
+  { code: PERMISSIONS.ACCOUNTING_MAPPING_WRITE, labelAr: 'ضبط الربط المحاسبي (المخزون، المشتريات، تكلفة البضاعة، الضريبة)', group: 'المحاسبة' },
 
   // المخزون والتقييم
   { code: PERMISSIONS.INVENTORY_READ, labelAr: 'عرض المستودعات والأصناف والأرصدة', group: 'المخزون' },

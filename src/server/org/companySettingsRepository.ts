@@ -29,6 +29,7 @@ export class CompanySettingsRepository {
           vat_rounding_mode as "vatRoundingMode",
           vat_payable_account_id as "vatPayableAccountId",
           vat_input_account_id as "vatInputAccountId",
+          cogs_account_id as "cogsAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -60,7 +61,7 @@ export class CompanySettingsRepository {
           opening_balance_equity_account_id,
           enforce_custody_separation,
           vat_enabled, default_vat_rate, prices_include_vat, vat_input_recoverable, vat_rounding_mode,
-          vat_payable_account_id, vat_input_account_id,
+          vat_payable_account_id, vat_input_account_id, cogs_account_id,
           updated_at, 
           updated_by
         )
@@ -80,7 +81,7 @@ export class CompanySettingsRepository {
           $19,
           COALESCE($21, TRUE),
           COALESCE($22::boolean, FALSE), COALESCE($23::numeric, 0), COALESCE($24::boolean, FALSE), COALESCE($25::boolean, TRUE), COALESCE($26::text, 'line'),
-          $28::uuid, $30::uuid,
+          $28::uuid, $30::uuid, $32::uuid,
           NOW(), 
           $8
         )
@@ -105,6 +106,7 @@ export class CompanySettingsRepository {
           vat_rounding_mode = CASE WHEN $26::text IS NOT NULL THEN EXCLUDED.vat_rounding_mode ELSE company_settings.vat_rounding_mode END,
           vat_payable_account_id = CASE WHEN $27::boolean THEN EXCLUDED.vat_payable_account_id ELSE company_settings.vat_payable_account_id END,
           vat_input_account_id = CASE WHEN $29::boolean THEN EXCLUDED.vat_input_account_id ELSE company_settings.vat_input_account_id END,
+          cogs_account_id = CASE WHEN $31::boolean THEN EXCLUDED.cogs_account_id ELSE company_settings.cogs_account_id END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -129,6 +131,7 @@ export class CompanySettingsRepository {
           vat_rounding_mode as "vatRoundingMode",
           vat_payable_account_id as "vatPayableAccountId",
           vat_input_account_id as "vatInputAccountId",
+          cogs_account_id as "cogsAccountId",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -164,6 +167,8 @@ export class CompanySettingsRepository {
         input.vatPayableAccountId === undefined ? null : input.vatPayableAccountId,
         input.vatInputAccountId !== undefined,
         input.vatInputAccountId === undefined ? null : input.vatInputAccountId,
+        input.cogsAccountId !== undefined,
+        input.cogsAccountId === undefined ? null : input.cogsAccountId,
       ]);
 
       return res.rows[0];

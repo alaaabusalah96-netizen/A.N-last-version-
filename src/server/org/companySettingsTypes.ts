@@ -20,6 +20,7 @@ export interface CompanySettings {
   vatRoundingMode?: 'line' | 'document';
   vatPayableAccountId?: string | null;
   vatInputAccountId?: string | null;
+  cogsAccountId?: string | null;
   updatedAt: string;
   updatedBy?: string | null;
 }
@@ -45,4 +46,5 @@ export interface UpsertCompanySettingsInput {
   vatRoundingMode?: 'line' | 'document';
   vatPayableAccountId?: string | null;
   vatInputAccountId?: string | null;
+  cogsAccountId?: string | null;
 }

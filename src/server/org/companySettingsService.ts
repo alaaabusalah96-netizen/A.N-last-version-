@@ -102,10 +102,11 @@ export class CompanySettingsService {
       // Validate accounts belong to company (only if string ID is provided, allow null to skip)
       // Inventory, purchases clearing and payables: must exist, be active, postable and of the right type.
       // (Header accounts such as 1300 / 2200 can never be posted to, so saving them would break posting later.)
-      const strictRules: Array<{ key: 'inventoryAccountId' | 'purchasesClearingAccountId' | 'accountsPayableAccountId'; label: string; types: string[] }> = [
+      const strictRules: Array<{ key: 'inventoryAccountId' | 'purchasesClearingAccountId' | 'accountsPayableAccountId' | 'cogsAccountId'; label: string; types: string[] }> = [
         { key: 'inventoryAccountId', label: 'حساب المخزون', types: ['asset'] },
         { key: 'purchasesClearingAccountId', label: 'حساب المشتريات المعلّقة', types: ['liability'] },
         { key: 'accountsPayableAccountId', label: 'حساب الدائنين (الموردون)', types: ['liability'] },
+        { key: 'cogsAccountId', label: 'حساب تكلفة البضاعة المباعة', types: ['expense'] },
       ];
       for (const rule of strictRules) {
         const id = input[rule.key];

@@ -198,6 +198,8 @@ const scripts = [
   'scripts/verifyCashFkHardening1.ts',
   'scripts/verifySalesCycle1.ts',
   'scripts/verifyBankReconcile1.ts',
+  'scripts/verifyCogsMapping.ts',
+  'scripts/verifyReservedRoleAccounts.ts',
   'scripts/verifyYearClose1.ts',
   'scripts/verifyReportsOps1.ts',
   'scripts/verifyDbModesScope1.ts',

@@ -5,6 +5,8 @@ export interface AccountOption {
   isActive?: boolean;
   isPostable?: boolean;
   accountType?: string;
+  /** System role that owns this account (set by the server); cash and bank pickers hide such accounts. */
+  reservedRole?: string | null;
 }
 
 export interface AccountRoleFieldRule {
@@ -15,6 +17,8 @@ export interface AccountRoleFieldRule {
   /** Accounts whose code or Arabic name matches are hidden (they belong to another system role). */
   excludeCodes?: readonly string[];
   excludeNamePattern?: RegExp;
+  /** Hide accounts the server marked as owned by a system role. */
+  excludeReserved?: boolean;
 }
 
 /**
@@ -27,6 +31,12 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     field: 'inventory_account_id',
     labelAr: 'حساب المخزون',
     allowedTypes: ['asset'],
+    requirePostable: true,
+  },
+  cogs_account_id: {
+    field: 'cogs_account_id',
+    labelAr: 'حساب تكلفة البضاعة المباعة',
+    allowedTypes: ['expense'],
     requirePostable: true,
   },
   purchases_clearing_account_id: {
@@ -65,8 +75,9 @@ const DEFAULT_FIELD_RULES: Record<string, AccountRoleFieldRule> = {
     allowedTypes: ['asset'],
     requirePostable: true,
     // Receivables (1200) and employee custody receivable (1300) are not cash; the server rejects them too.
-    excludeCodes: ['1200', '1300'],
-    excludeNamePattern: /(عملاء|ذمم|ذمة|عهد|مدينون)/,
+    excludeCodes: ['1200', '1300', '1400'],
+    excludeNamePattern: /(عملاء|ذمم|ذمة|عهد|مدينون|مخزون|بضاعة)/,
+    excludeReserved: true,
   },
   custody_expense_account: {
     field: 'custody_expense_account',
@@ -101,7 +112,8 @@ export function usableAccounts(
       (!requirePostable || a.isPostable === true) &&
       (rule.allowedTypes.length === 0 || rule.allowedTypes.includes(String(a.accountType))) &&
       !(rule.excludeCodes && rule.excludeCodes.includes(a.code)) &&
-      !(rule.excludeNamePattern && rule.excludeNamePattern.test(a.nameAr || ''))
+      !(rule.excludeNamePattern && rule.excludeNamePattern.test(a.nameAr || '')) &&
+      !(rule.excludeReserved && a.reservedRole)
   );
 }
 

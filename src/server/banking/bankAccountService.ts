@@ -1,3 +1,4 @@
+import { buildReservedRoleResolver, reservedRoleMessage } from '../accounting/reservedRoleAccounts.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { BankAccountRepository, defaultBankAccountRepository } from './bankAccountRepository.js';
 import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
@@ -79,19 +80,9 @@ export class BankAccountService {
       }
 
       // A bank account must not sit on an account the system uses for another role (receivables, custody, inventory, suppliers...).
-      const roleSettings = await defaultCompanySettingsRepository.getByCompanyId(companyId, tx);
-      const roleIds = [
-        roleSettings?.inventoryAccountId,
-        roleSettings?.purchasesClearingAccountId,
-        roleSettings?.custodyReceivableAccountId,
-        roleSettings?.accountsPayableAccountId,
-        roleSettings?.inventoryAdjustmentAccountId,
-        roleSettings?.openingBalanceEquityAccountId,
-        roleSettings?.vatPayableAccountId,
-        roleSettings?.vatInputAccountId,
-      ].filter(Boolean);
-      if (roleIds.includes(glAcc.id) || glAcc.code === '1200' || glAcc.code === '1300') {
-        throw new ValidationError('هذا الحساب مخصص لدور آخر في النظام (عملاء أو عهد أو مخزون أو موردين...) ولا يصلح كحساب بنكي. اختر حساب نقدية أو بنك.');
+      const reservedRole = (await buildReservedRoleResolver(companyId, tx))(glAcc);
+      if (reservedRole) {
+        throw new ValidationError(reservedRoleMessage(glAcc, reservedRole, 'bank'));
       }
 
       const existingCode = await this.repo.findByCode(companyId, input.code.trim(), tx);

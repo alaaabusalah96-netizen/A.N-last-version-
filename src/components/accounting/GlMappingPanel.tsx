@@ -11,6 +11,7 @@ import {
   Info,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { CoreMappingCard } from './CoreMappingCard.js';
 import { AccountOption, usableAccounts, isUsable } from '../../lib/accountRules.js';
 
 interface GlEventField {
@@ -392,6 +393,8 @@ export function GlMappingPanel({ companyId, userRole }: GlMappingPanelProps) {
           <span>{success}</span>
         </div>
       )}
+
+      <CoreMappingCard companyId={companyId} />
 
       {/* Active Wired Event Card */}
       {activeEvent && (
