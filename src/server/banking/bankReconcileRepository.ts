@@ -289,9 +289,9 @@ export class BankReconcileRepository {
       UPDATE fin_bank_statement_lines
       SET
         status = $3,
-        matched_journal_line_id = $4,
-        matched_at = CASE WHEN $4 IS NOT NULL THEN NOW() ELSE NULL END,
-        matched_by = CASE WHEN $4 IS NOT NULL THEN $5 ELSE NULL END
+        matched_journal_line_id = $4::uuid,
+        matched_at = CASE WHEN $4::uuid IS NOT NULL THEN NOW() ELSE NULL END,
+        matched_by = CASE WHEN $4::uuid IS NOT NULL THEN $5::uuid ELSE NULL END
       WHERE company_id = $1 AND id = $2
       RETURNING
         id,

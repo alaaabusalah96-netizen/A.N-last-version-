@@ -19,6 +19,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { useConfirm } from '../ui/useConfirm.js';
 import { PriceVarianceExceptionPanel } from './PriceVarianceExceptionPanel.js';
 import {
   MatchReportController,
@@ -162,6 +163,7 @@ const PO_STATUS_STYLES: Record<PoStatus, string> = {
 };
 
 export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
+  const [askConfirm, confirmDialog] = useConfirm();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'suppliers' | 'po' | 'grn' | 'invoices' | 'match' | 'returns' | 'ap' | 'payments'>('suppliers');
@@ -360,7 +362,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   };
 
   const handlePostReturn = async (id: string) => {
-    if (!confirm('هل أنت متأكد من ترحيل مرتجع المشتريات وخصم المخزون؟')) return;
+    if (!(await askConfirm('هل أنت متأكد من ترحيل مرتجع المشتريات وخصم المخزون؟'))) return;
     setActionLoading(true);
     setError(null);
     try {
@@ -379,7 +381,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   };
 
   const handleDeleteReturn = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف مسودة المرتجع؟')) return;
+    if (!(await askConfirm('هل أنت متأكد من حذف مسودة المرتجع؟'))) return;
     setActionLoading(true);
     setError(null);
     try {
@@ -428,7 +430,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   };
 
   const handlePostPayment = async (id: string) => {
-    if (!confirm('هل أنت متأكد من ترحيل سند السداد من الصندوق؟')) return;
+    if (!(await askConfirm('هل أنت متأكد من ترحيل سند السداد من الصندوق؟'))) return;
     setActionLoading(true);
     setError(null);
     try {
@@ -447,7 +449,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   };
 
   const handleDeletePayment = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف مسودة سند السداد؟')) return;
+    if (!(await askConfirm('هل أنت متأكد من حذف مسودة سند السداد؟'))) return;
     setActionLoading(true);
     setError(null);
     try {
@@ -542,7 +544,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   };
 
   const handlePostInvoice = async (id: string) => {
-    if (!confirm('هل أنت متأكد من ترحيل هذه الفاتورة وتوليد القيد المحاسبي؟')) return;
+    if (!(await askConfirm('هل أنت متأكد من ترحيل هذه الفاتورة وتوليد القيد المحاسبي؟'))) return;
     const targetCompanyId = selectedCompanyId;
     setActionLoading(true);
     setError(null);
@@ -578,7 +580,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   };
 
   const handleDeleteInvoice = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف هذه المسودة؟')) return;
+    if (!(await askConfirm('هل أنت متأكد من حذف هذه المسودة؟'))) return;
     const targetCompanyId = selectedCompanyId;
     setActionLoading(true);
     setError(null);
@@ -1018,6 +1020,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
 
   return (
     <div className="flex flex-col gap-6" dir="rtl">
+      {confirmDialog}
       {/* Header & Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
         <div className="flex items-center gap-3.5">

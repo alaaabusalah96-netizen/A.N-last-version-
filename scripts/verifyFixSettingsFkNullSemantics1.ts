@@ -23,7 +23,7 @@ async function verify() {
 
     const servicePath = path.resolve('src/server/org/companySettingsService.ts');
     const serviceContent = fs.readFileSync(servicePath, 'utf8');
-    assert(serviceContent.includes("typeof input.inventoryAccountId === 'string'"), 'Service should only validate if string provided');
+    assert(serviceContent.includes("typeof id === 'string'") && serviceContent.includes("key: 'inventoryAccountId'"), 'Service should only validate if string provided');
     assert(serviceContent.includes('defaultAuditService.record'), 'Service should record audit');
     assert(serviceContent.includes('executor: tx'), 'Service should pass executor to audit');
     console.log('Passed: Service static check');

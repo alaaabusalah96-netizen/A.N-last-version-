@@ -96,7 +96,11 @@ export class GrnService {
     }
 
     const extendedInput = input as any;
-    const poId = extendedInput.poId && typeof extendedInput.poId === 'string' ? extendedInput.poId.trim() : null;
+    const rawPoId = extendedInput.poId ?? extendedInput.purchaseOrderId;
+    const poId = rawPoId && typeof rawPoId === 'string' ? rawPoId.trim() : null;
+    if (extendedInput.poId && extendedInput.purchaseOrderId && extendedInput.poId !== extendedInput.purchaseOrderId) {
+      throw new ValidationError('poId و purchaseOrderId متعارضان');
+    }
 
     return await withTenantTransaction(companyId, async (tx) => {
       const supplier = await this.supplierRepo.findById(companyId, input.supplierId, tx);
