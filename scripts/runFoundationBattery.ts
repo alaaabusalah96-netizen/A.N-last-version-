@@ -113,6 +113,7 @@ const scripts = [
   'scripts/verifyInvTransfer1.ts',
   'scripts/verifyInvItemCard1.ts',
   'scripts/verifyInvAtomicBalance1.ts',
+  'scripts/verifyStockDocuments1.ts',
   'scripts/verifyPurchCore1.ts',
   'scripts/verifyFixN1OrgScopeStatus1.ts',
   'scripts/verifyFixN2CompositeFkLedger1.ts',

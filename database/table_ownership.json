@@ -95,6 +95,11 @@
     "reason": "Per-company warehouse item stock balances"
   },
   {
+    "table": "inv_stock_documents",
+    "scope": "tenant",
+    "reason": "Multi-line stock document headers (receipt, issue, adjustment, transfer); lines are inv_stock_movements rows"
+  },
+  {
     "table": "inv_stock_movements",
     "scope": "tenant",
     "reason": "Per-company stock movement ledger (receives and issues)"

@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultWarehouseService } from '../inventory/warehouseService.js';
 import { defaultItemService } from '../inventory/itemService.js';
 import { defaultStockService } from '../inventory/stockService.js';
+import { defaultStockDocumentService } from '../inventory/stockDocumentService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -331,3 +332,54 @@ inventoryRoutes.post(
   })
 );
 
+
+// Multi-line stock documents (receipt / issue / adjustment / transfer): header + lines[], all or nothing.
+inventoryRoutes.post(
+  '/documents',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    const docType = req.body?.docType;
+    if (!['receipt', 'issue', 'adjustment', 'transfer'].includes(docType)) {
+      throw new ValidationError('docType يجب أن يكون receipt أو issue أو adjustment أو transfer');
+    }
+    await assertInventoryPermission(
+      user,
+      docType === 'adjustment' ? PERMISSIONS.INVENTORY_VALUATION_ADJUST : PERMISSIONS.INVENTORY_MOVEMENT,
+      companyId
+    );
+    const b = req.body || {};
+    if (!Array.isArray(b.lines)) throw new ValidationError('lines يجب أن تكون مصفوفة');
+    const num = (v: any) => (v !== undefined && v !== null && v !== '' ? Number(v) : undefined);
+    const result = await defaultStockDocumentService.postDocument(
+      companyId,
+      {
+        docType,
+        warehouseId: b.warehouseId,
+        sourceWarehouseId: b.sourceWarehouseId,
+        destWarehouseId: b.destWarehouseId,
+        reason: b.reason,
+        memo: b.memo,
+        costSource: b.costSource,
+        entryDate: b.entryDate,
+        expenseAccountId: b.expenseAccountId,
+        adjustmentType: b.adjustmentType,
+        lines: b.lines.map((l: any) => ({
+          itemId: l?.itemId,
+          qty: Number(l?.qty),
+          unitCost: num(l?.unitCost),
+          costSource: l?.costSource,
+          reason: l?.reason,
+          memo: l?.memo,
+          warehouseId: l?.warehouseId,
+          direction: l?.direction,
+          adjustmentType: l?.adjustmentType,
+          expenseAccountId: l?.expenseAccountId,
+        })),
+      },
+      user.id
+    );
+    return res.status(201).json({ status: 'ok', ...result });
+  })
+);
