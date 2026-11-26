@@ -18,7 +18,9 @@ describe('company admin UI wiring (static)', () => {
     const app = read('src/App.tsx');
     expect(app).toMatch(/m\.role === 'company_admin'/);
     expect(app).toMatch(/role: isCompanyAdmin \? 'company_admin' : baseRole/);
-    expect(read('src/components/shell/AppSidebar.tsx')).toMatch(/permissions\.includes\('roles\.read'\)/);
+    expect(read('src/components/shell/AppSidebar.tsx')).toMatch(/canAccessNav\('roles', userRole, permissions\)/);
+    expect(read('src/lib/navAccess.ts')).toMatch(/'roles\.read'/);
+    expect(read('src/lib/navAccess.ts')).toMatch(/role === 'company_admin'/);
   });
 });
 
