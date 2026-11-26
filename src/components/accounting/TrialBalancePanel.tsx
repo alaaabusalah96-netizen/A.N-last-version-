@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Scale, RefreshCw, AlertCircle, CheckCircle2, Calendar, Building2 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { DataTableShell, ErrorBanner } from '../ui/index.js';
+import { normalizeTrialBalance } from '../../lib/trialBalanceView.js';
 
 interface TrialBalanceAccountRow {
   accountId: string;
@@ -70,7 +71,7 @@ export function TrialBalancePanel({ companyId }: TrialBalancePanelProps) {
         throw new Error(errData.message || errData.error || 'فشل في تحميل ميزان المراجعة');
       }
       const tbData = await res.json();
-      setData(tbData);
+      setData({ companyId, ...normalizeTrialBalance(tbData) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ أثناء تحميل ميزان المراجعة');
     } finally {

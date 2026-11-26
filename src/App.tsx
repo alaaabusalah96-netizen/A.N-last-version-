@@ -88,8 +88,15 @@ export default function App() {
       const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
+        // The sign-in role of a company user is 'user'. Show the company role the user holds.
+        const baseRole = (data.user || {}).role;
+        const isCompanyAdmin =
+          baseRole !== 'platform_admin' &&
+          Array.isArray(data.memberships) &&
+          data.memberships.some((m: any) => m && m.isActive !== false && m.role === 'company_admin');
         setCurrentUser({
           ...(data.user || {}),
+          role: isCompanyAdmin ? 'company_admin' : baseRole,
           permissions: Array.isArray(data.permissions) ? data.permissions : [],
         });
       } else {
@@ -275,7 +282,7 @@ export default function App() {
             ) : activeNav === 'cash' ? (
               <CashCustodyWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
             ) : activeNav === 'users' ? (
-              <UsersAdminWorkspace />
+              <UsersAdminWorkspace userRole={currentUser.role} />
             ) : activeNav === 'roles' ? (
               <RolesPanel userRole={currentUser.role} />
             ) : activeNav === 'org_units' ? (

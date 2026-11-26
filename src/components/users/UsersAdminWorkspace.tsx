@@ -23,7 +23,7 @@ interface CompanyMemberRoleInfo {
   isActive: boolean;
 }
 
-export function UsersAdminWorkspace() {
+export function UsersAdminWorkspace({ userRole }: { userRole?: string } = {}) {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +57,14 @@ export function UsersAdminWorkspace() {
   const [newPassword, setNewPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchUsers = useCallback(async () => {
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
+
+  // Company admins must send the company: the server lists users per company.
+  const fetchUsers = useCallback(async (companyId: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch('/api/users');
+      const res = await apiFetch(companyId ? `/api/users?companyId=${encodeURIComponent(companyId)}` : '/api/users');
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'تعذر جلب المستخدمين');
       setUsers(data.users || []);
@@ -129,8 +132,9 @@ export function UsersAdminWorkspace() {
   }, []);
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    if (!companiesLoaded) return;
+    void fetchUsers(selectedCompanyId);
+  }, [fetchUsers, companiesLoaded, selectedCompanyId]);
 
   useEffect(() => {
     async function loadCompaniesAndPermissions() {
@@ -148,14 +152,19 @@ export function UsersAdminWorkspace() {
             setUserCanWrite((prev) => prev || perms.includes('user:write'));
           }
         }
-        if (!compRes.ok) return;
+        if (!compRes.ok) {
+          setCompaniesLoaded(true);
+          return;
+        }
         const compBody = await compRes.json().catch(() => ({}));
         const list = compBody.companies || [];
         setCompanies(list);
         if (list.length > 0 && !selectedCompanyId) {
           setSelectedCompanyId(list[0].id);
         }
+        setCompaniesLoaded(true);
       } catch {
+        setCompaniesLoaded(true);
         // Error surfaced cleanly when company calls execute
       }
     }
@@ -207,7 +216,7 @@ export function UsersAdminWorkspace() {
       setShowCreateModal(false);
       setUsername('');
       setPassword('');
-      await Promise.all([fetchUsers(), loadCompanyMembersAndRoles(selectedCompanyId)]);
+      await Promise.all([fetchUsers(selectedCompanyId), loadCompanyMembersAndRoles(selectedCompanyId)]);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -286,7 +295,7 @@ export function UsersAdminWorkspace() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'فشل تحديث حالة المستخدم');
-      fetchUsers();
+      fetchUsers(selectedCompanyId);
     } catch (err: any) {
       setError(err.message);
     }
@@ -322,7 +331,7 @@ export function UsersAdminWorkspace() {
           )}
           <button
             onClick={() => {
-              fetchUsers();
+              fetchUsers(selectedCompanyId);
               if (selectedCompanyId) loadCompanyMembersAndRoles(selectedCompanyId);
             }}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
@@ -529,7 +538,7 @@ export function UsersAdminWorkspace() {
                     <optgroup label="مسار التوافق">
                       <option value="legacy:company_user">دور ثابت قديم (توافق) — مستخدم</option>
                       <option value="legacy:company_admin">دور ثابت قديم (توافق) — مدير شركة</option>
-                      <option value="legacy:platform_admin">مدير منصة</option>
+                      {userRole === 'platform_admin' && <option value="legacy:platform_admin">مدير منصة</option>}
                     </optgroup>
                   </select>
                 )}
