@@ -384,6 +384,21 @@ export class SalesInvoiceService {
         throw new ValidationError('تم ترحيل تكلفة البضاعة المباعة (COGS) لهذه الفاتورة مسبقاً ولا يمكن تكرارها');
       }
 
+      // A draft created before an item was disabled must not be posted with that item.
+      const postItemIds = Array.from(new Set(invoice.lines.map((l: any) => l.itemId).filter(Boolean)));
+      if (postItemIds.length > 0) {
+        const itemRes = await tx.query<any>(
+          `SELECT id, code, is_active FROM inv_items WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+          [companyId, postItemIds]
+        );
+        const inactive = (itemRes?.rows || []).filter((r: any) => r && r.is_active === false);
+        if (inactive.length > 0) {
+          throw new ValidationError(
+            `لا يمكن ترحيل الفاتورة: الصنف ${inactive[0].code || ''} معطّل. أعد تفعيله من بيانات الأصناف أو احذف البند من المسودة.`
+          );
+        }
+      }
+
       // Customer credit limit (0 / unset = no limit). Exposure = open posted receivables + this invoice.
       const customerForLimit = await this.customerRepo.findById(companyId, invoice.customerId, tx);
       const creditLimit = Number(customerForLimit?.creditLimit ?? 0);

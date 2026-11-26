@@ -264,6 +264,7 @@ describe('AN-SALES-CYCLE-1 Domain Services Unit Tests', () => {
       const auditService = { record: vi.fn().mockResolvedValue(undefined) } as any;
 
       mockTx.query
+        .mockResolvedValueOnce({ rows: [{ id: ITEM_ID, code: 'ITM', is_active: true }] })
         .mockResolvedValueOnce({ rows: [{ arAccountId: AR_ACC_ID }] })
         .mockResolvedValueOnce({ rows: [{ revAccountId: REV_ACC_ID }] });
 

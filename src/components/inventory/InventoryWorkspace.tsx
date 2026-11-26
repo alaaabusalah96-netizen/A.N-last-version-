@@ -226,6 +226,41 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
     }
   };
 
+  // A large stock document posts in the background. If this screen is remounted (session refresh)
+  // before the result was shown, resume watching the pending job and show its outcome.
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    let cancelled = false;
+    const raw = sessionStorage.getItem('anerp.pendingStockDocJob');
+    if (!raw) return;
+    let pending: { jobId: string; companyId: string; label: string } | null = null;
+    try { pending = JSON.parse(raw); } catch { pending = null; }
+    if (!pending || pending.companyId !== selectedCompanyId) return;
+    const p = pending;
+    (async () => {
+      for (let i = 0; i < 400 && !cancelled; i++) {
+        try {
+          const pr = await apiFetch(`/api/inventory/documents/jobs/${p.jobId}?companyId=${encodeURIComponent(p.companyId)}`);
+          const pd = await pr.json();
+          const job = pd?.job;
+          if (pr.ok && job?.status === 'done' && job.result) {
+            sessionStorage.removeItem('anerp.pendingStockDocJob');
+            setSuccess(`تم ترحيل ${p.label} رقم ${job.result.docNo} بعدد ${job.result.lineCount} سطر`);
+            loadData();
+            return;
+          }
+          if (pr.ok && job?.status === 'failed') {
+            sessionStorage.removeItem('anerp.pendingStockDocJob');
+            setError(job.errorMessage || 'فشل ترحيل المستند');
+            return;
+          }
+        } catch { /* keep trying */ }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedCompanyId]);
+
   useEffect(() => {
     loadData();
   }, [selectedCompanyId]);

@@ -135,17 +135,22 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
       if (!res.ok) throw new Error(data.message || data.error || 'فشل ترحيل المستند');
       if (res.status === 202 && data.jobId) {
         // Large document: posted in the background, poll until it finishes (up to 10 minutes).
+        try {
+          sessionStorage.setItem('anerp.pendingStockDocJob', JSON.stringify({ jobId: data.jobId, companyId, label: TYPE_LABEL[docType] }));
+        } catch { /* storage unavailable */ }
         const started = Date.now();
         while (Date.now() - started < 10 * 60 * 1000) {
-          await new Promise((r) => setTimeout(r, 2500));
+          await new Promise((r) => setTimeout(r, 1500));
           const pr = await apiFetch(`/api/inventory/documents/jobs/${data.jobId}?companyId=${encodeURIComponent(companyId)}`);
           const pd = await pr.json();
           if (!pr.ok) throw new Error(pd.message || pd.error || 'تعذر قراءة حالة الترحيل');
           const job = pd.job;
           if (job?.status === 'done' && job.result) {
+            try { sessionStorage.removeItem('anerp.pendingStockDocJob'); } catch { /* ignore */ }
             onDone(`تم ترحيل ${TYPE_LABEL[docType]} رقم ${job.result.docNo} بعدد ${job.result.lineCount} سطر`);
             return;
           }
+          if (job?.status === 'failed') try { sessionStorage.removeItem('anerp.pendingStockDocJob'); } catch { /* ignore */ }
           if (job?.status === 'failed') throw new Error(job.errorMessage || 'فشل ترحيل المستند');
         }
         throw new Error('ما زال الترحيل جاريًا. لا تعد الإرسال، راجع الحركات بعد دقائق قبل أي محاولة أخرى.');

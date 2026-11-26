@@ -379,9 +379,10 @@ inventoryRoutes.post(
     const wantsAsync = b.async === true || b.async === 'true' || String(req.query.async || '') === 'true';
     if (wantsAsync) {
       const job = await defaultStockDocumentService.createJob(companyId, docInput, user.id);
-      setImmediate(() => {
-        void defaultStockDocumentService.runJob(companyId, job.id).catch(() => undefined);
-      });
+      // Claim before answering so the job is already "running" when the client first polls; the
+      // posting itself continues after the response (polls keep the process busy).
+      const claim = await defaultStockDocumentService.claimJob(companyId, job.id);
+      if (claim) void defaultStockDocumentService.executeJob(companyId, job.id, claim).catch(() => undefined);
       return res.status(202).json({ status: 'accepted', jobId: job.id, jobStatus: job.status, lineCount: job.lineCount });
     }
     const result = await defaultStockDocumentService.postDocument(companyId, docInput, user.id);

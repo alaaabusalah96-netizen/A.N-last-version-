@@ -571,6 +571,22 @@ async function run() {
       postedNoTax.status === 'posted' && postedNoTax.subtotal === 200 && postedNoTax.taxAmount === 0 && postedNoTax.totalAmount === 200
     );
 
+    // L2b: a draft created while the item was active must NOT post after the item is disabled
+    const itemOff = await defaultItemService.createItem(companyId, { code: `OFF-${unique}`.slice(0, 20), nameAr: 'صنف سيعطل', uom: 'قطعة' }, user.id);
+    const offDraft = await defaultSalesInvoiceService.createInvoice(
+      companyId,
+      { customerId: customer.id, lines: [{ itemId: itemOff.id, qty: 1, unitPrice: 50, taxRate: 0 }] },
+      user.id
+    );
+    await defaultItemService.updateItem(companyId, itemOff.id, { isActive: false }, user.id);
+    let offMsg = '';
+    try {
+      await defaultSalesInvoiceService.postInvoice(companyId, offDraft.id, user.id);
+    } catch (e: any) {
+      offMsg = String(e?.message || e);
+    }
+    await check('L2b: posting a draft that contains a disabled item is rejected with a clear message', offMsg.includes('معطّل'), offMsg);
+
     // L3: Post taxable + COGS invoice
     const postedTaxCogs = await defaultSalesInvoiceService.postInvoice(companyId, invTaxCogsDraft.id, user.id);
     await check(

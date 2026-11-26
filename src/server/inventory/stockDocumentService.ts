@@ -230,8 +230,8 @@ export class StockDocumentService {
     });
   }
 
-  /** Claim a queued job (only one caller wins) and post it. Never throws: the outcome is stored on the job. */
-  async runJob(companyId: string, jobId: string): Promise<void> {
+  /** Claim a queued job (only one caller wins). Returns the claimed job or null. */
+  async claimJob(companyId: string, jobId: string): Promise<{ payload: StockDocumentInput; createdBy: string | null } | null> {
     const claim = await withTenantTransaction(companyId, async (tx: DbExecutor) => {
       const r = await tx.query<any>(
         `UPDATE inv_stock_document_jobs SET status = 'running', started_at = now()
@@ -240,11 +240,15 @@ export class StockDocumentService {
       );
       return r.rows[0] || null;
     });
-    if (!claim) return;
+    return claim ? { payload: claim.payload as StockDocumentInput, createdBy: claim.created_by || null } : null;
+  }
+
+  /** Post a claimed job and store the outcome on it. Never throws. */
+  async executeJob(companyId: string, jobId: string, claim: { payload: StockDocumentInput; createdBy: string | null }): Promise<void> {
     let result: StockDocumentResult | null = null;
     let errMsg: string | null = null;
     try {
-      result = await this.postDocument(companyId, claim.payload as StockDocumentInput, claim.created_by || undefined);
+      result = await this.postDocument(companyId, claim.payload, claim.createdBy || undefined);
     } catch (err: any) {
       errMsg = String(err?.message || err || 'فشل ترحيل المستند').slice(0, 1000);
     }
@@ -257,6 +261,12 @@ export class StockDocumentService {
     });
   }
 
+  /** Claim and post a queued job. Never throws: the outcome is stored on the job. */
+  async runJob(companyId: string, jobId: string): Promise<void> {
+    const claim = await this.claimJob(companyId, jobId);
+    if (claim) await this.executeJob(companyId, jobId, claim);
+  }
+
   /** Read a job. A queued job nobody started (CPU paused after the response) is started by the poll itself. */
   async getJob(companyId: string, jobId: string): Promise<StockDocumentJob | null> {
     const row = await withTenantTransaction(companyId, async (tx: DbExecutor) => {
@@ -265,7 +275,8 @@ export class StockDocumentService {
     });
     if (!row) return null;
     if (row.status === 'queued') {
-      void this.runJob(companyId, jobId).catch(() => undefined);
+      const claim = await this.claimJob(companyId, jobId);
+      if (claim) void this.executeJob(companyId, jobId, claim).catch(() => undefined);
       return { ...mapJob(row), status: 'running' };
     }
     if (row.status === 'running' && row.started_at && Date.now() - new Date(row.started_at).getTime() > JOB_STALE_MS) {
