@@ -22,6 +22,13 @@ export class CompanySettingsService {
         displayNameFinance: null,
         locale: 'ar-EG',
         enforceCustodySeparation: true,
+        vatEnabled: false,
+        defaultVatRate: 0,
+        pricesIncludeVat: false,
+        vatInputRecoverable: true,
+        vatRoundingMode: 'line',
+        vatPayableAccountId: null,
+        vatInputAccountId: null,
         updatedAt: new Date().toISOString()
       };
     }
@@ -40,6 +47,56 @@ export class CompanySettingsService {
 
       if (input.enforceCustodySeparation !== undefined && typeof input.enforceCustodySeparation !== 'boolean') {
         throw new ValidationError('إعداد فصل المهام في العهد يجب أن يكون تفعيل أو تعطيل (true/false)');
+      }
+
+      if (input.vatEnabled !== undefined && typeof input.vatEnabled !== 'boolean') {
+        throw new ValidationError('تفعيل ضريبة القيمة المضافة يجب أن يكون تفعيل أو تعطيل (true/false)');
+      }
+      if (input.pricesIncludeVat !== undefined && typeof input.pricesIncludeVat !== 'boolean') {
+        throw new ValidationError('إعداد "الأسعار شاملة الضريبة" يجب أن يكون تفعيل أو تعطيل (true/false)');
+      }
+      if (input.vatInputRecoverable !== undefined && typeof input.vatInputRecoverable !== 'boolean') {
+        throw new ValidationError('إعداد "ضريبة المشتريات قابلة للخصم" يجب أن يكون تفعيل أو تعطيل (true/false)');
+      }
+      if (input.defaultVatRate !== undefined) {
+        if (typeof input.defaultVatRate !== 'number' || !Number.isFinite(input.defaultVatRate) || input.defaultVatRate < 0 || input.defaultVatRate > 100) {
+          throw new ValidationError('نسبة الضريبة الافتراضية يجب أن تكون بين 0 و100');
+        }
+        if (Math.round(input.defaultVatRate * 100) / 100 !== input.defaultVatRate) {
+          throw new ValidationError('نسبة الضريبة الافتراضية يجب ألا تزيد عن خانتين عشريتين');
+        }
+      }
+      if (input.vatRoundingMode !== undefined && input.vatRoundingMode !== 'line' && input.vatRoundingMode !== 'document') {
+        throw new ValidationError('طريقة تقريب الضريبة يجب أن تكون على مستوى السطر (line) أو المستند (document)');
+      }
+
+      const vatAccountRules: Array<{ key: 'vatPayableAccountId' | 'vatInputAccountId'; label: string; types: string[] }> = [
+        { key: 'vatPayableAccountId', label: 'حساب ضريبة القيمة المضافة المستحقة (مخرجات)', types: ['liability'] },
+        { key: 'vatInputAccountId', label: 'حساب ضريبة القيمة المضافة القابلة للخصم (مدخلات)', types: ['asset'] },
+      ];
+      for (const rule of vatAccountRules) {
+        const id = input[rule.key];
+        if (typeof id === 'string' && id.trim() !== '') {
+          const account = await defaultAccountRepository.findById(companyId, id, tx);
+          if (!account) throw new ValidationError(`${rule.label} غير موجود في دليل الحسابات`);
+          if (!account.isActive) throw new ValidationError(`${rule.label} غير نشط`);
+          if (!account.isPostable) throw new ValidationError(`${rule.label} يجب أن يكون حساباً فرعياً قابلاً للترحيل`);
+          if (!rule.types.includes(account.accountType)) {
+            throw new ValidationError(`${rule.label} يجب أن يكون من نوع ${rule.types.join('/')} وليس ${account.accountType}`);
+          }
+        }
+      }
+      if (input.vatPayableAccountId && input.vatInputAccountId && input.vatPayableAccountId === input.vatInputAccountId) {
+        throw new ValidationError('حساب ضريبة المخرجات وحساب ضريبة المدخلات يجب أن يكونا حسابين مختلفين');
+      }
+
+      // VAT can only be switched on when the output VAT account exists (existing or in this same request).
+      if (input.vatEnabled === true) {
+        const existing = await this.repo.getByCompanyId(companyId, tx);
+        const payable = input.vatPayableAccountId !== undefined ? input.vatPayableAccountId : existing?.vatPayableAccountId;
+        if (!payable) {
+          throw new ValidationError('لا يمكن تفعيل ضريبة القيمة المضافة قبل تحديد حساب الضريبة المستحقة (مخرجات)');
+        }
       }
 
       // Validate accounts belong to company (only if string ID is provided, allow null to skip)
