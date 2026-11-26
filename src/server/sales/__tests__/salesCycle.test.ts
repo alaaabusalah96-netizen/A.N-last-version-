@@ -219,6 +219,17 @@ describe('AN-SALES-CYCLE-1 Domain Services Unit Tests', () => {
       expect(invoiceRepo.createDraft).not.toHaveBeenCalled();
     });
 
+    it('rejects a new invoice that contains a deactivated item', async () => {
+      const invoiceRepo = { createDraft: vi.fn() } as any;
+      const customerRepo = { findById: vi.fn().mockResolvedValue({ id: CUST_ID, isActive: true }) } as any;
+      mockTx.query.mockResolvedValue({ rows: [{ id: ITEM_ID, code: 'ITM-9', is_active: false }] });
+      const service = new SalesInvoiceService(invoiceRepo, customerRepo, {} as any, {} as any, { record: vi.fn() } as any);
+      await expect(
+        service.createInvoice(COMP_ID, { customerId: CUST_ID, invoiceDate: '2026-01-10', lines: [{ itemId: ITEM_ID, qty: 1, unitPrice: 10 }] } as any, ACTOR_ID)
+      ).rejects.toThrow('معطّل');
+      expect(invoiceRepo.createDraft).not.toHaveBeenCalled();
+    });
+
     it('posts sales invoice with balanced Dr AR / Cr Revenue journal entry', async () => {
       const invoiceRepo = {
         findByIdForUpdate: vi.fn().mockResolvedValue({ id: INV_ID, status: 'draft', totalAmount: 1150 }),

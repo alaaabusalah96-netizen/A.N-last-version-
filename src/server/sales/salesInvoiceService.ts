@@ -147,6 +147,20 @@ export class SalesInvoiceService {
       }
 
       const effectiveInvoiceDate = validatedInvoiceDate ?? (await resolveCompanyToday(companyId, tx));
+      const lineItemIds = Array.from(new Set(input.lines.map((l) => l.itemId).filter(Boolean)));
+      if (lineItemIds.length > 0) {
+        const itemRes = await tx.query<any>(
+          `SELECT id, code, is_active FROM items WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+          [companyId, lineItemIds]
+        );
+        const inactive = (itemRes?.rows || []).filter((r: any) => r && r.is_active === false);
+        if (inactive.length > 0) {
+          throw new ValidationError(
+            `الصنف ${inactive[0].code || ''} معطّل ولا يمكن إضافته إلى فاتورة جديدة. أعد تفعيله من بيانات الأصناف أو احذفه من البنود.`
+          );
+        }
+      }
+
       const created = await this.invoiceRepo.createDraft(
         companyId,
         {
