@@ -12,6 +12,7 @@ export interface CompanySettings {
   accountsPayableAccountId?: string | null;
   inventoryAdjustmentAccountId?: string | null;
   openingBalanceEquityAccountId?: string | null;
+  enforceCustodySeparation?: boolean;
   updatedAt: string;
   updatedBy?: string | null;
 }
@@ -29,4 +30,5 @@ export interface UpsertCompanySettingsInput {
   accountsPayableAccountId?: string | null;
   inventoryAdjustmentAccountId?: string | null;
   openingBalanceEquityAccountId?: string | null;
+  enforceCustodySeparation?: boolean;
 }

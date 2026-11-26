@@ -21,6 +21,7 @@ export class CompanySettingsRepository {
           accounts_payable_account_id as "accountsPayableAccountId",
           inventory_adjustment_account_id as "inventoryAdjustmentAccountId",
           opening_balance_equity_account_id as "openingBalanceEquityAccountId",
+          enforce_custody_separation as "enforceCustodySeparation",
           updated_at as "updatedAt",
           updated_by as "updatedBy"
         FROM company_settings
@@ -50,6 +51,7 @@ export class CompanySettingsRepository {
           accounts_payable_account_id,
           inventory_adjustment_account_id,
           opening_balance_equity_account_id,
+          enforce_custody_separation,
           updated_at, 
           updated_by
         )
@@ -67,6 +69,7 @@ export class CompanySettingsRepository {
           $15,
           $17,
           $19,
+          COALESCE($21, TRUE),
           NOW(), 
           $8
         )
@@ -83,6 +86,7 @@ export class CompanySettingsRepository {
           accounts_payable_account_id = CASE WHEN $16 THEN EXCLUDED.accounts_payable_account_id ELSE company_settings.accounts_payable_account_id END,
           inventory_adjustment_account_id = CASE WHEN $18 THEN EXCLUDED.inventory_adjustment_account_id ELSE company_settings.inventory_adjustment_account_id END,
           opening_balance_equity_account_id = CASE WHEN $20 THEN EXCLUDED.opening_balance_equity_account_id ELSE company_settings.opening_balance_equity_account_id END,
+          enforce_custody_separation = CASE WHEN $21::boolean IS NOT NULL THEN EXCLUDED.enforce_custody_separation ELSE company_settings.enforce_custody_separation END,
           updated_at = NOW(),
           updated_by = EXCLUDED.updated_by
         RETURNING 
@@ -99,6 +103,7 @@ export class CompanySettingsRepository {
           accounts_payable_account_id as "accountsPayableAccountId",
           inventory_adjustment_account_id as "inventoryAdjustmentAccountId",
           opening_balance_equity_account_id as "openingBalanceEquityAccountId",
+          enforce_custody_separation as "enforceCustodySeparation",
           updated_at as "updatedAt",
           updated_by as "updatedBy";
       `;
@@ -124,6 +129,7 @@ export class CompanySettingsRepository {
         input.inventoryAdjustmentAccountId !== undefined,
         input.openingBalanceEquityAccountId === undefined ? null : input.openingBalanceEquityAccountId,
         input.openingBalanceEquityAccountId !== undefined,
+        typeof input.enforceCustodySeparation === 'boolean' ? input.enforceCustodySeparation : null,
       ]);
 
       return res.rows[0];

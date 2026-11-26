@@ -21,6 +21,7 @@ export class CompanySettingsService {
         fiscalYearStartDay: 1,
         displayNameFinance: null,
         locale: 'ar-EG',
+        enforceCustodySeparation: true,
         updatedAt: new Date().toISOString()
       };
     }
@@ -35,6 +36,10 @@ export class CompanySettingsService {
       }
       if (input.fiscalYearStartDay !== undefined && (input.fiscalYearStartDay < 1 || input.fiscalYearStartDay > 28)) {
         throw new ValidationError('Day must be between 1 and 28');
+      }
+
+      if (input.enforceCustodySeparation !== undefined && typeof input.enforceCustodySeparation !== 'boolean') {
+        throw new ValidationError('إعداد فصل المهام في العهد يجب أن يكون تفعيل أو تعطيل (true/false)');
       }
 
       // Validate accounts belong to company (only if string ID is provided, allow null to skip)

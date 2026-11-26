@@ -244,7 +244,7 @@ async function run() {
     // Calendar Periods relative to company business date (Africa/Cairo)
     // P0: [-100 .. -70] -> CLOSED (closedDate = -85)
     // P1: [-60  .. -31] -> OPEN   (dP1 = -45 => agingDays = 45 => '31-60' bucket!)
-    // P2: [-30  .. +10] -> OPEN   (dToday = 0 => agingDays = 0  => '0-30'  bucket!)
+    // P2: [-30  .. 0] -> OPEN   (dToday = 0 => agingDays = 0  => '0-30'  bucket!)
     const dToday = getBusinessDateToday(DEFAULT_BUSINESS_TIMEZONE);
     const p0Start = addDaysYmd(dToday, -100);
     const p0End = addDaysYmd(dToday, -70);
@@ -255,7 +255,7 @@ async function run() {
     const dP1 = addDaysYmd(dToday, -45);
 
     const p2Start = addDaysYmd(dToday, -30);
-    const p2End = addDaysYmd(dToday, 10);
+    const p2End = dToday;
 
     const p0Draft = await defaultPeriodService.createPeriod(companyId, { code: `P0-CLS-${unique}`.slice(0, 20), startDate: p0Start, endDate: p0End }, user.id);
     const p0 = await defaultPeriodService.closePeriod(companyId, p0Draft.id, user.id);

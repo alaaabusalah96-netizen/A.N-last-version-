@@ -22,6 +22,7 @@ interface CompanySettings {
   accountsPayableAccountId: string | null;
   inventoryAdjustmentAccountId: string | null;
   openingBalanceEquityAccountId: string | null;
+  enforceCustodySeparation?: boolean;
 }
 
 interface CompanySettingsPanelProps {
@@ -372,6 +373,22 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* Custody separation of duties */}
+            <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <label className="flex items-center gap-3 text-sm font-bold text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.enforceCustodySeparation !== false}
+                  onChange={(e) => updateField('enforceCustodySeparation', e.target.checked)}
+                  disabled={isReadOnly}
+                />
+                فصل المهام في العهد النقدية (مفعّل افتراضياً)
+              </label>
+              <p className="text-xs text-slate-400">
+                عند التفعيل لا يجوز لمقدّم طلب العهدة اعتمادها أو صرفها بنفسه، ويسري ذلك حتى على مدير المنصة. تعطيله قرار صريح من الشركة ويُسجَّل في سجل التدقيق.
+              </p>
             </div>
 
             {/* Notifications */}

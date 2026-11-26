@@ -18,6 +18,7 @@ import {
   OpenCustodyEmployeeSummary,
   SettleCustodyInput,
 } from './cashTypes.js';
+import { defaultCompanySettingsRepository, CompanySettingsRepository } from '../org/companySettingsRepository.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
 import { toMoney } from '../lib/numeric.js';
@@ -81,8 +82,18 @@ export class CustodyService {
     private auditService: Pick<AuditService, 'record'> = defaultAuditService,
     private membershipStore: Pick<MembershipStore, 'getMembership' | 'listByCompany'> = defaultMembershipStore,
     private userRepo: Pick<UserRepository, 'findById'> = defaultUserRepository,
-    private glResolver: Pick<CustodyGlResolver, 'resolveAndAssertUsable'> = defaultCustodyGlResolver
+    private glResolver: Pick<CustodyGlResolver, 'resolveAndAssertUsable'> = defaultCustodyGlResolver,
+    private settingsRepo: Pick<CompanySettingsRepository, 'getByCompanyId'> = defaultCompanySettingsRepository
   ) {}
+
+  /**
+   * Separation of duties is ENFORCED unless the company explicitly disabled it in settings.
+   * When enforced it also binds platform admins.
+   */
+  private async isSeparationEnforced(companyId: string, tx: any): Promise<boolean> {
+    const settings = await this.settingsRepo.getByCompanyId(companyId, tx);
+    return settings?.enforceCustodySeparation !== false;
+  }
 
   private assertTransition(current: CustodyStatus, target: CustodyStatus): void {
     const allowed = ALLOWED_TRANSITIONS[current] || [];
@@ -257,8 +268,10 @@ export class CustodyService {
 
       this.assertTransition(custody.status, 'approved');
 
-      if (!isPlatformAdmin && custody.requestedBy && custody.requestedBy === actorId) {
-        throw new ForbiddenError('فصل المهام: لا يمكن لمقدّم طلب العهدة اعتماد طلبه بنفسه');
+      if (custody.requestedBy && custody.requestedBy === actorId && (await this.isSeparationEnforced(companyId, tx))) {
+        throw new ForbiddenError(
+          'فصل المهام: لا يمكن لمقدّم طلب العهدة اعتماد طلبه بنفسه. الإعداد مفعّل افتراضياً ويسري حتى على مدير المنصة؛ يمكن تعطيله من إعدادات الشركة صراحةً.'
+        );
       }
 
       await this.custodyRepo.setStatus(
@@ -358,6 +371,12 @@ export class CustodyService {
         throw new ValidationError('تم صرف هذه العهدة مسبقاً ولا يمكن تكرار الصرف');
       }
       this.assertTransition(custody.status, 'open');
+
+      if (custody.requestedBy && custody.requestedBy === actorId && (await this.isSeparationEnforced(companyId, tx))) {
+        throw new ForbiddenError(
+          'فصل المهام: لا يمكن لمقدّم طلب العهدة صرفها بنفسه. الإعداد مفعّل افتراضياً ويسري حتى على مدير المنصة؛ يمكن تعطيله من إعدادات الشركة صراحةً.'
+        );
+      }
 
       const register = await this.registerRepo.lockForUpdate(companyId, custody.registerId, tx);
       if (!register) {

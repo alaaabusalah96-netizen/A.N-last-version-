@@ -153,6 +153,10 @@ function createHarness() {
     }),
   };
 
+  const settingsRepo = {
+    getByCompanyId: vi.fn().mockResolvedValue({ enforceCustodySeparation: true }),
+  };
+
   const service = new CustodyService(
     custodyRepo,
     registerRepo,
@@ -162,7 +166,8 @@ function createHarness() {
     auditService,
     membershipStore,
     userRepo,
-    glResolver
+    glResolver,
+    settingsRepo
   );
 
   return {
@@ -176,6 +181,7 @@ function createHarness() {
     membershipStore,
     userRepo,
     glResolver,
+    settingsRepo,
   };
 }
 
@@ -266,13 +272,33 @@ describe('CustodyService Unit Tests (No DB)', () => {
   });
 
   describe('SoD & Approval / Cancel Governance', () => {
-    it('enforces SoD: requester cannot approve own custody unless platform_admin', async () => {
+    it('enforces SoD by default: requester cannot approve own custody, platform admin included', async () => {
       const { service, custodyRepo } = createHarness();
       custodyRepo.findByIdForUpdate.mockResolvedValue(
         makeCustody({ status: 'pending', requestedBy: REQUESTER_ID })
       );
 
       await expect(service.approveCustody(COMP_ID, CUSTODY_ID, REQUESTER_ID, false)).rejects.toThrow(ForbiddenError);
+      await expect(service.approveCustody(COMP_ID, CUSTODY_ID, REQUESTER_ID, true)).rejects.toThrow(/فصل المهام/);
+    });
+
+    it('allows self-approval only when the company explicitly disabled SoD', async () => {
+      const { service, custodyRepo, settingsRepo } = createHarness();
+      settingsRepo.getByCompanyId.mockResolvedValue({ enforceCustodySeparation: false });
+      custodyRepo.findByIdForUpdate.mockResolvedValue(
+        makeCustody({ status: 'pending', requestedBy: REQUESTER_ID })
+      );
+      custodyRepo.findById.mockResolvedValue(makeCustody({ status: 'approved', approvedBy: REQUESTER_ID }));
+      const res = await service.approveCustody(COMP_ID, CUSTODY_ID, REQUESTER_ID, false);
+      expect(res.status).toBe('approved');
+    });
+
+    it('blocks the requester from disbursing own custody when SoD is enforced', async () => {
+      const { service, custodyRepo } = createHarness();
+      custodyRepo.findByIdForUpdate.mockResolvedValue(
+        makeCustody({ status: 'approved', requestedBy: REQUESTER_ID })
+      );
+      await expect(service.disburseCustody(COMP_ID, CUSTODY_ID, REQUESTER_ID, true)).rejects.toThrow(/فصل المهام/);
     });
 
     it('allows distinct approver without creating movement or journal entry', async () => {
