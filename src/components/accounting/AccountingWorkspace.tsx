@@ -18,9 +18,10 @@ interface Company {
 
 interface AccountingWorkspaceProps {
   userRole?: string;
+  permissions?: string[];
 }
 
-export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
+export function AccountingWorkspace({ userRole, permissions = [] }: AccountingWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -40,7 +41,14 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
     return () => window.removeEventListener('hashchange', syncHash);
   }, []);
 
-  const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
+  const isAdmin = userRole === 'platform_admin' || userRole === 'company_admin';
+  // Admin roles keep full access; any other role is judged by its granted permission codes.
+  const has = (code: string) => isAdmin || permissions.includes(code);
+  const canWrite = isAdmin;
+  const canWriteJournal = has('accounting.journals.write');
+  const canPostJournal = has('accounting.journals.post');
+  const canCreateAccount = has('accounting.accounts.create');
+  const canSeedAccounts = has('accounting.accounts.seed');
 
   useEffect(() => {
     async function loadCompanies() {
@@ -223,12 +231,12 @@ export function AccountingWorkspace({ userRole }: AccountingWorkspaceProps) {
           </p>
         </div>
       ) : activeTab === 'coa' ? (
-        <AccountsPanel companyId={selectedCompanyId} canCreate={canWrite} canSeed={canWrite} />
+        <AccountsPanel companyId={selectedCompanyId} canCreate={canCreateAccount} canSeed={canSeedAccounts} />
       ) : activeTab === 'journal' ? (
         <JournalWorkspace
           companyId={selectedCompanyId}
-          canWrite={canWrite}
-          canPost={userRole === 'platform_admin' || userRole === 'company_admin'}
+          canWrite={canWriteJournal}
+          canPost={canPostJournal}
         />
       ) : activeTab === 'tb' ? (
         <TrialBalancePanel companyId={selectedCompanyId} />

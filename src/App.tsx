@@ -292,9 +292,9 @@ export default function App() {
             ) : activeNav === 'companies' ? (
               <CompaniesPanel userRole={currentUser.role} />
             ) : activeNav === 'accounting' ? (
-              <AccountingWorkspace userRole={currentUser.role} />
+              <AccountingWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
             ) : activeNav === 'inventory' ? (
-              <InventoryWorkspace userRole={currentUser.role} />
+              <InventoryWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
             ) : activeNav === 'purchasing' ? (
               <PurchasingWorkspace userRole={currentUser.role} />
             ) : activeNav === 'sales' ? (

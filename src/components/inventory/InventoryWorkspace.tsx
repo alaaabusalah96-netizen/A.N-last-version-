@@ -95,9 +95,10 @@ interface AccountRef {
 
 interface InventoryWorkspaceProps {
   userRole: string;
+  permissions?: string[];
 }
 
-export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
+export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation'>('balances');
@@ -162,7 +163,8 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [transferQty, setTransferQty] = useState('');
   const [transferMemo, setTransferMemo] = useState('');
 
-  const canWrite = userRole === 'platform_admin' || userRole === 'company_admin';
+  const isAdminRole = userRole === 'platform_admin' || userRole === 'company_admin';
+  const canWrite = isAdminRole || permissions.includes('inventory:write');
 
   // Fetch companies
   useEffect(() => {
@@ -690,7 +692,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
 
       {/* Tab Panels */}
       {activeTab === 'valuation' && (
-        <InventoryValuationPanel companyId={selectedCompanyId} userRole={userRole} />
+        <InventoryValuationPanel companyId={selectedCompanyId} userRole={userRole} permissions={permissions} />
       )}
 
       {activeTab === 'balances' && (

@@ -48,7 +48,7 @@ async function verifyFixAccountingUiGates() {
   assertCheck(
     'S4',
     'AccountingWorkspace and App pass userRole / capability props down to AccountsPanel',
-    wsContent.includes('canCreate={canWrite}') && wsContent.includes('canSeed={canWrite}') && appContent.includes('userRole={currentUser.role}')
+    wsContent.includes('canCreate={canCreateAccount}') && wsContent.includes('canSeed={canSeedAccounts}') && appContent.includes('userRole={currentUser.role}')
   );
 
   // S5: Server accountingRoutes still references ACCOUNTING_ACCOUNTS_CREATE and SEED (regression guard)

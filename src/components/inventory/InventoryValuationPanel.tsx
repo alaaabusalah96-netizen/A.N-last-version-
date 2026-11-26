@@ -204,6 +204,7 @@ interface SimpleRef {
 interface InventoryValuationPanelProps {
   companyId: string;
   userRole: string;
+  permissions?: string[];
 }
 
 type ValuationSubTab =
@@ -215,7 +216,7 @@ type ValuationSubTab =
   | 'opening'
   | 'reconciliation';
 
-export function InventoryValuationPanel({ companyId, userRole }: InventoryValuationPanelProps) {
+export function InventoryValuationPanel({ companyId, userRole, permissions = [] }: InventoryValuationPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<ValuationSubTab>('readiness');
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -272,7 +273,11 @@ export function InventoryValuationPanel({ companyId, userRole }: InventoryValuat
   const [recMethod, setRecMethod] = useState('');
   const [recNotes, setRecNotes] = useState('');
 
-  const canManageValuation = userRole === 'platform_admin' || userRole === 'company_admin';
+  // Admin roles keep full access; other roles see the management controls when they hold any valuation permission (the server still checks each action).
+  const canManageValuation =
+    userRole === 'platform_admin' ||
+    userRole === 'company_admin' ||
+    ['inventory:costing_profile:write', 'inventory:costing:assign', 'inventory:opening:approve', 'inventory:valuation:adjust', 'inventory:valuation:reconcile'].some((p) => permissions.includes(p));
 
   const loadAll = useCallback(async () => {
     if (!companyId) return;
