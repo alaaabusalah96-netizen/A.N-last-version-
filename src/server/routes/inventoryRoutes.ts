@@ -398,14 +398,20 @@ inventoryRoutes.get(
     const user = req.user!;
     const companyId = (req.query.companyId as string) || '';
     if (!companyId || !isUuid(companyId)) throw new ValidationError('Invalid or missing company ID format');
-    // 1) pure read, 2) authorize, 3) only then let the job move forward.
+    // 1) authorize first (before anything about the job is revealed: existence or type),
+    // 2) pure read, 3) type-specific check, 4) only then let the job move forward.
+    // A caller with neither inventory permission gets 403 whatever the job id is. A caller who has one
+    // but not the permission for this job's type gets the same 404 as for a missing job.
+    const company = await defaultCompanyStore.getById(companyId);
+    if (!company) throw new NotFoundError('Company not found');
+    const canMove = await defaultRbacService.hasPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
+    const canAdjust = await defaultRbacService.hasPermission(user, PERMISSIONS.INVENTORY_VALUATION_ADJUST, companyId);
+    if (!canMove && !canAdjust) {
+      throw new ForbiddenError(`Access denied: Missing required permission '${PERMISSIONS.INVENTORY_MOVEMENT}' for this company`);
+    }
     const existing = await defaultStockDocumentService.readJob(companyId, req.params.jobId);
-    if (!existing) throw new NotFoundError('مهمة الترحيل غير موجودة');
-    await assertInventoryPermission(
-      user,
-      existing.docType === 'adjustment' ? PERMISSIONS.INVENTORY_VALUATION_ADJUST : PERMISSIONS.INVENTORY_MOVEMENT,
-      companyId
-    );
+    const allowedForType = existing ? (existing.docType === 'adjustment' ? canAdjust : canMove) : false;
+    if (!existing || !allowedForType) throw new NotFoundError('مهمة الترحيل غير موجودة');
     const job = await defaultStockDocumentService.advanceJob(companyId, req.params.jobId);
     if (!job) throw new NotFoundError('مهمة الترحيل غير موجودة');
     return res.status(200).json({ status: 'ok', job });

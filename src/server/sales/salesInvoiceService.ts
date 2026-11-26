@@ -4,6 +4,7 @@ import {
   multiplyToMinorUnits,
 } from './salesInvoiceRepository.js';
 import { CustomerRepository, defaultCustomerRepository } from './customerRepository.js';
+import { computeSalesInvoiceTotals } from './salesInvoiceRepository.js';
 import { JournalRepository, defaultJournalRepository } from '../accounting/journalRepository.js';
 import { JournalService, defaultJournalService } from '../accounting/journalService.js';
 import { AuditService, defaultAuditService } from '../audit/auditService.js';
@@ -93,6 +94,33 @@ export class SalesInvoiceService {
         }
         if (delRes.rows[0].customer_id !== input.customerId) {
           throw new ValidationError('عميل الفاتورة لا يطابق عميل إذن التسليم');
+        }
+      }
+
+      // Invoice-level money fields are not accepted as input: tax and totals come only from the lines.
+      // If a client sends them anyway they must agree with the lines, otherwise reject (never ignore silently).
+      {
+        const supplied = input as unknown as Record<string, unknown>;
+        const keys = ['subtotal', 'taxAmount', 'totalAmount'] as const;
+        const present = keys.filter((k) => supplied[k] !== undefined && supplied[k] !== null && String(supplied[k]).trim() !== '');
+        if (present.length > 0) {
+          let computed: ReturnType<typeof computeSalesInvoiceTotals> | null = null;
+          try {
+            computed = computeSalesInvoiceTotals(input.lines);
+          } catch {
+            computed = null; // invalid lines are reported by the line checks below
+          }
+          if (computed) {
+            for (const k of present) {
+              const got = toMinorUnits(supplied[k] as any, MONEY_SCALE);
+              const want = toMinorUnits(computed[k], MONEY_SCALE);
+              if (got !== want) {
+                throw new ValidationError(
+                  `قيمة ${k === 'taxAmount' ? 'الضريبة' : k === 'subtotal' ? 'الإجمالي قبل الضريبة' : 'الإجمالي'} على مستوى الفاتورة لا تطابق البنود (المرسل ${String(supplied[k])} والمحسوب ${computed[k]}). تُحسب الضريبة والإجماليات من بنود الفاتورة فقط.`
+                );
+              }
+            }
+          }
         }
       }
 

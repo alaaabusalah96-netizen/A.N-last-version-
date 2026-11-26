@@ -156,7 +156,7 @@
 | `/api/inventory` | `GET` | `/api/inventory/costing-profiles` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/costing-profiles` | `true` | `PERMISSIONS.INVENTORY_COSTING_PROFILE_WRITE` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/documents` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST, PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
-| `/api/inventory` | `GET` | `/api/inventory/documents/jobs/:jobId` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST, PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
+| `/api/inventory` | `GET` | `/api/inventory/documents/jobs/:jobId` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT, PERMISSIONS.INVENTORY_VALUATION_ADJUST` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/issue` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/items` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/items` | `true` | `PERMISSIONS.INVENTORY_WRITE` | `src/server/routes/inventoryRoutes.ts` |

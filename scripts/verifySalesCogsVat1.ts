@@ -571,6 +571,26 @@ async function run() {
       postedNoTax.status === 'posted' && postedNoTax.subtotal === 200 && postedNoTax.taxAmount === 0 && postedNoTax.totalAmount === 200
     );
 
+    // L2a: invoice-level money fields are never silently ignored: a wrong taxAmount/subtotal is rejected,
+    // a matching one is accepted (tax comes only from the lines)
+    let wrongTaxRejected = false;
+    try {
+      await defaultSalesInvoiceService.createInvoice(
+        companyId,
+        { customerId: customer.id, taxAmount: 999, lines: [{ itemId: item.id, qty: 2, unitPrice: 100, taxRate: 15 }] } as any,
+        user.id
+      );
+    } catch (err) {
+      if (err instanceof ValidationError) wrongTaxRejected = true;
+    }
+    await check('L2a: invoice-level taxAmount that disagrees with the lines is rejected (not ignored)', wrongTaxRejected);
+    const matchingTaxDraft = await defaultSalesInvoiceService.createInvoice(
+      companyId,
+      { customerId: customer.id, taxAmount: 30, subtotal: 200, lines: [{ itemId: item.id, qty: 2, unitPrice: 100, taxRate: 15 }] } as any,
+      user.id
+    );
+    await check('L2a2: a matching invoice-level taxAmount/subtotal is accepted', Number(matchingTaxDraft.taxAmount) === 30 && Number(matchingTaxDraft.subtotal) === 200);
+
     // L2b: a draft created while the item was active must NOT post after the item is disabled
     const itemOff = await defaultItemService.createItem(companyId, { code: `OFF-${unique}`.slice(0, 20), nameAr: 'صنف سيعطل', uom: 'قطعة' }, user.id);
     const offDraft = await defaultSalesInvoiceService.createInvoice(
