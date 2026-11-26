@@ -73,5 +73,38 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     }
   }
 
-  return res;
+  return normalizeApiResponse(path, res);
+}
+
+/** Arabic message for a failed request whose body is not JSON (proxy page, HTML, empty). */
+export function arabicHttpErrorMessage(status: number): string {
+  if (status === 401) return 'انتهت الجلسة. سجّل الدخول من جديد.';
+  if (status === 403) return 'ليست لديك صلاحية لتنفيذ هذه العملية. اطلب الصلاحية من مدير الشركة.';
+  if (status === 404) return 'الخدمة المطلوبة غير موجودة. حدّث الصفحة وحاول مرة أخرى.';
+  if (status === 429) return 'طلبات كثيرة في وقت قصير. انتظر قليلاً ثم حاول مرة أخرى.';
+  if (status >= 500) return 'تعذّر على الخادم تنفيذ الطلب. حاول بعد قليل، وإن تكرر أبلغ المسؤول.';
+  return 'تعذّر تنفيذ الطلب. تحقق من البيانات وحاول مرة أخرى.';
+}
+
+/**
+ * Never let a screen read raw HTML as JSON ("Unexpected token <") or show "HTTP 403".
+ * A failed API answer that is not JSON, or an API path answered with an HTML page, becomes a JSON
+ * answer with the same status and an Arabic message. JSON answers are returned untouched.
+ */
+export function normalizeApiResponse(path: string, res: Response): Response {
+  if (!path.startsWith('/api/')) return res;
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  const isJson = contentType.includes('application/json');
+  const isHtmlOk = res.ok && contentType.includes('text/html');
+  if ((res.ok && !isHtmlOk) || isJson) return res;
+  if (res.status === 204 || res.status === 304) return res;
+  const status = isHtmlOk ? 502 : res.status;
+  const message = isHtmlOk
+    ? 'وصل رد غير متوقع من الخادم. حدّث الصفحة وسجّل الدخول من جديد إن لزم.'
+    : arabicHttpErrorMessage(res.status);
+  return new Response(JSON.stringify({ error: message, message, code: `HTTP_${status}` }), {
+    status,
+    statusText: res.statusText,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
