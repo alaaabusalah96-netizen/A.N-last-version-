@@ -190,6 +190,15 @@ async function run() {
     await check('P5: cannot reverse a submitted voucher or a voucher twice',
       (await rejects(() => defaultCustodyVoucherService.reverseVoucher(compA.id, v2.id, 'x', approver.id, false), ValidationError)) &&
       (await rejects(() => defaultCustodyVoucherService.reverseVoucher(compA.id, v1.id, 'x', approver.id, false), ValidationError)));
+    const stPend = await defaultCustodyExtrasService.getStatement(compA.id, custody.id);
+    const pr = await defaultCustodyExtrasService.getPeriodReport(compA.id, custody.id, '2000-01-01T00:00:00Z', '2999-01-01T00:00:00Z');
+    const pr0 = await defaultCustodyExtrasService.getPeriodReport(compA.id, custody.id, '1990-01-01T00:00:00Z', '1990-01-02T00:00:00Z');
+    await check('P5b: period report closing = opening + in - out = statement remaining 1200 after a reversal, reconciled; empty past period is 0; a pending voucher is reserved (10) without lowering remaining',
+      pr.opening === 0 && pr.closing === 1200 && pr.closing === pr.opening + pr.totalIn - pr.totalOut && pr.reconciled === true &&
+      pr.asOfBalance === 1200 && pr0.closing === 0 && pr0.rows.length === 0 &&
+      stPend.totals.pendingVoucherAmount === 10 && stPend.totals.remaining === 1200 && stPend.totals.available === 1190 &&
+      (await rejects(() => defaultCustodyExtrasService.getPeriodReport(compA.id, custody.id, '2999-01-01T00:00:00Z', '2000-01-01T00:00:00Z'), ValidationError)) &&
+      (await rejects(() => defaultCustodyExtrasService.getPeriodReport(compB.id, custody.id, '2000-01-01T00:00:00Z', '2999-01-01T00:00:00Z'), NotFoundError)));
     await defaultCustodyVoucherService.rejectVoucher(compA.id, v2.id, 'غير مطلوب', approver.id);
 
     // P6

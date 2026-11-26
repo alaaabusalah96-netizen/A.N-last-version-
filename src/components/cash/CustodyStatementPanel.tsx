@@ -79,6 +79,8 @@ interface StatementView {
     cashReturned: number;
     remaining: number;
     pendingVouchers: number;
+    pendingVoucherAmount?: number;
+    available?: number;
   };
   vouchers: VoucherView[];
   cashCounts: CountView[];
@@ -269,7 +271,10 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
             <div><div className="text-slate-400">مرتجع نقدي وسداد عجز</div><div className="text-white font-bold">{fmt(statement.totals.cashReturned)}</div></div>
             <div><div className="text-slate-400">المتبقي</div><div data-testid="custody-remaining" className="text-emerald-300 font-bold">{fmt(statement.totals.remaining)}</div></div>
             <div><div className="text-slate-400">حوافظ بانتظار القرار</div><div className="text-amber-300 font-bold">{statement.totals.pendingVouchers}</div></div>
+            <div><div className="text-slate-400">محجوز لحوافظ معلقة (بدون قيد)</div><div data-testid="custody-reserved" className="text-amber-300 font-bold">{fmt(statement.totals.pendingVoucherAmount ?? 0)}</div></div>
+            <div><div className="text-slate-400">المتاح بعد الحجز</div><div data-testid="custody-available" className="text-emerald-300 font-bold">{fmt(statement.totals.available ?? statement.totals.remaining)}</div></div>
           </div>
+          <CustodyPeriodReportPanel companyId={companyId} custodyId={custodyId} />
 
           <div>
             <h6 className="text-xs font-bold text-slate-300 mb-2">الحوافظ</h6>
@@ -490,6 +495,71 @@ export function CustodyStatementPanel(props: CustodyStatementPanelProps) {
               </div>
             </div>
           )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+interface PeriodReportView {
+  opening: number; totalIn: number; totalOut: number; closing: number; reconciled: boolean;
+  rows: { movementType: string; signedAmount: number; createdAt: string; memo: string | null; runningBalance: number }[];
+}
+const TYPE_AR: Record<string, string> = {
+  disburse: 'صرف عهدة', topup: 'تعزيز', settle_expense: 'مصروف معتمد', reverse: 'عكس حافظة',
+  settle_return: 'مرتجع نقدي', shortage_repay: 'سداد عجز',
+};
+
+/** تقرير فترة العهدة: افتتاحي، وارد، صادر، ختامي. قراءة فقط ولا يرحّل شيئا. */
+export function CustodyPeriodReportPanel({ companyId, custodyId }: { companyId: string; custodyId: string }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const [from, setFrom] = useState(monthAgo);
+  const [to, setTo] = useState(today);
+  const [rep, setRep] = useState<PeriodReportView | null>(null);
+  const [err, setErr] = useState('');
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      const q = `companyId=${encodeURIComponent(companyId)}&from=${from}T00:00:00.000Z&to=${to}T23:59:59.999Z`;
+      const res = await apiFetch(`/api/cash/custodies/${custodyId}/period-report?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || data?.message || 'تعذر تحميل التقرير');
+      setRep(data.report);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'تعذر تحميل التقرير');
+    }
+  }, [companyId, custodyId, from, to]);
+  useEffect(() => { void load(); }, [load]);
+  return (
+    <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-2 text-xs" data-testid="custody-period-report">
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-slate-300 font-bold">تقرير الفترة</span>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white" aria-label="من" />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white" aria-label="إلى" />
+      </div>
+      {err && <div className="text-red-300">{err}</div>}
+      {rep && (
+        <>
+          <div className="grid grid-cols-4 gap-2">
+            <div><div className="text-slate-400">افتتاحي</div><div className="text-white font-bold">{fmt(rep.opening)}</div></div>
+            <div><div className="text-slate-400">وارد</div><div className="text-emerald-300 font-bold">{fmt(rep.totalIn)}</div></div>
+            <div><div className="text-slate-400">صادر</div><div className="text-amber-300 font-bold">{fmt(rep.totalOut)}</div></div>
+            <div><div className="text-slate-400">ختامي</div><div data-testid="period-closing" className="text-white font-bold">{fmt(rep.closing)}</div></div>
+          </div>
+          {!rep.reconciled && <div className="text-red-300">تنبيه: مجموع الحركات لا يطابق المتبقي في الكشف، راجع المحاسب.</div>}
+          <table className="w-full text-right">
+            <thead><tr className="text-slate-400"><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الرصيد</th></tr></thead>
+            <tbody>
+              {rep.rows.map((r, i) => (
+                <tr key={i} className="border-t border-slate-800 text-slate-200">
+                  <td>{r.createdAt.slice(0, 10)}</td><td>{TYPE_AR[r.movementType] || r.movementType}</td>
+                  <td>{fmt(r.signedAmount)}</td><td>{fmt(r.runningBalance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </>
       )}
     </div>

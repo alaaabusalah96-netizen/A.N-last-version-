@@ -488,6 +488,23 @@ cashRoutes.get(
   })
 );
 
+cashRoutes.get(
+  '/custodies/:id/period-report',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const report = await defaultCustodyExtrasService.getPeriodReport(
+      companyId,
+      req.params.id,
+      String(req.query.from || ''),
+      String(req.query.to || '')
+    );
+    res.json({ status: 'ok', report });
+  })
+);
+
 // Cancel Custody
 // القاعدة الصريحة: يتطلب المسار صلاحية CUSTODY_REQUEST لإلغاء طلب pending،
 // بينما يتطلب إلغاء عهدة معتمدة (approved) وجود صلاحية CUSTODY_APPROVE.

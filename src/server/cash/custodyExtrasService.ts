@@ -1,4 +1,5 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
+import { buildPeriodReport, balanceAsOf, availableAfterReservation, type CustodyPeriodReport } from './custodyPeriodReport.js';
 import { DbExecutor } from '../db/types.js';
 import { CustodyRepository, defaultCustodyRepository } from './custodyRepository.js';
 import { CashRegisterRepository, defaultCashRegisterRepository } from './cashRegisterRepository.js';
@@ -62,6 +63,10 @@ export interface CustodyStatement {
     cashReturned: number;
     remaining: number;
     pendingVouchers: number;
+    /** Total of vouchers waiting for approval. Reserved, no accounting entry yet. */
+    pendingVoucherAmount: number;
+    /** remaining minus the reserved amount. Display only. */
+    available: number;
   };
   movements: CustodyMovement[];
   vouchers: CustodyVoucher[];
@@ -407,6 +412,26 @@ export class CustodyExtrasService {
     return out;
   }
 
+  /** Read-only period report and point-in-time balance from the movements ledger. */
+  async getPeriodReport(companyId: string, custodyId: string, fromIso: string, toIso: string): Promise<CustodyPeriodReport & { asOfBalance: number; statementRemaining: number; reconciled: boolean }> {
+    if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
+    if (!custodyId || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
+    const from = new Date(fromIso);
+    const to = new Date(toIso);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) throw new ValidationError('تاريخ الفترة غير صالح');
+    if (from.getTime() > to.getTime()) throw new ValidationError('بداية الفترة بعد نهايتها');
+    return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
+      const custody = await this.custodyRepo.findById(companyId, custodyId, tx);
+      if (!custody) throw new NotFoundError('العهدة النقدية غير موجودة');
+      const movements = await this.custodyRepo.listMovements(companyId, { custodyId }, tx);
+      const report = buildPeriodReport(movements, from, to);
+      const allTime = balanceAsOf(movements, new Date(8640000000000000));
+      const sum = (type: string) => toMoney(movements.filter((m) => m.movementType === type).reduce((s, m) => s + m.amount, 0));
+      const statementRemaining = toMoney(custody.amount - (sum('settle_expense') - sum('reverse')) - toMoney(sum('settle_return') + sum('shortage_repay')));
+      return { ...report, asOfBalance: balanceAsOf(movements, to), statementRemaining, reconciled: allTime === statementRemaining };
+    });
+  }
+
   async getStatement(companyId: string, custodyId: string): Promise<CustodyStatement> {
     if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
     if (!custodyId || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
@@ -437,6 +462,11 @@ export class CustodyExtrasService {
           cashReturned,
           remaining: toMoney(custody.amount - (approved - reversed) - cashReturned),
           pendingVouchers: vouchers.filter((v) => v.status === 'submitted').length,
+          ...(() => {
+            const remaining = toMoney(custody.amount - (approved - reversed) - cashReturned);
+            const pend = toMoney(vouchers.filter((v) => v.status === 'submitted').reduce((a, v) => a + v.totalAmount, 0));
+            return { pendingVoucherAmount: pend, available: availableAfterReservation(remaining, pend).available };
+          })(),
         },
         movements,
         vouchers,

@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 240
+- **Total Mounted Endpoints**: 241
 - **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 232
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 233
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -62,6 +62,7 @@
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/cash-counts/:countId/shortage-claim` | `true` | `PERMISSIONS.CUSTODY_SETTLE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/disburse` | `true` | `PERMISSIONS.CUSTODY_DISBURSE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/:id/movements` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/custodies/:id/period-report` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/reject` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies/:id/settle` | `true` | `PERMISSIONS.CUSTODY_SETTLE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/:id/statement` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
