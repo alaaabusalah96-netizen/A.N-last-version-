@@ -210,6 +210,7 @@ const scripts = [
   'scripts/verifyCustodyP2a1.ts',
   'scripts/verifyCustodyP2a2_1.ts',
   'scripts/verifyCustodyLimit1.ts',
+  'scripts/verifyCustodyPeriodLock1.ts',
   'scripts/verifyUxFoundation1.ts',
   'scripts/verifyCompositeFkSetNull1.ts',
   'scripts/verifySalesCogsVat1.ts',

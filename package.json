@@ -163,6 +163,7 @@
     "test:custody-p2a-1": "tsx scripts/verifyCustodyP2a1.ts",
     "test:custody-p2a2-1": "tsx scripts/verifyCustodyP2a2_1.ts",
     "test:custody-limit-1": "tsx scripts/verifyCustodyLimit1.ts",
+    "test:custody-period-lock-1": "tsx scripts/verifyCustodyPeriodLock1.ts",
     "test:ux-foundation-1": "tsx scripts/verifyUxFoundation1.ts",
     "test:composite-fk-set-null-1": "tsx scripts/verifyCompositeFkSetNull1.ts",
     "ops:backup": "tsx scripts/ops/backupDb.ts",
