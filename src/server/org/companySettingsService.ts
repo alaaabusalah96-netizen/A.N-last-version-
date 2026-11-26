@@ -38,13 +38,24 @@ export class CompanySettingsService {
       }
 
       // Validate accounts belong to company (only if string ID is provided, allow null to skip)
-      if (typeof input.inventoryAccountId === 'string') {
-        const account = await defaultAccountRepository.findById(companyId, input.inventoryAccountId, tx);
-        if (!account) throw new ValidationError('Invalid inventory account');
-      }
-      if (typeof input.purchasesClearingAccountId === 'string') {
-        const account = await defaultAccountRepository.findById(companyId, input.purchasesClearingAccountId, tx);
-        if (!account) throw new ValidationError('Invalid purchases clearing account');
+      // Inventory, purchases clearing and payables: must exist, be active, postable and of the right type.
+      // (Header accounts such as 1300 / 2200 can never be posted to, so saving them would break posting later.)
+      const strictRules: Array<{ key: 'inventoryAccountId' | 'purchasesClearingAccountId' | 'accountsPayableAccountId'; label: string; types: string[] }> = [
+        { key: 'inventoryAccountId', label: 'حساب المخزون', types: ['asset'] },
+        { key: 'purchasesClearingAccountId', label: 'حساب المشتريات المعلّقة', types: ['liability'] },
+        { key: 'accountsPayableAccountId', label: 'حساب الدائنين (الموردون)', types: ['liability'] },
+      ];
+      for (const rule of strictRules) {
+        const id = input[rule.key];
+        if (typeof id === 'string' && id.trim() !== '') {
+          const account = await defaultAccountRepository.findById(companyId, id, tx);
+          if (!account) throw new ValidationError(`${rule.label} غير موجود في دليل الحسابات`);
+          if (!account.isActive) throw new ValidationError(`${rule.label} غير نشط`);
+          if (!account.isPostable) throw new ValidationError(`${rule.label} يجب أن يكون حساباً فرعياً قابلاً للترحيل (الحساب ${account.code} حساب رئيسي)`);
+          if (!rule.types.includes(account.accountType)) {
+            throw new ValidationError(`${rule.label} يجب أن يكون من نوع ${rule.types.join('/')} وليس ${account.accountType}`);
+          }
+        }
       }
 
       if (typeof input.custodyReceivableAccountId === 'string' && input.custodyReceivableAccountId.trim() !== '') {

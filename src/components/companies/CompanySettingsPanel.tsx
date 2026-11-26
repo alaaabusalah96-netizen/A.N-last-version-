@@ -273,7 +273,7 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
                 >
                   <option value="">— غير محدد —</option>
-                  {accounts.map((a) => (
+                  {usableAccounts(accounts, 'inventory_account_id').map((a) => (
                     <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
                   ))}
                 </select>
@@ -292,7 +292,7 @@ export function CompanySettingsPanel({ userRole }: CompanySettingsPanelProps) {
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
                 >
                   <option value="">— غير محدد —</option>
-                  {accounts.map((a) => (
+                  {usableAccounts(accounts, 'purchases_clearing_account_id').map((a) => (
                     <option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>
                   ))}
                 </select>

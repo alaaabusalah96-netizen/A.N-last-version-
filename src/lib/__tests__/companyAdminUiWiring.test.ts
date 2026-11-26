@@ -21,3 +21,11 @@ describe('company admin UI wiring (static)', () => {
     expect(read('src/components/shell/AppSidebar.tsx')).toMatch(/permissions\.includes\('roles\.read'\)/);
   });
 });
+
+describe('company settings account lists are filtered by role', () => {
+  it('inventory and purchases clearing selects use usableAccounts', () => {
+    const src = read('src/components/companies/CompanySettingsPanel.tsx');
+    expect(src).toContain("usableAccounts(accounts, 'inventory_account_id')");
+    expect(src).toContain("usableAccounts(accounts, 'purchases_clearing_account_id')");
+  });
+});
