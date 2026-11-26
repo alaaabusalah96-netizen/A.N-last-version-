@@ -49,7 +49,7 @@ for (const [route, gate] of gates) {
 assert(/countedAmount: countAmount/.test(panel), 'U3 cash count sends countedAmount');
 assert(/\{ amount: topUpAmount/.test(panel), 'U3 top-up sends amount');
 assert(/\{ amount: repayById\[c\.id\] \}/.test(panel), 'U3 repayment sends amount');
-assert(/lines: \[\{ expenseAccountId: vAccount, amount: vAmount/.test(panel), 'U3 voucher sends lines[].expenseAccountId/amount');
+assert(/lines: toPayloadLines\(/.test(panel) && /expenseAccountId: l\.account, amount: l\.amount/.test(fs.readFileSync('src/lib/voucherLines.ts', 'utf8')), 'U3 voucher sends lines[].expenseAccountId/amount');
 assert(/\{ reason: reasonById\[v\.id\] \}/.test(panel), 'U3 reject/reverse send reason');
 
 // U4: the count never posts and the UI never adjusts automatically. Since C13 (owner decision) a write-off or payroll deduction is offered only as an approval request.
