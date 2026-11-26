@@ -1,7 +1,8 @@
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { ValidationError } from '../http/errors.js';
-import { defaultStockService, StockService } from './stockService.js';
+import { defaultStockService, StockService, StockJournalCollector } from './stockService.js';
+import { defaultJournalService } from '../accounting/journalService.js';
 import { defaultAuditService } from '../audit/auditService.js';
 import type { StockAdjustmentKind, StockAdjustmentDirection } from './inventoryTypes.js';
 
@@ -144,6 +145,7 @@ export class StockDocumentService {
       );
       const documentId: string = ins.rows[0].id;
       const out: StockDocumentResult['lines'] = [];
+      const collector: StockJournalCollector = { lines: [], valuationMovementIds: [] };
 
       for (let i = 0; i < input.lines.length; i++) {
         const l = input.lines[i];
@@ -160,14 +162,14 @@ export class StockDocumentService {
               warehouseId, itemId: l.itemId, qty: Number(l.qty), unitCost: l.unitCost,
               costSource: l.costSource || input.costSource, reason, memo: memo ? `${memo} [${tag}]` : tag,
               entryDate: input.entryDate, expenseAccountId: l.expenseAccountId || input.expenseAccountId,
-            }, actorId);
+            }, actorId, collector);
             movementIds = [r.movement.id]; journalEntryId = r.journalEntryId;
           } else if (input.docType === 'issue') {
             const r = await this.stock.issueStock(companyId, {
               warehouseId, itemId: l.itemId, qty: Number(l.qty), reason,
               memo: memo ? `${memo} [${tag}]` : tag, entryDate: input.entryDate,
               expenseAccountId: l.expenseAccountId || input.expenseAccountId,
-            }, actorId);
+            }, actorId, collector);
             movementIds = [r.movement.id]; journalEntryId = r.journalEntryId;
           } else if (input.docType === 'adjustment') {
             const adjustmentType = l.adjustmentType || input.adjustmentType || 'adjustment';
@@ -179,7 +181,7 @@ export class StockDocumentService {
               unitCost: l.unitCost, costSource: l.costSource || input.costSource, reason: reason || '',
               memo: memo ? `${memo} [${tag}]` : tag, entryDate: input.entryDate,
               expenseAccountId: l.expenseAccountId || input.expenseAccountId,
-            }, actorId);
+            }, actorId, collector);
             movementIds = [r.movement.id]; journalEntryId = r.journalEntryId;
           } else {
             const r = await this.stock.transfer(companyId, {
@@ -201,6 +203,34 @@ export class StockDocumentService {
         }
       }
 
+      // One journal entry for the whole document: a debit and a credit line per item line.
+      let documentJournalId: string | null = null;
+      if (collector.lines.length > 0) {
+        const draft = await defaultJournalService.createDraftEntry(
+          companyId,
+          {
+            entryDate: collector.entryDate || input.entryDate || new Date().toISOString().slice(0, 10),
+            memo: `مستند مخزني ${docNo} (${input.lines.length} سطر)`,
+            lines: collector.lines,
+          },
+          actorId,
+          false,
+          tx
+        );
+        const posted = await defaultJournalService.postEntry(companyId, draft.id, actorId || '', false, tx);
+        documentJournalId = posted.id;
+        if (collector.valuationMovementIds.length > 0) {
+          await tx.query(
+            'UPDATE inv_valuation_movements SET journal_entry_id = $3 WHERE company_id = $1 AND id = ANY($2::uuid[])',
+            [companyId, collector.valuationMovementIds, documentJournalId]
+          );
+        }
+        await tx.query('UPDATE inv_stock_documents SET journal_entry_id = $3 WHERE company_id = $1 AND id = $2', [companyId, documentId, documentJournalId]);
+        for (const row of out) {
+          if (row.journalEntryId === null) row.journalEntryId = documentJournalId;
+        }
+      }
+
       await defaultAuditService.record(
         {
           actorUserId: actorId || null,
@@ -208,7 +238,7 @@ export class StockDocumentService {
           action: 'STOCK_DOCUMENT_POST',
           entityType: 'inv_stock_document',
           entityId: documentId,
-          metadata: { docNo, docType: input.docType, lineCount: input.lines.length },
+          metadata: { docNo, docType: input.docType, lineCount: input.lines.length, journalEntryId: documentJournalId },
         },
         { executor: tx }
       );

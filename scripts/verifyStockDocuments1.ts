@@ -271,6 +271,42 @@ async function run() {
       badState?.status === 'failed' && (badState.errorMessage || '').includes('السطر 55') && (await qtyOf(wh1.id, items[0].id)) === before0 - 1,
       badState?.errorMessage || ''
     );
+
+    // D13: one journal entry per document, a debit and credit line per item line, every valuation movement linked
+    let qCount = 0;
+    const origQuery = (pg.Client.prototype as any).query;
+    (pg.Client.prototype as any).query = function (...a: any[]) { qCount++; return origQuery.apply(this, a); };
+    const t0 = Date.now();
+    const rcpt = await defaultStockDocumentService.postDocument(
+      companyId,
+      { docType: 'receipt', warehouseId: wh2.id, reason: 'استلام قيد واحد', costSource: 'supplier_invoice', lines: items.map((it, i) => ({ itemId: it.id, qty: 3, unitCost: 4 + i })) },
+      user.id
+    );
+    const elapsed = Date.now() - t0;
+    (pg.Client.prototype as any).query = origQuery;
+    console.log(`[perf] 100-line receipt: ${qCount} queries (${(qCount / N).toFixed(1)} per line), ${elapsed} ms locally`);
+    const docRow = await withTenantTransaction(companyId, (tx) => tx.query<any>('SELECT journal_entry_id FROM inv_stock_documents WHERE company_id = $1 AND id = $2', [companyId, rcpt.documentId]));
+    const jeId = docRow.rows[0]?.journal_entry_id;
+    const jl = await withTenantTransaction(companyId, (tx) => tx.query<any>(
+      'SELECT count(*)::int AS n, sum(debit)::numeric AS d, sum(credit)::numeric AS c FROM journal_lines WHERE company_id = $1 AND entry_id = $2', [companyId, jeId]));
+    const jes = await withTenantTransaction(companyId, (tx) => tx.query<any>(
+      'SELECT count(DISTINCT journal_entry_id)::int AS n, count(*)::int AS m FROM inv_valuation_movements WHERE company_id = $1 AND journal_entry_id = $2', [companyId, jeId]));
+    const expectedTotal = items.reduce((a, _it, i) => a + 3 * (4 + i), 0);
+    await check(
+      'D13: one journal entry per document: 200 lines (Dr+Cr per item), balanced, total = sum of item costs, all 100 valuation movements linked to it',
+      !!jeId && jl.rows[0].n === 2 * N && Number(jl.rows[0].d) === expectedTotal && Number(jl.rows[0].c) === expectedTotal && jes.rows[0].m === N,
+      JSON.stringify({ jeId: !!jeId, lines: jl.rows[0].n, d: jl.rows[0].d, c: jl.rows[0].c, linked: jes.rows[0].m })
+    );
+    const perItem = await withTenantTransaction(companyId, (tx) => tx.query<any>(
+      `SELECT count(DISTINCT line_memo)::int AS n FROM journal_lines WHERE company_id = $1 AND entry_id = $2 AND debit > 0`, [companyId, jeId]));
+    await check('D14: item detail is kept: every item has its own debit line', perItem.rows[0].n === N);
+    // old single-line posting is unchanged (its own JE per movement)
+    const single = await defaultStockService.receiveStock(
+      companyId,
+      { warehouseId: wh2.id, itemId: items[0].id, qty: 1, unitCost: 9, costSource: 'supplier_invoice', reason: 'استلام فردي' },
+      user.id
+    );
+    await check('D15: single-line receive still posts its own journal entry', !!single.journalEntryId && single.journalEntryId !== jeId);
   } catch (err) {
     console.error('[verifyStockDocuments1] Live test error:', err);
     await check('Live stock document suite execution', false, err instanceof Error ? err.message : String(err));
@@ -292,6 +328,7 @@ async function run() {
                OR valuation_movement_id IN (SELECT id FROM inv_valuation_movements WHERE company_id = ANY($1::uuid[])))`,
           [companyIds]
         );
+        await client.query('UPDATE inv_stock_documents SET journal_entry_id = NULL WHERE company_id = ANY($1::uuid[])', [companyIds]);
         for (const t of [
           'inv_valuation_reconciliations', 'inv_ma_source_events', 'inv_ma_source_balances', 'inv_cost_layers',
           'inv_valuation_movements', 'inv_valuation_balances', 'inv_item_costing_profiles', 'inv_costing_profiles',

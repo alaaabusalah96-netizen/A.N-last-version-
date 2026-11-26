@@ -1257,7 +1257,7 @@ async function run() {
       { warehouseId: wh1.id, itemId: itemPeriod.id, qty: 5, unitCost: 12, costSource: 'APPROVED_COST', reason: 'استلام في فترة مفتوحة', entryDate: todayStr },
       user.id
     );
-    const s7OpenRecvGl = await verifyJournalEntryExact(companyId, s7OpenRecv.journalEntryId, S7_EXPECTED.openReceiptGl);
+    const s7OpenRecvGl = await verifyJournalEntryExact(companyId, s7OpenRecv.journalEntryId as string, S7_EXPECTED.openReceiptGl);
     const s7BalMid = await getStockAndValuationSql(companyId, wh1.id, itemPeriod.id);
 
     // Closed period stock issue rejected without mutating 5@12 balance

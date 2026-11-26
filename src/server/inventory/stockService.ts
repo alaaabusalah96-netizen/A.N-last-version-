@@ -31,6 +31,17 @@ import { defaultJournalService } from '../accounting/journalService.js';
 import { assertOptionalCalendarDate, resolveCompanyToday } from '../lib/calendarDate.js';
 
 
+
+/**
+ * Collects the GL lines of many stock lines so a multi-line document can post ONE journal entry
+ * (a debit and credit line per item line) instead of one entry per line.
+ */
+export interface StockJournalCollector {
+  entryDate?: string;
+  lines: Array<{ accountId: string; debit: number; credit: number; lineMemo?: string }>;
+  valuationMovementIds: string[];
+}
+
 // Per-transaction memo: inside one multi-line document the same company settings, GL accounts and
 // "today" are read once instead of once per line (the transaction object is the cache key).
 const txMemo = new WeakMap<object, Map<string, Promise<any>>>();
@@ -100,6 +111,52 @@ export class StockService {
     return await this.stockRepo.listMovementsByItem(companyId, itemId, filters);
   }
 
+  /** Post one stock journal entry now, or (with a collector) hand its lines to the document. */
+  private async emitJournal(
+    companyId: string,
+    tx: DbExecutor,
+    actorId: string | undefined,
+    collector: StockJournalCollector | undefined,
+    entry: { entryDate: string; memo: string; lines: Array<{ accountId: string; debit: number; credit: number; lineMemo?: string }> }
+  ): Promise<{ id: string | null }> {
+    if (collector) {
+      collector.entryDate = collector.entryDate || entry.entryDate;
+      for (const l of entry.lines) {
+        collector.lines.push({ ...l, lineMemo: `${entry.memo} | ${l.lineMemo ?? ''}`.slice(0, 480) });
+      }
+      return { id: null };
+    }
+    const draft = await defaultJournalService.createDraftEntry(companyId, entry, actorId, false, tx);
+    const posted = await defaultJournalService.postEntry(companyId, draft.id, actorId || '', false, tx);
+    return { id: posted.id };
+  }
+
+  private async linkJournal(
+    companyId: string,
+    tx: DbExecutor,
+    collector: StockJournalCollector | undefined,
+    valuationMovementId: string,
+    journalEntryId: string | null
+  ): Promise<void> {
+    if (journalEntryId) {
+      await this.valuationService.linkValuationMovementJournal(companyId, valuationMovementId, journalEntryId, tx);
+    } else if (collector) {
+      collector.valuationMovementIds.push(valuationMovementId);
+    }
+  }
+
+  private async processReceiptCollect(
+    collector: StockJournalCollector | undefined,
+    companyId: string,
+    input: any,
+    actorId: string | undefined,
+    tx: DbExecutor
+  ): Promise<void> {
+    const r = await this.valuationService.processReceipt(companyId, input, actorId, tx);
+    if (collector && !input.journalEntryId) collector.valuationMovementIds.push(r.movement.id);
+  }
+
+
   private async resolveInventoryAccountingAccounts(
     companyId: string,
     overrideContraAccountId: string | undefined,
@@ -148,8 +205,9 @@ export class StockService {
   async receiveStock(
     companyId: string,
     input: RecordMovementInput,
-    actorId?: string
-  ): Promise<{ balance: StockBalance; movement: StockMovement; journalEntryId: string; unitCost: number; totalCost: number }> {
+    actorId?: string,
+    collector?: StockJournalCollector
+  ): Promise<{ balance: StockBalance; movement: StockMovement; journalEntryId: string | null; unitCost: number; totalCost: number }> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('companyId is required');
     }
@@ -229,23 +287,16 @@ export class StockService {
         tx
       );
 
-      const jeDraft = await defaultJournalService.createDraftEntry(
-        companyId,
-        {
+      const postedJe = await this.emitJournal(companyId, tx, actorId, collector, {
           entryDate,
           memo: `استلام مخزني يدوي — ${item.code} (${reason})`,
           lines: [
             { accountId: gl.inventoryAccountId, debit: glAmount, credit: 0, lineMemo: `زيادة مخزون: ${item.nameAr}` },
             { accountId: gl.contraAccountId, debit: 0, credit: glAmount, lineMemo: `مقابل استلام يدوي (${costSource})` },
           ],
-        },
-        actorId,
-        false,
-        tx
-      );
-      const postedJe = await defaultJournalService.postEntry(companyId, jeDraft.id, actorId || '', false, tx);
+        });
 
-      await this.valuationService.processReceipt(
+      await this.processReceiptCollect(collector, 
         companyId,
         {
           warehouseId: input.warehouseId,
@@ -307,7 +358,8 @@ export class StockService {
   async issueStock(
     companyId: string,
     input: RecordMovementInput,
-    actorId?: string
+    actorId?: string,
+    collector?: StockJournalCollector
   ): Promise<{ balance: StockBalance; movement: StockMovement; journalEntryId: string | null; unitCost: number; totalCost: number }> {
     if (!companyId || typeof companyId !== 'string') {
       throw new ValidationError('companyId is required');
@@ -406,23 +458,16 @@ export class StockService {
 
       let postedJeId: string | null = null;
       if (glAmount > 0) {
-        const jeDraft = await defaultJournalService.createDraftEntry(
-          companyId,
-          {
+        const postedJe = await this.emitJournal(companyId, tx, actorId, collector, {
             entryDate,
             memo: `صرف مخزني يدوي — ${item.code} (${reason})`,
             lines: [
               { accountId: gl.contraAccountId, debit: glAmount, credit: 0, lineMemo: `صرف مخزني: ${reason}` },
               { accountId: gl.inventoryAccountId, debit: 0, credit: glAmount, lineMemo: `تخفيض مخزون: ${item.nameAr}` },
             ],
-          },
-          actorId,
-          false,
-          tx
-        );
-        const postedJe = await defaultJournalService.postEntry(companyId, jeDraft.id, actorId || '', false, tx);
+          });
         postedJeId = postedJe.id;
-        await this.valuationService.linkValuationMovementJournal(companyId, valResult.movement.id, postedJe.id, tx);
+        await this.linkJournal(companyId, tx, collector, valResult.movement.id, postedJe.id);
       }
 
       await this.auditService.record(
@@ -463,7 +508,8 @@ export class StockService {
   async adjustStock(
     companyId: string,
     input: StockAdjustmentInput,
-    actorId?: string
+    actorId?: string,
+    collector?: StockJournalCollector
   ): Promise<{
     balance: StockBalance;
     movement: StockMovement;
@@ -570,23 +616,16 @@ export class StockService {
           tx
         );
 
-        const jeDraft = await defaultJournalService.createDraftEntry(
-          companyId,
-          {
+        const postedJe = await this.emitJournal(companyId, tx, actorId, collector, {
             entryDate,
             memo: `تسوية مخزنية بالزيادة — ${item.code} (${reason})`,
             lines: [
               { accountId: gl.inventoryAccountId, debit: glAmount, credit: 0, lineMemo: `تسوية زيادة مخزون: ${item.nameAr}` },
               { accountId: gl.contraAccountId, debit: 0, credit: glAmount, lineMemo: `تسوية مخزنية: ${reason}` },
             ],
-          },
-          actorId,
-          false,
-          tx
-        );
-        const postedJe = await defaultJournalService.postEntry(companyId, jeDraft.id, actorId || '', false, tx);
+          });
 
-        await this.valuationService.processReceipt(
+        await this.processReceiptCollect(collector, 
           companyId,
           {
             warehouseId: input.warehouseId,
@@ -695,23 +734,16 @@ export class StockService {
 
       let postedJeId: string | null = null;
       if (glAmount > 0) {
-        const jeDraft = await defaultJournalService.createDraftEntry(
-          companyId,
-          {
+        const postedJe = await this.emitJournal(companyId, tx, actorId, collector, {
             entryDate,
             memo: `${input.adjustmentType === 'internal_consumption' ? 'استهلاك داخلي' : 'تسوية/إتلاف مخزون'} — ${item.code} (${reason})`,
             lines: [
               { accountId: gl.contraAccountId, debit: glAmount, credit: 0, lineMemo: `${sourceTypeMap[input.adjustmentType]}: ${reason}` },
               { accountId: gl.inventoryAccountId, debit: 0, credit: glAmount, lineMemo: `تخفيض مخزون: ${item.nameAr}` },
             ],
-          },
-          actorId,
-          false,
-          tx
-        );
-        const postedJe = await defaultJournalService.postEntry(companyId, jeDraft.id, actorId || '', false, tx);
+          });
         postedJeId = postedJe.id;
-        await this.valuationService.linkValuationMovementJournal(companyId, valResult.movement.id, postedJe.id, tx);
+        await this.linkJournal(companyId, tx, collector, valResult.movement.id, postedJe.id);
       }
 
       await this.auditService.record(
