@@ -19,7 +19,7 @@ export function CustodyShortageAgeingPanel({ companyId }: { companyId: string })
       const res = await apiFetch(`/api/cash/reports/custody-shortage-ageing?companyId=${encodeURIComponent(companyId)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || data?.message || 'تعذر تحميل أعمار العجز');
-      setRows(data.report.rows);
+      setRows(data.report?.rows || []);
       setTotal(data.report.total);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'تعذر تحميل أعمار العجز');
