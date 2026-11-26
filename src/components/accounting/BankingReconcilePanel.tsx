@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { getLocalTodayDateString } from '../../lib/calendarDate.js';
+import { usableAccounts } from '../../lib/accountRules.js';
 
 interface BankAccount {
   id: string;
@@ -167,13 +168,16 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
 
       if (glRes.ok) {
         const glJson = await glRes.json();
-        const postableAssets = (glJson.accounts || []).filter(
-          (a: AccountOption) => a.accountType === 'asset' && a.isPostable && a.isActive
-        );
+        // Same rule as the cash register picker: no receivables / custody receivables / system-role accounts.
+        const postableAssets = usableAccounts(glJson.accounts || [], 'cash_register_gl_account') as AccountOption[];
         setAssetGlAccounts(postableAssets);
-        if (postableAssets.length > 0 && !newBankForm.glAccountId) {
-          setNewBankForm((prev) => ({ ...prev, glAccountId: postableAssets[0].id }));
-        }
+        // Always re-validate the selection against THIS company's list. A value left over from another
+        // company (company switch) is not in the list and would be rejected by the server.
+        setNewBankForm((prev) =>
+          postableAssets.some((a) => a.id === prev.glAccountId)
+            ? prev
+            : { ...prev, glAccountId: postableAssets[0]?.id || '' }
+        );
       }
 
       if (list.length > 0) {
@@ -452,7 +456,7 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
 
           {canWrite && (
             <button
-              onClick={() => setShowNewBankModal(true)}
+              onClick={() => { setError(null); setShowNewBankModal(true); }}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
@@ -912,6 +916,12 @@ export function BankingReconcilePanel({ companyId, canWrite, canReconcile }: Ban
                   />
                 </div>
               </div>
+              {error && (
+                <div role="alert" className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{error}</span>
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"

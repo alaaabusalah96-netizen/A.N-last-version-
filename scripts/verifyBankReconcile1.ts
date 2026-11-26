@@ -103,6 +103,11 @@ async function run() {
   assert(!/currencyCode:\s*'SAR'/.test(panelSrc), "Bank panel must not hardcode 'SAR' as the default currency");
   const svcSrc = fs.readFileSync(path.join(process.cwd(), 'src/server/banking/bankAccountService.ts'), 'utf8');
   assert(svcSrc.includes('defaultCurrencyCode'), 'Bank account service resolves the default currency from company settings');
+  assert(panelSrc.includes('postableAssets.some((a) => a.id === prev.glAccountId)'), 'Bank panel re-validates the selected GL account against the current company list');
+  assert(panelSrc.includes("usableAccounts(glJson.accounts || [], 'cash_register_gl_account')"), 'Bank panel hides receivable/custody accounts from the GL picker');
+  const modalStart = panelSrc.indexOf('<form onSubmit={handleCreateBank}');
+  const modalEnd = panelSrc.indexOf('</form>', modalStart);
+  assert(panelSrc.slice(modalStart, modalEnd).includes('{error && ('), 'Create-bank errors are shown inside the modal, not behind it');
   console.log('PASS: verifyBankReconcile1 static and loopback DB checks passed.');
 }
 
