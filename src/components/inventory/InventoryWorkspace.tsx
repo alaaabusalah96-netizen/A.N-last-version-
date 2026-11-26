@@ -18,6 +18,7 @@ import {
 import { apiFetch } from '../../lib/apiClient.js';
 import { ItemCardPanel } from './ItemCardPanel.js';
 import { InventoryValuationPanel } from './InventoryValuationPanel.js';
+import { StockDocumentModal } from './StockDocumentModal.js';
 import {
   DynamicFieldGroup,
   DynamicFieldDefinition,
@@ -119,6 +120,7 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
 
   // Form states
   const [whCode, setWhCode] = useState('');
@@ -548,6 +550,14 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
                 <span>إذن تحويل</span>
+              </button>
+
+              <button
+                onClick={() => setShowDocumentModal(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl shadow-lg transition cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>مستند متعدد الأسطر</span>
               </button>
             </div>
           )}
@@ -1092,6 +1102,20 @@ export function InventoryWorkspace({ userRole }: InventoryWorkspaceProps) {
             </form>
           </div>
         </div>
+      )}
+
+      {showDocumentModal && (
+        <StockDocumentModal
+          companyId={selectedCompanyId}
+          warehouses={warehouses}
+          items={items}
+          onClose={() => setShowDocumentModal(false)}
+          onDone={async (message) => {
+            setShowDocumentModal(false);
+            setSuccess(message);
+            await loadData();
+          }}
+        />
       )}
 
       {/* Movement Modal (Receive / Issue) */}
