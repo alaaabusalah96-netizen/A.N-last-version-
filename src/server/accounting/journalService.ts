@@ -57,6 +57,7 @@ export class JournalService {
 
     const runOp = async (tx: DbExecutor) => {
       // Validate accounts existence, active state, and postability
+      const accountCache = new Map<string, Awaited<ReturnType<AccountRepository['findById']>>>();
       for (const line of input.lines) {
         if (!line.accountId) {
           throw new ValidationError('Each line must reference an accountId');
@@ -77,7 +78,11 @@ export class JournalService {
           throw new ValidationError('Line cannot have both debit and credit greater than 0 (single sided)');
         }
 
-        const account = await this.accountRepo.findById(companyId, line.accountId, tx);
+        let account = accountCache.get(line.accountId);
+        if (account === undefined) {
+          account = await this.accountRepo.findById(companyId, line.accountId, tx);
+          accountCache.set(line.accountId, account);
+        }
         if (!account) {
           throw new ValidationError(`Account ${line.accountId} not found in this company`);
         }

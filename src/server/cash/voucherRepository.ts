@@ -70,13 +70,20 @@ export class VoucherRepository {
     lines: Array<{ accountId: string; amount: number; memo: string | null }>,
     tx: DbExecutor
   ): Promise<void> {
+    if (lines.length === 0) return;
     const tbl = linesTable(kind);
-    for (let i = 0; i < lines.length; i++) {
-      await tx.query(
-        `INSERT INTO ${tbl} (company_id, voucher_id, line_no, account_id, amount, memo) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [companyId, voucherId, i + 1, lines[i].accountId, toMoney(lines[i].amount), lines[i].memo]
-      );
-    }
+    // إدراج دفعة واحدة (جولة شبكية واحدة بدل جولة لكل سطر)
+    const params: unknown[] = [companyId, voucherId];
+    const values: string[] = [];
+    lines.forEach((l, i) => {
+      const base = params.length;
+      params.push(i + 1, l.accountId, toMoney(l.amount), l.memo);
+      values.push(`($1, $2, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+    });
+    await tx.query(
+      `INSERT INTO ${tbl} (company_id, voucher_id, line_no, account_id, amount, memo) VALUES ${values.join(', ')}`,
+      params
+    );
   }
 
   async listLines(kind: VoucherKind, companyId: string, voucherId: string, tx: DbExecutor): Promise<CashVoucherLine[]> {

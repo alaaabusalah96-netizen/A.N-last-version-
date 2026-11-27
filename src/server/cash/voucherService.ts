@@ -118,8 +118,8 @@ export class VoucherService {
         throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن إصدار سندات عليه`);
       }
 
-      for (const l of normLines) {
-        await this.validateContraAccount(companyId, l.accountId, register.glAccountId, tx);
+      for (const accId of new Set(normLines.map((l) => l.accountId))) {
+        await this.validateContraAccount(companyId, accId, register.glAccountId, tx);
       }
       const voucherDate = requestedVoucherDate ?? (await resolveCompanyToday(companyId, tx));
 
@@ -260,8 +260,13 @@ export class VoucherService {
         ? storedLines.map((l) => ({ accountId: l.accountId, amount: l.amount, memo: l.memo }))
         : [{ accountId: voucher.contraAccountId, amount: voucher.amount, memo: null as string | null }];
       const lineAccounts: Array<{ id: string; code: string; nameAr: string; amount: number; memo: string | null }> = [];
+      const accCache = new Map<string, Awaited<ReturnType<VoucherService['validateContraAccount']>>>();
       for (const l of postingLines) {
-        const acc = await this.validateContraAccount(companyId, l.accountId, register.glAccountId, tx);
+        let acc = accCache.get(l.accountId);
+        if (!acc) {
+          acc = await this.validateContraAccount(companyId, l.accountId, register.glAccountId, tx);
+          accCache.set(l.accountId, acc);
+        }
         lineAccounts.push({ id: acc.id, code: acc.code, nameAr: acc.nameAr, amount: l.amount, memo: l.memo });
       }
       const contraAccount = lineAccounts[0];

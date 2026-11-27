@@ -102,30 +102,30 @@ export class JournalRepository {
         entryDate: toCalendarDate(entryRes.rows[0].entryDate),
       };
 
-      const insertedLines: JournalLine[] = [];
-      for (const line of lines) {
-        const lineSql = `
-          INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit, line_memo, org_unit_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-          RETURNING 
-            id, 
-            company_id as "companyId", 
-            entry_id as "entryId", 
-            account_id as "accountId", 
-            debit::text as "debit", 
-            credit::text as "credit", 
-            line_memo as "lineMemo"
-        `;
-        const lineRes = await executor.query<JournalLine>(lineSql, [
-          companyId,
-          entry.id,
-          line.accountId,
-          line.debit,
-          line.credit,
-          line.lineMemo || null,
-          orgUnitId || null,
-        ]);
-        insertedLines.push(lineRes.rows[0]);
+      // إدراج كل الأسطر في جملة واحدة (جولة شبكية واحدة بدل جولة لكل سطر)
+      let insertedLines: JournalLine[] = [];
+      if (lines.length > 0) {
+        const params: unknown[] = [companyId, entry.id, orgUnitId || null];
+        const values: string[] = [];
+        for (const line of lines) {
+          const base = params.length;
+          params.push(line.accountId, line.debit, line.credit, line.lineMemo || null);
+          values.push(`($1, $2, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $3)`);
+        }
+        const lineRes = await executor.query<JournalLine>(
+          `INSERT INTO journal_lines (company_id, entry_id, account_id, debit, credit, line_memo, org_unit_id)
+           VALUES ${values.join(', ')}
+           RETURNING
+             id,
+             company_id as "companyId",
+             entry_id as "entryId",
+             account_id as "accountId",
+             debit::text as "debit",
+             credit::text as "credit",
+             line_memo as "lineMemo"`,
+          params
+        );
+        insertedLines = lineRes.rows;
       }
 
       entry.lines = insertedLines;
