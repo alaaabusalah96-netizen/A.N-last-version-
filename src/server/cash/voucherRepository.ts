@@ -2,6 +2,7 @@ import { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import {
   CashVoucher,
+  CashVoucherLine,
   EmployeeCustodyMovementRow,
   RegisterMovementReportRow,
   VoucherKind,
@@ -19,6 +20,10 @@ function toIsoTimestamp(val: unknown): string | null {
 
 function tableNameForKind(kind: VoucherKind): 'cash_receipt_vouchers' | 'cash_payment_vouchers' {
   return kind === 'receipt' ? 'cash_receipt_vouchers' : 'cash_payment_vouchers';
+}
+
+function linesTable(kind: VoucherKind): 'cash_receipt_voucher_lines' | 'cash_payment_voucher_lines' {
+  return kind === 'receipt' ? 'cash_receipt_voucher_lines' : 'cash_payment_voucher_lines';
 }
 
 function mapVoucherRow(kind: VoucherKind, row: any): CashVoucher {
@@ -58,6 +63,40 @@ const MOVEMENT_LABELS_AR: Record<string, string> = {
 };
 
 export class VoucherRepository {
+  async insertLines(
+    kind: VoucherKind,
+    companyId: string,
+    voucherId: string,
+    lines: Array<{ accountId: string; amount: number; memo: string | null }>,
+    tx: DbExecutor
+  ): Promise<void> {
+    const tbl = linesTable(kind);
+    for (let i = 0; i < lines.length; i++) {
+      await tx.query(
+        `INSERT INTO ${tbl} (company_id, voucher_id, line_no, account_id, amount, memo) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [companyId, voucherId, i + 1, lines[i].accountId, toMoney(lines[i].amount), lines[i].memo]
+      );
+    }
+  }
+
+  async listLines(kind: VoucherKind, companyId: string, voucherId: string, tx: DbExecutor): Promise<CashVoucherLine[]> {
+    const tbl = linesTable(kind);
+    const res = await tx.query(
+      `SELECT l.line_no as "lineNo", l.account_id as "accountId", a.code as "accountCode", a.name_ar as "accountNameAr", l.amount, l.memo
+       FROM ${tbl} l INNER JOIN accounts a ON a.id = l.account_id AND a.company_id = l.company_id
+       WHERE l.company_id = $1 AND l.voucher_id = $2 ORDER BY l.line_no`,
+      [companyId, voucherId]
+    );
+    return res.rows.map((r: any) => ({
+      lineNo: Number(r.lineNo),
+      accountId: r.accountId,
+      accountCode: r.accountCode ?? null,
+      accountNameAr: r.accountNameAr ?? null,
+      amount: toMoney(r.amount),
+      memo: r.memo ?? null,
+    }));
+  }
+
   async createDraft(
     kind: VoucherKind,
     companyId: string,
@@ -156,7 +195,9 @@ export class VoucherRepository {
       `;
       const res = await executor.query(sql, [companyId, id]);
       if (res.rows.length === 0) return null;
-      return mapVoucherRow(kind, res.rows[0]);
+      const mapped = mapVoucherRow(kind, res.rows[0]);
+      mapped.lines = await this.listLines(kind, companyId, id, executor);
+      return mapped;
     };
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);

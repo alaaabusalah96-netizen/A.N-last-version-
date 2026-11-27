@@ -191,6 +191,15 @@ export interface CashCustodyWorkspaceProps {
   permissions: string[];
 }
 
+const MAX_VOUCHER_LINES = 100;
+
+// مجموع المبالغ المُدخلة للعرض فقط (الخادم يحسب المبلغ المعتمد)
+function sumEnteredLines(lines: Array<{ amount: string }>): string {
+  let cents = 0;
+  for (const l of lines) cents += Math.round((Number(l.amount) || 0) * 100);
+  return (cents / 100).toFixed(2);
+}
+
 type CashTabKey = 'registers' | 'custodies' | 'open_balances' | 'vouchers' | 'register_movements';
 
 const TABS: Array<{
@@ -348,8 +357,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
   const [vchKind, setVchKind] = useState<VoucherKind>('receipt');
   const [vchDate, setVchDate] = useState(() => getLocalTodayDateString());
   const [vchRegisterId, setVchRegisterId] = useState('');
-  const [vchAmount, setVchAmount] = useState('');
-  const [vchContraAccountId, setVchContraAccountId] = useState('');
+  const [vchLines, setVchLines] = useState<Array<{ accountId: string; amount: string; memo: string }>>([{ accountId: '', amount: '', memo: '' }]);
   const [vchReference, setVchReference] = useState('');
   const [vchMemo, setVchMemo] = useState('');
   const [vchModalError, setVchModalError] = useState<string | null>(null);
@@ -823,8 +831,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
     setVchKind(voucherKindToggle);
     setVchDate(getLocalTodayDateString());
     setVchRegisterId(registers.find((r) => r.isActive)?.id || '');
-    setVchAmount('');
-    setVchContraAccountId('');
+    setVchLines([{ accountId: '', amount: '', memo: '' }]);
     setVchReference('');
     setVchMemo('');
     setVchModalError(null);
@@ -847,8 +854,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
           companyId: selectedCompanyId,
           registerId: vchRegisterId,
           voucherDate: vchDate || undefined,
-          amount: Number(vchAmount),
-          contraAccountId: vchContraAccountId,
+          lines: vchLines.map((l) => ({ accountId: l.accountId, amount: Number(l.amount), memo: l.memo.trim() || undefined })),
           reference: vchReference.trim() || undefined,
           memo: vchMemo.trim() || undefined,
         }),
@@ -2347,7 +2353,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                     value={vchKind}
                     onChange={(e) => {
                       setVchKind(e.target.value as VoucherKind);
-                      setVchContraAccountId('');
+                      setVchLines((p) => p.map((l) => ({ ...l, accountId: '' })));
                     }}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
                   >
@@ -2388,37 +2394,82 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">المبلغ *</label>
-                <input
-                  type="number"
-                  name="voucherAmount"
-                  step="0.01"
-                  min="0.01"
-                  required
-                  value={vchAmount}
-                  onChange={(e) => setVchAmount(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono tabular-nums focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">الحساب الطرف *</label>
-                <select
-                  name="contraAccountId"
-                  required
-                  value={vchContraAccountId}
-                  onChange={(e) => setVchContraAccountId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-                >
-                  <option value="">-- اختر الحساب الطرف --</option>
-                  {voucherContraOptions.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.nameAr}
-                    </option>
-                  ))}
-                </select>
+              <div data-testid="voucher-lines-section" className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-300">
+                    الأسطر ({vchLines.length} / {MAX_VOUCHER_LINES}) - الإجمالي:{' '}
+                    <span className="font-mono tabular-nums text-white">
+                      {sumEnteredLines(vchLines)}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="voucher-add-line"
+                    disabled={vchLines.length >= MAX_VOUCHER_LINES}
+                    title={vchLines.length >= MAX_VOUCHER_LINES ? `الحد الأقصى ${MAX_VOUCHER_LINES} سطر لكل سند` : undefined}
+                    onClick={() => setVchLines((p) => (p.length >= MAX_VOUCHER_LINES ? p : [...p, { accountId: '', amount: '', memo: '' }]))}
+                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg disabled:opacity-40 cursor-pointer"
+                  >
+                    + سطر
+                  </button>
+                </div>
+                {vchLines.map((ln, idx) => (
+                  <div key={idx} className="grid grid-cols-12 gap-2 items-start">
+                    <div className="col-span-5">
+                      {idx === 0 && <label className="block text-xs font-semibold text-slate-300 mb-1">الحساب الطرف *</label>}
+                      <select
+                        name={idx === 0 ? 'contraAccountId' : `contraAccountId_${idx + 1}`}
+                        required
+                        value={ln.accountId}
+                        onChange={(e) => setVchLines((p) => p.map((x, i) => (i === idx ? { ...x, accountId: e.target.value } : x)))}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="">-- اختر الحساب الطرف --</option>
+                        {voucherContraOptions.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.code} - {a.nameAr}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-3">
+                      {idx === 0 && <label className="block text-xs font-semibold text-slate-300 mb-1">المبلغ *</label>}
+                      <input
+                        type="number"
+                        name={idx === 0 ? 'voucherAmount' : `voucherAmount_${idx + 1}`}
+                        step="0.01"
+                        min="0.01"
+                        required
+                        value={ln.amount}
+                        onChange={(e) => setVchLines((p) => p.map((x, i) => (i === idx ? { ...x, amount: e.target.value } : x)))}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono tabular-nums focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      {idx === 0 && <label className="block text-xs font-semibold text-slate-300 mb-1">بيان السطر</label>}
+                      <input
+                        type="text"
+                        name={`voucherLineMemo_${idx + 1}`}
+                        value={ln.memo}
+                        onChange={(e) => setVchLines((p) => p.map((x, i) => (i === idx ? { ...x, memo: e.target.value } : x)))}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="col-span-1">
+                      {idx === 0 && <label className="block text-xs mb-1">&nbsp;</label>}
+                      <button
+                        type="button"
+                        aria-label={`حذف السطر ${idx + 1}`}
+                        disabled={vchLines.length <= 1}
+                        onClick={() => setVchLines((p) => p.filter((_, i) => i !== idx))}
+                        className="w-full px-2 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs disabled:opacity-30 cursor-pointer"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div>

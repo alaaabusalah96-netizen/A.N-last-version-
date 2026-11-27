@@ -49,6 +49,8 @@ function createHarness() {
     createDraft: vi.fn().mockImplementation(async (kind) => makeVoucher({ kind })),
     findById: vi.fn().mockImplementation(async (kind) => makeVoucher({ kind })),
     findByIdForUpdate: vi.fn(),
+    listLines: vi.fn().mockResolvedValue([]),
+    insertLines: vi.fn().mockResolvedValue(undefined),
     listByCompany: vi.fn().mockResolvedValue([]),
     markPosted: vi.fn().mockResolvedValue(undefined),
     markCancelled: vi.fn().mockResolvedValue(undefined),

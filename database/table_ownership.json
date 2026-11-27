@@ -300,6 +300,16 @@
     "reason": "Per-company cash receipt vouchers posted directly to cash registers and GL"
   },
   {
+    "table": "cash_receipt_voucher_lines",
+    "scope": "tenant",
+    "reason": "Lines (account + amount) of multi-line cash receipt vouchers"
+  },
+  {
+    "table": "cash_payment_voucher_lines",
+    "scope": "tenant",
+    "reason": "Lines (account + amount) of multi-line cash payment vouchers"
+  },
+  {
     "table": "cash_payment_vouchers",
     "scope": "tenant",
     "reason": "Per-company general cash payment vouchers posted directly from cash registers and GL"

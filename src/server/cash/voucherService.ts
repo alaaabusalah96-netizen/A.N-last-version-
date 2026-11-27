@@ -17,6 +17,7 @@ import {
 } from './voucherTypes.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { isUuid } from '../http/validators.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 import { toMoney } from '../lib/numeric.js';
 import {
   assertOptionalCalendarDate,
@@ -89,10 +90,23 @@ export class VoucherService {
     if (!input.registerId || !isUuid(input.registerId)) {
       throw new ValidationError('معرف الصندوق / الخزينة مطلوب وبصيغة صحيحة');
     }
-    if (!input.contraAccountId || !isUuid(input.contraAccountId)) {
-      throw new ValidationError('الحساب الطرف مطلوب وبصيغة صحيحة');
+    let rawLines: Array<{ accountId: string; amount: number | string; memo?: string | null }>;
+    if (Array.isArray(input.lines) && input.lines.length > 0) {
+      assertMaxDocumentLines(input.lines);
+      rawLines = input.lines;
+    } else {
+      if (!input.contraAccountId || !isUuid(input.contraAccountId)) {
+        throw new ValidationError('الحساب الطرف مطلوب وبصيغة صحيحة');
+      }
+      rawLines = [{ accountId: input.contraAccountId, amount: input.amount as number }];
     }
-    const amount = assertValidVoucherMoney(input.amount);
+    const normLines = rawLines.map((l, i) => {
+      if (!l || !l.accountId || !isUuid(l.accountId)) {
+        throw new ValidationError(`السطر ${i + 1}: الحساب مطلوب وبصيغة صحيحة`);
+      }
+      return { accountId: l.accountId, amount: assertValidVoucherMoney(l.amount), memo: l.memo?.toString().trim() || null };
+    });
+    const amount = toMoney(normLines.reduce((a, l) => a + l.amount, 0));
     const requestedVoucherDate = assertOptionalCalendarDate(input.voucherDate, 'تاريخ السند');
 
     return await withTenantTransaction(companyId, async (tx) => {
@@ -104,7 +118,9 @@ export class VoucherService {
         throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن إصدار سندات عليه`);
       }
 
-      await this.validateContraAccount(companyId, input.contraAccountId, register.glAccountId, tx);
+      for (const l of normLines) {
+        await this.validateContraAccount(companyId, l.accountId, register.glAccountId, tx);
+      }
       const voucherDate = requestedVoucherDate ?? (await resolveCompanyToday(companyId, tx));
 
       const created = await this.voucherRepo.createDraft(
@@ -114,13 +130,14 @@ export class VoucherService {
           registerId: input.registerId,
           voucherDate,
           amount,
-          contraAccountId: input.contraAccountId,
+          contraAccountId: normLines[0].accountId,
           memo: input.memo?.trim() || null,
           reference: input.reference?.trim() || null,
           createdBy: actorId || null,
         },
         tx
       );
+      await this.voucherRepo.insertLines(kind, companyId, created.id, normLines, tx);
 
       await this.auditService.record(
         {
@@ -132,7 +149,8 @@ export class VoucherService {
           metadata: {
             kind,
             registerId: input.registerId,
-            contraAccountId: input.contraAccountId,
+            contraAccountId: normLines[0].accountId,
+            linesCount: normLines.length,
             amount,
             voucherDate,
           },
@@ -237,12 +255,16 @@ export class VoucherService {
         throw new ValidationError(`الصندوق (${register.nameAr}) معطّل ولا يمكن الترحيل عليه`);
       }
 
-      const contraAccount = await this.validateContraAccount(
-        companyId,
-        voucher.contraAccountId,
-        register.glAccountId,
-        tx
-      );
+      const storedLines = await this.voucherRepo.listLines(kind, companyId, id, tx);
+      const postingLines = storedLines.length > 0
+        ? storedLines.map((l) => ({ accountId: l.accountId, amount: l.amount, memo: l.memo }))
+        : [{ accountId: voucher.contraAccountId, amount: voucher.amount, memo: null as string | null }];
+      const lineAccounts: Array<{ id: string; code: string; nameAr: string; amount: number; memo: string | null }> = [];
+      for (const l of postingLines) {
+        const acc = await this.validateContraAccount(companyId, l.accountId, register.glAccountId, tx);
+        lineAccounts.push({ id: acc.id, code: acc.code, nameAr: acc.nameAr, amount: l.amount, memo: l.memo });
+      }
+      const contraAccount = lineAccounts[0];
 
       // فحص كفاية رصيد الصندوق عبر المصدر الموحّد cashRegisterService.getBalance لسندات الصرف
       if (kind === 'payment') {
@@ -258,36 +280,20 @@ export class VoucherService {
       const seqPrefix = kind === 'receipt' ? 'CRV' : 'CPV';
       const voucherNo = voucher.voucherNo || (await this.journalRepo.allocateSequenceNumber(companyId, seqDocType, seqPrefix, tx));
 
-      const jeLines =
-        kind === 'receipt'
-          ? [
-              {
-                accountId: register.glAccountId,
-                debit: voucher.amount,
-                credit: 0,
-                lineMemo: `سند قبض ${voucherNo} - صندوق ${register.code}`,
-              },
-              {
-                accountId: contraAccount.id,
-                debit: 0,
-                credit: voucher.amount,
-                lineMemo: `سند قبض ${voucherNo} - ${contraAccount.code} ${contraAccount.nameAr}`,
-              },
-            ]
-          : [
-              {
-                accountId: contraAccount.id,
-                debit: voucher.amount,
-                credit: 0,
-                lineMemo: `سند صرف ${voucherNo} - ${contraAccount.code} ${contraAccount.nameAr}`,
-              },
-              {
-                accountId: register.glAccountId,
-                debit: 0,
-                credit: voucher.amount,
-                lineMemo: `سند صرف ${voucherNo} - صندوق ${register.code}`,
-              },
-            ];
+      const cashLabel = `${kind === 'receipt' ? 'سند قبض' : 'سند صرف'} ${voucherNo} - صندوق ${register.code}`;
+      const contraJeLines = lineAccounts.map((l) => ({
+        accountId: l.id,
+        debit: kind === 'receipt' ? 0 : l.amount,
+        credit: kind === 'receipt' ? l.amount : 0,
+        lineMemo: l.memo || `${kind === 'receipt' ? 'سند قبض' : 'سند صرف'} ${voucherNo} - ${l.code} ${l.nameAr}`,
+      }));
+      const registerJeLine = {
+        accountId: register.glAccountId,
+        debit: kind === 'receipt' ? voucher.amount : 0,
+        credit: kind === 'receipt' ? 0 : voucher.amount,
+        lineMemo: cashLabel,
+      };
+      const jeLines = kind === 'receipt' ? [registerJeLine, ...contraJeLines] : [...contraJeLines, registerJeLine];
 
       const draftJe = await this.journalService.createDraftEntry(
         companyId,
@@ -318,6 +324,7 @@ export class VoucherService {
             amount: voucher.amount,
             registerId: register.id,
             contraAccountId: contraAccount.id,
+            linesCount: lineAccounts.length,
             journalEntryId: postedJe.id,
           },
         },

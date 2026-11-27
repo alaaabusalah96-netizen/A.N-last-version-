@@ -6,6 +6,15 @@
 export type VoucherKind = 'receipt' | 'payment';
 export type VoucherStatus = 'draft' | 'posted' | 'cancelled';
 
+export interface CashVoucherLine {
+  lineNo: number;
+  accountId: string;
+  accountCode?: string | null;
+  accountNameAr?: string | null;
+  amount: number;
+  memo: string | null;
+}
+
 export interface CashVoucher {
   id: string;
   companyId: string;
@@ -29,13 +38,15 @@ export interface CashVoucher {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  lines?: CashVoucherLine[];
 }
 
 export interface CreateVoucherInput {
   registerId: string;
   voucherDate?: string;
-  amount: number;
-  contraAccountId: string;
+  amount?: number;
+  contraAccountId?: string;
+  lines?: Array<{ accountId: string; amount: number | string; memo?: string | null }>;
   memo?: string | null;
   reference?: string | null;
 }
