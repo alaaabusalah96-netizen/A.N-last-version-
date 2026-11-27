@@ -66,6 +66,10 @@ export const PERMISSIONS = {
   CUSTODY_DISBURSE: 'custody:disburse',
   CUSTODY_SETTLE: 'custody:settle',
 
+  // Fleet (الأسطول)
+  FLEET_READ: 'fleet:read',
+  FLEET_MANAGE: 'fleet:manage',
+
   // Sales Revenue Cycle (المبيعات ودورة الإيرادات)
   SALES_READ: 'sales:read',
   SALES_WRITE: 'sales:write',
@@ -82,7 +86,7 @@ export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS] | st
 export interface PermissionCatalogItem {
   code: PermissionCode;
   labelAr: string;
-  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المبيعات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة' | 'البنوك';
+  group: 'عام' | 'الشركات' | 'المستخدمون' | 'المحاسبة' | 'المخزون' | 'المشتريات' | 'المبيعات' | 'المنظمة' | 'الإعدادات' | 'الأدوار' | 'الخزينة' | 'البنوك' | 'الأسطول';
 }
 
 export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
@@ -142,6 +146,10 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.CUSTODY_APPROVE, labelAr: 'اعتماد ورفض طلبات العهد', group: 'الخزينة' },
   { code: PERMISSIONS.CUSTODY_DISBURSE, labelAr: 'صرف العهد النقدية وترحيلها', group: 'الخزينة' },
   { code: PERMISSIONS.CUSTODY_SETTLE, labelAr: 'تسوية وإغلاق العهد النقدية', group: 'الخزينة' },
+
+  // الأسطول
+  { code: PERMISSIONS.FLEET_READ, labelAr: 'عرض المركبات والسائقين', group: 'الأسطول' },
+  { code: PERMISSIONS.FLEET_MANAGE, labelAr: 'إدارة المركبات والسائقين (إضافة وتعديل وتغيير الحالة)', group: 'الأسطول' },
 
   // المبيعات
   { code: PERMISSIONS.SALES_READ, labelAr: 'عرض العملاء وأذون التسليم والفواتير والتحصيلات', group: 'المبيعات' },

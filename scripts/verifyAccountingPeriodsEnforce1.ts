@@ -64,7 +64,7 @@ async function runVerification() {
 
   // S6: No unauthorized business modules added
   const srcServerDir = path.join(rootDir, 'src/server');
-  const forbiddenModules = ['fleet', 'pos', 'cash_bank'];
+  const forbiddenModules = ['pos', 'cash_bank'];
   let noForbiddenModules = true;
   for (const mod of forbiddenModules) {
     if (fs.existsSync(path.join(srcServerDir, mod))) {

@@ -78,8 +78,8 @@ async function runVerification() {
 
   // 6. S6: No unapproved external ERP business modules created
   const srcServerDir = path.join(rootDir, 'src/server');
-  // Sales is in scope. Fleet, POS, and legacy cash_bank remain out of scope.
-  const forbiddenModules = ['fleet', 'pos', 'cash_bank'];
+  // Sales and Fleet (owner-approved, phase a) are in scope. POS and legacy cash_bank remain out of scope.
+  const forbiddenModules = ['pos', 'cash_bank'];
   let noForbiddenModules = true;
   for (const mod of forbiddenModules) {
     if (fs.existsSync(path.join(srcServerDir, mod))) {

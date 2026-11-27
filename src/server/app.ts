@@ -15,6 +15,7 @@ import { inventoryRoutes } from './routes/inventoryRoutes.js';
 import { purchasingRoutes } from './routes/purchasingRoutes.js';
 import { salesRoutes } from './routes/salesRoutes.js';
 import { cashRoutes } from './routes/cashRoutes.js';
+import { fleetRoutes } from './routes/fleetRoutes.js';
 import { bankingRoutes } from './routes/bankingRoutes.js';
 import { configPlatformRoutes } from './routes/configRoutes.js';
 import { rbacRoutes } from './routes/roleRoutes.js';
@@ -63,6 +64,7 @@ export function createApp(): Express {
   app.use('/api/purchasing', purchasingRoutes);
   app.use('/api/sales', salesRoutes);
   app.use('/api/cash', cashRoutes);
+  app.use('/api/fleet', fleetRoutes);
   app.use('/api/banking', bankingRoutes);
 
   // Configuration Platform — global definitions catalog (Wave A / A2)

@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 244
-- **Mounted Route Modules Parsed**: 17
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 236
+- **Total Mounted Endpoints**: 250
+- **Mounted Route Modules Parsed**: 18
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 242
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -153,6 +153,12 @@
 | `/api/config` | `GET` | `/api/config/definitions` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/configRoutes.ts` |
 | `/api/config` | `POST` | `/api/config/definitions` | `true` | `requirePlatformAdmin` | `src/server/routes/configRoutes.ts` |
 | `/api/config` | `PATCH` | `/api/config/definitions/:key` | `true` | `requirePlatformAdmin` | `src/server/routes/configRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/drivers` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/drivers` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `PATCH` | `/api/fleet/drivers/:id` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/vehicles` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/vehicles` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `PATCH` | `/api/fleet/vehicles/:id` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/adjustments` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/balances` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/cost-adjustments` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |

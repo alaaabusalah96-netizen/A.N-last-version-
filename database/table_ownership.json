@@ -205,6 +205,16 @@
     "reason": "Per-company append-only claims owed by an employee after a custody cash count shortage"
   },
   {
+    "table": "fleet_vehicles",
+    "scope": "tenant",
+    "reason": "Per-company fleet vehicles master (status-based retirement, no delete)"
+  },
+  {
+    "table": "fleet_drivers",
+    "scope": "tenant",
+    "reason": "Per-company fleet drivers master (status-based, no delete)"
+  },
+  {
     "table": "custody_limit_policies",
     "scope": "tenant",
     "reason": "Per-company or per-employee versioned ceiling on custody held at one time (append-only)"
