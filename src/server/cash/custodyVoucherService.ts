@@ -12,6 +12,7 @@ import { toMoney } from '../lib/numeric.js';
 import { resolveCompanyToday } from '../lib/calendarDate.js';
 import { defaultApprovalService, ApprovalService, PermissionChecker } from '../approvals/approvalService.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 /** Approval-engine document type for custody vouchers (C1-c). */
 export const CUSTODY_VOUCHER_APPROVAL_TYPE = 'custody_voucher';
@@ -175,6 +176,7 @@ export class CustodyVoucherService {
   ): Promise<CustodyVoucher> {
     if (!companyId) throw new ValidationError('معرف الشركة مطلوب');
     if (!custodyId || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
+    assertMaxDocumentLines(input.lines);
     if (!input || !Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('بنود الحافظة مطلوبة');
     }

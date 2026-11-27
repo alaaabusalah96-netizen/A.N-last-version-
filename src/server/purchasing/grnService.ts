@@ -33,6 +33,7 @@ import {
   getBusinessDateToday,
   resolveCompanyTimeZone,
 } from '../lib/calendarDate.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 export class GrnService {
   private glMappingService: GlMappingService;
@@ -91,6 +92,7 @@ export class GrnService {
       throw new ValidationError('مستودع الاستلام مطلوب');
     }
 
+    assertMaxDocumentLines(input.lines);
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة صنف واحد على الأقل في سند الاستلام');
     }

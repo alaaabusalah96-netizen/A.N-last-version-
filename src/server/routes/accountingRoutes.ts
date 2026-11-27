@@ -11,6 +11,7 @@ import { defaultReportsService } from '../accounting/reportsService.js';
 import { defaultYearCloseService } from '../accounting/yearCloseService.js';
 import { defaultOperationalReportsService } from '../accounting/operationalReportsService.js';
 import { buildReservedRoleResolver } from '../accounting/reservedRoleAccounts.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 import { GL_EVENT_CATALOG } from '../accounting/glEventCatalog.js';
 
 export const accountingRoutes = Router();
@@ -184,6 +185,7 @@ accountingRoutes.post(
     }
 
     await assertPermissionForCompanyQueryOrBody(user, PERMISSIONS.ACCOUNTING_JOURNALS_WRITE, companyId);
+    assertMaxDocumentLines(lines);
 
     const { defaultJournalService } = await import('../accounting/journalService.js');
     const journal = await defaultJournalService.createDraftEntry(

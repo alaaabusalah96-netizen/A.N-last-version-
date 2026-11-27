@@ -17,6 +17,7 @@ import {
   isValidCalendarDate,
   resolveCompanyToday,
 } from '../lib/calendarDate.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 export class PurchReturnService {
   private glMappingService: GlMappingService;
@@ -84,6 +85,7 @@ export class PurchReturnService {
     if (!input.grnId || typeof input.grnId !== 'string') {
       throw new ValidationError('سند الاستلام (GRN) مطلوب');
     }
+    assertMaxDocumentLines(input.lines);
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في المرتجع');
     }

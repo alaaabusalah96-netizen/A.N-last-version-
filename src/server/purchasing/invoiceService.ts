@@ -35,6 +35,7 @@ import {
   isValidCalendarDate,
   resolveCompanyToday,
 } from '../lib/calendarDate.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 export class InvoiceService {
   private glMappingService: GlMappingService;
@@ -102,6 +103,7 @@ export class InvoiceService {
     if (!input.supplierInvoiceNo || typeof input.supplierInvoiceNo !== 'string' || input.supplierInvoiceNo.trim() === '') {
       throw new ValidationError('رقم فاتورة المورد مطلوب');
     }
+    assertMaxDocumentLines(input.lines);
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في فاتورة المورد');
     }

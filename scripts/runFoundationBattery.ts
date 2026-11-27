@@ -219,6 +219,7 @@ const scripts = [
   'scripts/verifyFleetMaintenance1.ts',
   'scripts/verifyCashPickers1.ts',
   'scripts/verifyStockDocUi1.ts',
+  'scripts/verifyDocumentLimits1.ts',
   'scripts/verifyFleetUi1.ts',
   'scripts/verifyCustodyPeriodLock1.ts',
   'scripts/verifyCustodyOrgUnits1.ts',

@@ -13,6 +13,7 @@ import {
   assertOptionalCalendarDate,
   resolveCompanyToday,
 } from '../lib/calendarDate.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 export class SalesDeliveryService {
   constructor(
@@ -40,6 +41,7 @@ export class SalesDeliveryService {
     if (!companyId) throw new ValidationError('companyId is required');
     if (!input.customerId) throw new ValidationError('العميل مطلوب');
     if (!input.warehouseId) throw new ValidationError('المستودع مطلوب');
+    assertMaxDocumentLines(input.lines);
     if (!input.lines || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في إذن التسليم');
     }

@@ -8,7 +8,7 @@ import type { StockAdjustmentKind, StockAdjustmentDirection } from './inventoryT
 
 export type StockDocumentType = 'receipt' | 'issue' | 'adjustment' | 'transfer';
 
-export const MAX_STOCK_DOCUMENT_LINES = 500;
+export const MAX_STOCK_DOCUMENT_LINES = 100;
 
 export interface StockDocumentLineInput {
   itemId: string;

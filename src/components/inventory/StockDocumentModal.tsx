@@ -38,6 +38,7 @@ const TYPE_LABEL: Record<DocType, string> = {
   transfer: 'إذن تحويل بين مستودعات',
 };
 
+const MAX_LINES = 100;
 const emptyLine = (): Line => ({ itemId: '', qty: '', unitCost: '', direction: 'increase' });
 
 const inputCls =
@@ -232,11 +233,13 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
           </div>
 
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-200">الأسطر ({lines.filter((l) => l.itemId || l.qty).length})</span>
+            <span className="text-xs font-bold text-slate-200">الأسطر ({lines.filter((l) => l.itemId || l.qty).length} / {MAX_LINES})</span>
             <button
               type="button"
-              onClick={() => setLines((p) => [...p, emptyLine()])}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg"
+              onClick={() => setLines((p) => (p.length >= MAX_LINES ? p : [...p, emptyLine()]))}
+              disabled={lines.length >= MAX_LINES}
+              title={lines.length >= MAX_LINES ? `الحد الأقصى ${MAX_LINES} سطر لكل مستند` : undefined}
+              className="disabled:opacity-40 inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg"
             >
               <Plus className="w-3.5 h-3.5" /> سطر
             </button>

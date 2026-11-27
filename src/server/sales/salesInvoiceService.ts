@@ -29,6 +29,7 @@ import {
   isValidCalendarDate,
   resolveCompanyToday,
 } from '../lib/calendarDate.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 interface AccountRow {
   id: string;
@@ -69,6 +70,7 @@ export class SalesInvoiceService {
   async createInvoice(companyId: string, input: CreateSalesInvoiceInput, actorUserId?: string): Promise<SalesInvoice> {
     if (!companyId) throw new ValidationError('companyId is required');
     if (!input.customerId) throw new ValidationError('العميل مطلوب');
+    assertMaxDocumentLines(input.lines);
     if (!input.lines || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة بند واحد على الأقل في فاتورة المبيعات');
     }

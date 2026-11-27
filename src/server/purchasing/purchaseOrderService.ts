@@ -8,6 +8,7 @@ import { NotFoundError, ValidationError } from '../http/errors.js';
 import { CreatePoInput, PurchaseOrder } from './purchasingTypes.js';
 import { toDecimal } from '../lib/numeric.js';
 import { isValidCalendarDate } from '../lib/calendarDate.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 export class PurchaseOrderService {
   constructor(
@@ -50,6 +51,7 @@ export class PurchaseOrderService {
     if (!input.supplierId || typeof input.supplierId !== 'string') {
       throw new ValidationError('المورد مطلوب');
     }
+    assertMaxDocumentLines(input.lines);
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
       throw new ValidationError('يجب إضافة صنف واحد على الأقل في أمر الشراء');
     }
