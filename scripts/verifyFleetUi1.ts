@@ -20,6 +20,9 @@ check('F4', 'sidebar has fleet item gated by canAccessNav', side.includes("canAc
 check('F5', 'App renders FleetWorkspace lazily for fleet nav', app.includes("import('./components/fleet/FleetWorkspace.js')") && app.includes('<FleetWorkspace'));
 check('F6', 'expired driver license is flagged in the UI', ws.includes('منتهية') && ws.includes('licenseExpiry < today'));
 check('F7', 'no delete action is offered (retire via status only)', !/method:\s*'DELETE'/.test(ws));
+check('F8', 'status change asks for confirmation before calling the API', ws.includes('fleet-status-confirm') && ws.includes('setPending('));
+check('F9', 'vehicle type is an Arabic select and brand/model/year are separate columns', ws.includes('VEHICLE_TYPE') && ws.includes('<th className="py-3.5 px-4">الماركة</th>'));
+check('F10', 'add dialog has a close button and license warnings (expired, within 30 days)', ws.includes('aria-label="إغلاق"') && ws.includes('تنتهي خلال') && ws.includes('رخصة منتهية'));
 
 if (failed > 0) { console.log(`[FAIL] ${failed} check(s) failed`); process.exit(1); }
-console.log('[PASS] verifyFleetUi1: 7/7');
+console.log('[PASS] verifyFleetUi1: 10/10');

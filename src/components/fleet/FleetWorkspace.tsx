@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Truck, UserRound, Plus, RefreshCw, Building2 } from 'lucide-react';
+import { Truck, UserRound, Plus, RefreshCw, Building2, X, Search, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 
 interface Company { id: string; code: string; nameAr: string }
@@ -16,6 +16,11 @@ interface Driver {
 const VEHICLE_STATUS: Record<string, string> = { active: 'نشطة', maintenance: 'في الصيانة', out_of_service: 'خارج الخدمة', retired: 'مستبعدة' };
 const DRIVER_STATUS: Record<string, string> = { active: 'نشط', suspended: 'موقوف', inactive: 'غير نشط' };
 
+const VEHICLE_TYPE: Record<string, string> = { car: 'سيارة ملاكي', pickup: 'نصف نقل', van: 'ميكروباص / فان', truck: 'شاحنة', bus: 'أتوبيس', motorcycle: 'دراجة نارية', other: 'أخرى' };
+const typeLabel = (t: string) => VEHICLE_TYPE[t] || t;
+const fmtKm = (n: number) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const daysUntil = (iso: string, today: string) => Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000);
+
 interface FleetWorkspaceProps { userRole?: string; permissions?: string[] }
 
 export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspaceProps) {
@@ -31,6 +36,8 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [f, setF] = useState<Record<string, string>>({});
+  const [q, setQ] = useState('');
+  const [pending, setPending] = useState<{ kind: 'vehicles' | 'drivers'; id: string; status: string; name: string; from: string } | null>(null);
 
   const can = useCallback(
     (perm: string): boolean => {
@@ -135,6 +142,9 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
   const inp = 'w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500';
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
   const today = new Date().toISOString().slice(0, 10);
+  const needle = q.trim().toLowerCase();
+  const shownVehicles = vehicles.filter((v) => !needle || [v.code, v.plateNo, v.make, v.model].some((x) => (x || '').toLowerCase().includes(needle)));
+  const shownDrivers = drivers.filter((d) => !needle || [d.fullName, d.phone, d.licenseNo].some((x) => (x || '').toLowerCase().includes(needle)));
 
   return (
     <div className="space-y-4" data-testid="fleet-workspace">
@@ -142,8 +152,8 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center"><Truck className="w-5 h-5 text-indigo-300" /></div>
           <div>
-            <h3 className="text-sm font-bold text-white">الأسطول</h3>
-            <p className="text-xs text-slate-400">المركبات والسائقون وحالتهم</p>
+            <h3 className="text-sm font-bold text-white">بيانات الأسطول</h3>
+            <p className="text-xs text-slate-400">اختر الشركة ثم أضف أو راجع المركبات والسائقين</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -153,6 +163,11 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
               className="pr-8 pl-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white cursor-pointer">
               {companies.map((c) => (<option key={c.id} value={c.id}>{c.nameAr} ({c.code})</option>))}
             </select>
+          </div>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث بالكود أو اللوحة أو الاسم" aria-label="بحث"
+              className="pr-8 pl-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white w-52" />
           </div>
           <button type="button" onClick={() => void load()} title="تحديث البيانات" className="p-2 bg-slate-800 rounded-xl text-slate-300 hover:text-white cursor-pointer">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -183,22 +198,25 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
           {tab === 'vehicles' ? (
             <table className="w-full text-right text-xs">
               <thead><tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
-                <th className="py-3.5 px-4">الكود</th><th className="py-3.5 px-4">اللوحة</th><th className="py-3.5 px-4">النوع</th>
+                <th className="py-3.5 px-4">الكود</th><th className="py-3.5 px-4">اللوحة</th><th className="py-3.5 px-4">النوع</th><th className="py-3.5 px-4">الماركة</th><th className="py-3.5 px-4">الموديل</th><th className="py-3.5 px-4">سنة الصنع</th>
                 <th className="py-3.5 px-4">الوحدة التنظيمية</th><th className="py-3.5 px-4">العداد (كم)</th><th className="py-3.5 px-4">الحالة</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {vehicles.length === 0 ? (
-                  <tr><td colSpan={6} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : 'لا توجد مركبات بعد'}</td></tr>
-                ) : vehicles.map((v) => (
+                  <tr><td colSpan={9} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : vehicles.length === 0 ? 'لا توجد مركبات بعد' : 'لا نتائج مطابقة للبحث'}</td></tr>
+                ) : shownVehicles.map((v) => (
                   <tr key={v.id} data-testid="fleet-vehicle-row">
                     <td className="py-3.5 px-4 font-mono text-indigo-300">{v.code}</td>
-                    <td className="py-3.5 px-4">{v.plateNo}</td>
-                    <td className="py-3.5 px-4 text-slate-300">{[v.vehicleType, v.make, v.model, v.modelYear].filter(Boolean).join(' · ')}</td>
+                    <td className="py-3.5 px-4"><bdi dir="ltr">{v.plateNo}</bdi></td>
+                    <td className="py-3.5 px-4 text-slate-300">{typeLabel(v.vehicleType)}</td>
+                    <td className="py-3.5 px-4 text-slate-300">{v.make || '-'}</td>
+                    <td className="py-3.5 px-4 text-slate-300">{v.model || '-'}</td>
+                    <td className="py-3.5 px-4 font-mono tabular-nums">{v.modelYear ?? '-'}</td>
                     <td className="py-3.5 px-4 text-slate-300">{unitLabel(v.orgUnitId)}</td>
-                    <td className="py-3.5 px-4 font-mono tabular-nums">{Number(v.odometerKm).toFixed(1)}</td>
+                    <td className="py-3.5 px-4 font-mono tabular-nums">{fmtKm(v.odometerKm)}</td>
                     <td className="py-3.5 px-4">
                       {canManage && v.status !== 'retired' ? (
-                        <select value={v.status} disabled={busy} onChange={(e) => void changeStatus('vehicles', v.id, e.target.value)} aria-label="حالة المركبة"
+                        <select value={v.status} disabled={busy} onChange={(e) => setPending({ kind: 'vehicles', id: v.id, status: e.target.value, name: `${v.code} - ${v.plateNo}`, from: v.status })} aria-label="حالة المركبة"
                           className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white cursor-pointer">
                           {Object.entries(VEHICLE_STATUS).map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
                         </select>
@@ -216,19 +234,29 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {drivers.length === 0 ? (
-                  <tr><td colSpan={6} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : 'لا يوجد سائقون بعد'}</td></tr>
-                ) : drivers.map((d) => {
+                  <tr><td colSpan={6} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : drivers.length === 0 ? 'لا يوجد سائقون بعد' : 'لا نتائج مطابقة للبحث'}</td></tr>
+                ) : shownDrivers.map((d) => {
                   const expired = !!d.licenseExpiry && d.licenseExpiry < today;
+                  const left = d.licenseExpiry && !expired ? daysUntil(d.licenseExpiry, today) : null;
+                  const soon = left !== null && left <= 30;
+                  const noLicense = !d.licenseExpiry;
                   return (
                     <tr key={d.id} data-testid="fleet-driver-row">
                       <td className="py-3.5 px-4 font-medium text-white">{d.fullName}</td>
-                      <td className="py-3.5 px-4 text-slate-300">{d.phone || '-'}</td>
-                      <td className="py-3.5 px-4 font-mono">{d.licenseNo || '-'}</td>
-                      <td className={`py-3.5 px-4 font-mono ${expired ? 'text-red-300' : ''}`}>{d.licenseExpiry || '-'}{expired ? ' (منتهية)' : ''}</td>
+                      <td className="py-3.5 px-4 text-slate-300"><bdi dir="ltr">{d.phone || '-'}</bdi></td>
+                      <td className="py-3.5 px-4 font-mono"><bdi dir="ltr">{d.licenseNo || '-'}</bdi></td>
+                      <td className="py-3.5 px-4">
+                        <bdi dir="ltr" className={`font-mono ${expired ? 'text-red-300' : ''}`}>{d.licenseExpiry || '-'}</bdi>
+                        {expired && <span className="mr-2 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">رخصة منتهية</span>}
+                        {soon && <span className="mr-2 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">تنتهي خلال {left} يوم</span>}
+                        {d.status === 'active' && (expired || noLicense) && (
+                          <div className="mt-1 inline-flex items-center gap-1 text-amber-300"><AlertTriangle className="w-3 h-3" /><span>{expired ? 'نشط لكن لا يصلح للتكليف برحلة (الرخصة منتهية)' : 'نشط لكن لا يصلح للتكليف (لا يوجد تاريخ رخصة)'}</span></div>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4 text-slate-300">{unitLabel(d.orgUnitId)}</td>
                       <td className="py-3.5 px-4">
                         {canManage ? (
-                          <select value={d.status} disabled={busy} onChange={(e) => void changeStatus('drivers', d.id, e.target.value)} aria-label="حالة السائق"
+                          <select value={d.status} disabled={busy} onChange={(e) => setPending({ kind: 'drivers', id: d.id, status: e.target.value, name: d.fullName, from: d.status })} aria-label="حالة السائق"
                             className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white cursor-pointer">
                             {Object.entries(DRIVER_STATUS).map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
                           </select>
@@ -246,16 +274,24 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
       {showForm && canManage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
           <form onSubmit={submit} className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-            <h4 className="font-bold text-white text-sm">{tab === 'vehicles' ? 'إضافة مركبة' : 'إضافة سائق'}</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-white text-sm">{tab === 'vehicles' ? 'إضافة مركبة' : 'إضافة سائق'}</h4>
+              <button type="button" onClick={() => setShowForm(false)} aria-label="إغلاق" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
             {tab === 'vehicles' ? (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="text-xs text-slate-300">الكود *<input required className={inp} value={f.code || ''} onChange={set('code')} /></label>
+                  <label className="text-xs text-slate-300">الكود *<input required className={inp} placeholder="مثال: VEH-003" value={f.code || ''} onChange={set('code')} /></label>
                   <label className="text-xs text-slate-300">رقم اللوحة *<input required className={inp} value={f.plateNo || ''} onChange={set('plateNo')} /></label>
-                  <label className="text-xs text-slate-300">النوع<input className={inp} placeholder="car / truck" value={f.vehicleType || ''} onChange={set('vehicleType')} /></label>
-                  <label className="text-xs text-slate-300">سنة الصنع<input type="number" className={inp} value={f.modelYear || ''} onChange={set('modelYear')} /></label>
-                  <label className="text-xs text-slate-300">الماركة<input className={inp} value={f.make || ''} onChange={set('make')} /></label>
-                  <label className="text-xs text-slate-300">الموديل<input className={inp} value={f.model || ''} onChange={set('model')} /></label>
+                  <label className="text-xs text-slate-300">نوع المركبة
+                    <select className={inp} value={f.vehicleType || 'car'} onChange={set('vehicleType')}>
+                      {Object.entries(VEHICLE_TYPE).map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
+                    </select>
+                  </label>
+                  <span />
+                  <label className="text-xs text-slate-300">الماركة<input className={inp} placeholder="مثال: تويوتا" value={f.make || ''} onChange={set('make')} /></label>
+                  <label className="text-xs text-slate-300">الموديل<input className={inp} placeholder="مثال: هايلكس" value={f.model || ''} onChange={set('model')} /></label>
+                  <label className="text-xs text-slate-300">سنة الصنع<input type="number" min="1950" max="2100" className={inp} placeholder="مثال: 2021" value={f.modelYear || ''} onChange={set('modelYear')} /></label>
                 </div>
                 <label className="block text-xs text-slate-300">قراءة العداد (كم)<input type="number" min="0" step="0.1" className={inp} value={f.odometerKm || ''} onChange={set('odometerKm')} /></label>
               </>
@@ -282,6 +318,25 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-200 text-xs rounded-xl cursor-pointer">إلغاء</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {pending && canManage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" data-testid="fleet-status-confirm">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+            <h4 className="font-bold text-white text-sm">تأكيد تغيير الحالة</h4>
+            <p className="text-xs text-slate-300">
+              تغيير حالة <bdi dir="auto" className="font-bold text-white">{pending.name}</bdi> من «{(pending.kind === 'vehicles' ? VEHICLE_STATUS : DRIVER_STATUS)[pending.from] || pending.from}» إلى «{(pending.kind === 'vehicles' ? VEHICLE_STATUS : DRIVER_STATUS)[pending.status] || pending.status}».
+            </p>
+            {pending.kind === 'vehicles' && pending.status === 'retired' && (
+              <p className="text-xs text-amber-300">المركبة المستبعدة لا يمكن إعادتها للخدمة لاحقا.</p>
+            )}
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={async () => { const p = pending; setPending(null); await changeStatus(p.kind, p.id, p.status); }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">تأكيد</button>
+              <button type="button" onClick={() => setPending(null)} className="px-4 py-2 bg-slate-800 text-slate-200 text-xs rounded-xl cursor-pointer">إلغاء</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
