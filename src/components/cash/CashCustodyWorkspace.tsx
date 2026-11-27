@@ -133,6 +133,7 @@ interface CashVoucherItem {
   voucherDate: string;
   amount: number;
   contraAccountId: string;
+  linesCount?: number;
   contraAccountCode?: string | null;
   contraAccountNameAr?: string | null;
   status: VoucherStatus;
@@ -1503,7 +1504,14 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
                             {v.kind === 'receipt' ? 'قبض' : 'صرف'}
                           </td>
                           <td className="py-3.5 px-4 text-slate-300">{regDisplay}</td>
-                          <td className="py-3.5 px-4 text-slate-300">{contraDisplay}</td>
+                          <td className="py-3.5 px-4 text-slate-300">
+                            {contraDisplay}
+                            {(v.linesCount ?? 0) > 1 && (
+                              <span data-testid="voucher-lines-count" className="mr-1.5 px-1.5 py-0.5 bg-indigo-900/60 text-indigo-200 rounded text-[10px] font-bold">
+                                +{(v.linesCount ?? 1) - 1} بند
+                              </span>
+                            )}
+                          </td>
                           <td className="py-3.5 px-4 font-mono tabular-nums font-bold text-emerald-300">
                             {Number(v.amount).toFixed(2)}
                           </td>

@@ -50,6 +50,7 @@ function mapVoucherRow(kind: VoucherKind, row: any): CashVoucher {
     createdBy: row.createdBy ?? null,
     createdAt: toIsoTimestamp(row.createdAt) || new Date().toISOString(),
     updatedAt: toIsoTimestamp(row.updatedAt) || new Date().toISOString(),
+    ...(row.linesCount !== undefined && row.linesCount !== null ? { linesCount: Number(row.linesCount) } : {}),
   };
 }
 
@@ -294,7 +295,8 @@ export class VoucherRepository {
           v.posted_by as "postedBy",
           v.created_by as "createdBy",
           v.created_at as "createdAt",
-          v.updated_at as "updatedAt"
+          v.updated_at as "updatedAt",
+          (SELECT COUNT(*) FROM ${linesTable(kind)} l WHERE l.company_id = v.company_id AND l.voucher_id = v.id) as "linesCount"
         FROM ${tbl} v
         INNER JOIN cash_registers cr ON cr.id = v.register_id AND cr.company_id = v.company_id
         INNER JOIN accounts ca ON ca.id = v.contra_account_id AND ca.company_id = v.company_id

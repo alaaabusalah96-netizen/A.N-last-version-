@@ -207,6 +207,8 @@ async function run() {
     const lp = await defaultVoucherService.postReceiptVoucher(compA.id, legacy.id, actorA.id, false);
     const ls = await sumJe(lp.journalEntryId);
     await check('M-LEG: legacy single amount + contraAccountId payload still works (1 line, JE 2 lines)', legacy.lines?.length === 1 && ls.n === 2 && ls.d === 7 && ls.c === 7, JSON.stringify(ls));
+    const listed = await defaultVoucherService.listVouchers('receipt', compA.id, {});
+    await check('M-LIST: voucher list exposes linesCount (1, 2 and 100 present)', [1, 2, 100].every((k) => listed.some((v: any) => v.linesCount === k)), JSON.stringify(listed.map((v: any) => v.linesCount)));
   } finally {
     const cleanupUrl = process.env.MIGRATION_DATABASE_URL || dbUrl;
     if (cleanupUrl && companyIds.length > 0) {

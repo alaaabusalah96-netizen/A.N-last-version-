@@ -39,6 +39,7 @@ export interface CashVoucher {
   createdAt: string;
   updatedAt: string;
   lines?: CashVoucherLine[];
+  linesCount?: number;
 }
 
 export interface CreateVoucherInput {
