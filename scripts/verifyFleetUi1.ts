@@ -24,5 +24,11 @@ check('F8', 'status change asks for confirmation before calling the API', ws.inc
 check('F9', 'vehicle type is an Arabic select and brand/model/year are separate columns', ws.includes('VEHICLE_TYPE') && ws.includes('<th className="py-3.5 px-4">الماركة</th>'));
 check('F10', 'add dialog has a close button and license warnings (expired, within 30 days)', ws.includes('aria-label="إغلاق"') && ws.includes('تنتهي خلال') && ws.includes('رخصة منتهية'));
 
+const tp = read('src/components/fleet/FleetTripsPanel.tsx');
+check('F11', 'trips tab uses only /api/fleet/trips endpoints and offers no delete', tp.includes('/api/fleet/trips') && !/method:\s*'DELETE'/.test(tp) && ws.includes('<FleetTripsPanel'));
+check('F12', 'create/approve/dispatch actions are gated by fleet:trip:* permissions', tp.includes("can('fleet:trip:create')") && tp.includes("can('fleet:trip:approve')") && tp.includes("can('fleet:trip:dispatch')") && tp.includes('if (!canCreate) return'));
+check('F13', 'a trip needs two stops in the form and reject/cancel need a reason', tp.includes('محطتين على الأقل') && tp.includes('السبب مطلوب'));
+check('F14', 'every action asks for confirmation, start/complete need the odometer, dialog has close X', tp.includes('fleet-trip-confirm') && tp.includes('قراءة العداد') && tp.includes('aria-label="إغلاق"'));
+check('F15', 'trip statuses are shown in Arabic', ['مسودة', 'معتمدة', 'مرفوضة', 'جارية', 'مكتملة', 'ملغاة'].every((w) => tp.includes(w)));
 if (failed > 0) { console.log(`[FAIL] ${failed} check(s) failed`); process.exit(1); }
-console.log('[PASS] verifyFleetUi1: 10/10');
+console.log('[PASS] verifyFleetUi1: 15/15');

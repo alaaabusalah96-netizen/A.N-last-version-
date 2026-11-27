@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Truck, UserRound, Plus, RefreshCw, Building2, X, Search, AlertTriangle } from 'lucide-react';
+import { Truck, UserRound, Plus, RefreshCw, Building2, X, Search, AlertTriangle, Route } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { FleetTripsPanel } from './FleetTripsPanel.js';
 
 interface Company { id: string; code: string; nameAr: string }
 interface OrgUnit { id: string; code: string; nameAr: string }
@@ -26,7 +27,7 @@ interface FleetWorkspaceProps { userRole?: string; permissions?: string[] }
 export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
-  const [tab, setTab] = useState<'vehicles' | 'drivers'>('vehicles');
+  const [tab, setTab] = useState<'vehicles' | 'drivers' | 'trips'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [units, setUnits] = useState<OrgUnit[]>([]);
@@ -164,15 +165,15 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
               {companies.map((c) => (<option key={c.id} value={c.id}>{c.nameAr} ({c.code})</option>))}
             </select>
           </div>
-          <div className="relative">
+          {tab !== 'trips' && (<div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث بالكود أو اللوحة أو الاسم" aria-label="بحث"
               className="pr-8 pl-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white w-52" />
-          </div>
+          </div>)}
           <button type="button" onClick={() => void load()} title="تحديث البيانات" className="p-2 bg-slate-800 rounded-xl text-slate-300 hover:text-white cursor-pointer">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          {canManage && (
+          {canManage && tab !== 'trips' && (
             <button type="button" onClick={() => { setF({}); setShowForm(true); }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer">
               <Plus className="w-3.5 h-3.5" /><span>{tab === 'vehicles' ? 'مركبة جديدة' : 'سائق جديد'}</span>
@@ -182,7 +183,7 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
       </div>
 
       <div role="tablist" className="flex gap-2">
-        {([['vehicles', 'المركبات', Truck], ['drivers', 'السائقون', UserRound]] as const).map(([k, label, Icon]) => (
+        {([['vehicles', 'المركبات', Truck], ['drivers', 'السائقون', UserRound], ['trips', 'الرحلات', Route]] as const).map(([k, label, Icon]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setShowForm(false); }}
             className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold cursor-pointer ${tab === k ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300 border border-slate-800'}`}>
             <Icon className="w-3.5 h-3.5" /><span>{label}</span>
@@ -193,6 +194,11 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
       {error && <div role="alert" className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-300">{error}</div>}
       {success && <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-300">{success}</div>}
 
+      {tab === 'trips' && (
+        <FleetTripsPanel companyId={companyId} vehicles={vehicles} drivers={drivers} units={units} can={can} onChanged={() => void load()} />
+      )}
+
+      {tab !== 'trips' && (
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           {tab === 'vehicles' ? (
@@ -270,6 +276,7 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
           )}
         </div>
       </div>
+      )}
 
       {showForm && canManage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
