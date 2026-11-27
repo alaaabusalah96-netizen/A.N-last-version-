@@ -15,7 +15,7 @@ const side = read('src/components/shell/AppSidebar.tsx');
 check('F1', 'FleetWorkspace uses only /api/fleet endpoints for vehicles and drivers',
   ws.includes('/api/fleet/vehicles') && ws.includes('/api/fleet/drivers'));
 check('F2', 'create and status actions are gated by fleet:manage', ws.includes("can('fleet:manage')") && ws.includes('if (!canManage) return'));
-check('F3', 'nav key fleet requires fleet:read or fleet:manage', /fleet:\s*\['fleet:read',\s*'fleet:manage'\]/.test(nav));
+check('F3', 'nav key fleet requires fleet:read, fleet:manage or fleet:driver:self', /fleet:\s*\['fleet:read',\s*'fleet:manage',\s*'fleet:driver:self'\]/.test(nav));
 check('F4', 'sidebar has fleet item gated by canAccessNav', side.includes("canAccessNav('fleet'") && side.includes("onNavigate('fleet')"));
 check('F5', 'App renders FleetWorkspace lazily for fleet nav', app.includes("import('./components/fleet/FleetWorkspace.js')") && app.includes('<FleetWorkspace'));
 check('F6', 'expired driver license is flagged in the UI', ws.includes('منتهية') && ws.includes('licenseExpiry < today'));
@@ -37,5 +37,9 @@ check('F17', 'create/approve/post actions are gated by fleet:expense:* permissio
 check('F18', 'posting asks the user to choose the counter account (no hard-coded account), reject/reverse need a reason, confirmation dialog on every action', ep.includes('counterAccountId') && ep.includes('اختر الحساب المقابل') && ep.includes('السبب مطلوب') && ep.includes('fleet-expense-confirm'));
 check('F19', 'expense statuses are shown in Arabic and dialogs have a close button', ['مسودة', 'معتمد', 'مرفوض', 'مرحّل', 'معكوس'].every((w) => ep.includes(w)) && ep.includes('aria-label="إغلاق"'));
 check('F20', 'pay from custody: needs a chosen open custody, uses the pay-from-custody endpoint only, warns when custodies cannot be loaded, and hides actions while a custody voucher is pending', ep.includes('pay-from-custody') && ep.includes('اختر العهدة') && ep.includes('expense-custody-select') && ep.includes('custodyNote') && ep.includes('x.custodyVoucherId'));
+const dp = read('src/components/fleet/FleetDriverPortal.tsx');
+check('F21', 'driver portal uses only /api/fleet/my endpoints, offers no delete, is wired as the "رحلاتي" tab and shown only with fleet:driver:self', dp.includes('/api/fleet/my/trips') && dp.includes('/api/fleet/my/expenses') && !dp.includes("'DELETE'") && !/\/api\/fleet\/(trips|expenses)/.test(dp) && ws.includes('<FleetDriverPortal') && ws.includes("permissions.includes('fleet:driver:self')") && ws.includes('رحلاتي'));
+check('F22', 'driver portal asks for the odometer, confirms every action, has a close X, shows Arabic statuses, and expenses are drafts only', dp.includes('my-trip-odometer') && dp.includes('my-trip-confirm') && dp.includes('aria-label="إغلاق"') && ['جاهزة للانطلاق', 'جارية', 'مكتملة', 'بانتظار الاعتماد', 'مرحّل'].every((w) => dp.includes(w)) && dp.includes('لا يمكنك اعتماده'));
+check('F23', 'a driver-only user (no fleet:read) does not load office data and sees no office tabs; nav allows fleet:driver:self', ws.includes('!hasOffice') && ws.includes("k === 'mine' ? hasPortal : hasOffice") && read('src/lib/navAccess.ts').includes("'fleet:driver:self'"));
 if (failed > 0) { console.log(`[FAIL] ${failed} check(s) failed`); process.exit(1); }
-console.log('[PASS] verifyFleetUi1: 20/20');
+console.log('[PASS] verifyFleetUi1: 23/23');

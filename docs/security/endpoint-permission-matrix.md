@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 270
+- **Total Mounted Endpoints**: 277
 - **Mounted Route Modules Parsed**: 18
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 262
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 269
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -167,6 +167,13 @@
 | `/api/fleet` | `POST` | `/api/fleet/expenses/:id/post` | `true` | `PERMISSIONS.FLEET_EXPENSE_POST` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/expenses/:id/reject` | `true` | `PERMISSIONS.FLEET_EXPENSE_APPROVE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/expenses/:id/reverse` | `true` | `PERMISSIONS.FLEET_EXPENSE_POST` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/my/expense-categories` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/my/expenses` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/my/profile` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/my/trips` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/my/trips/:id/complete` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/my/trips/:id/expenses` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/my/trips/:id/start` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/trips` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/trips` | `true` | `PERMISSIONS.FLEET_TRIP_CREATE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/trips/:id` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |

@@ -75,6 +75,7 @@ export const PERMISSIONS = {
   FLEET_EXPENSE_CREATE: 'fleet:expense:create',
   FLEET_EXPENSE_APPROVE: 'fleet:expense:approve',
   FLEET_EXPENSE_POST: 'fleet:expense:post',
+  FLEET_DRIVER_SELF: 'fleet:driver:self',
 
   // Sales Revenue Cycle (المبيعات ودورة الإيرادات)
   SALES_READ: 'sales:read',
@@ -161,6 +162,7 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   { code: PERMISSIONS.FLEET_TRIP_DISPATCH, labelAr: 'إرسال الرحلات وتشغيلها وإنهاؤها وإلغاؤها', group: 'الأسطول' },
   { code: PERMISSIONS.FLEET_EXPENSE_CREATE, labelAr: 'تسجيل مصروفات الأسطول وإدارة فئاتها', group: 'الأسطول' },
   { code: PERMISSIONS.FLEET_EXPENSE_APPROVE, labelAr: 'اعتماد أو رفض مصروفات الأسطول', group: 'الأسطول' },
+  { code: PERMISSIONS.FLEET_DRIVER_SELF, labelAr: 'بوابة السائق: رحلاتي وتسجيل مصروفاتي', group: 'الأسطول' },
   { code: PERMISSIONS.FLEET_EXPENSE_POST, labelAr: 'ترحيل مصروفات الأسطول محاسبيا وعكسها', group: 'الأسطول' },
 
   // المبيعات

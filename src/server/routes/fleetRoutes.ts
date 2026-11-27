@@ -3,6 +3,7 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultFleetService } from '../fleet/fleetService.js';
 import { defaultFleetTripService } from '../fleet/fleetTripService.js';
+import { defaultFleetDriverPortalService } from '../fleet/fleetDriverPortalService.js';
 import { defaultFleetExpenseService } from '../fleet/fleetExpenseService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
@@ -159,4 +160,40 @@ fleetRoutes.post('/expenses/:id/reverse', requireAuth, wrap(async (req: Authenti
   const companyId = cid(req);
   await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_POST, companyId);
   res.json({ status: 'ok', expense: await defaultFleetExpenseService.reverseExpense(companyId, req.params.id, req.body?.reason, req.user!.id, isAdmin(req)) });
+}));
+// Phase (d): driver portal. A driver sees and acts only on their own trips (resolved from the login, never from the request).
+fleetRoutes.get('/my/profile', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.json({ status: 'ok', driver: await defaultFleetDriverPortalService.me(companyId, req.user!.id) });
+}));
+fleetRoutes.get('/my/trips', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.json({ status: 'ok', trips: await defaultFleetDriverPortalService.myTrips(companyId, req.user!.id) });
+}));
+fleetRoutes.post('/my/trips/:id/start', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.json({ status: 'ok', trip: await defaultFleetDriverPortalService.startMyTrip(companyId, req.user!.id, req.params.id, req.body?.odometerStart) });
+}));
+fleetRoutes.post('/my/trips/:id/complete', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.json({ status: 'ok', trip: await defaultFleetDriverPortalService.completeMyTrip(companyId, req.user!.id, req.params.id, req.body?.odometerEnd) });
+}));
+fleetRoutes.post('/my/trips/:id/expenses', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.status(201).json({ status: 'ok', expense: await defaultFleetDriverPortalService.logMyExpense(companyId, req.user!.id, req.params.id, req.body || {}) });
+}));
+fleetRoutes.get('/my/expenses', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.json({ status: 'ok', expenses: await defaultFleetDriverPortalService.myExpenses(companyId, req.user!.id) });
+}));
+fleetRoutes.get('/my/expense-categories', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.json({ status: 'ok', categories: await defaultFleetDriverPortalService.categories(companyId, req.user!.id) });
 }));

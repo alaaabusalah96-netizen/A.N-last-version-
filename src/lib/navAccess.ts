@@ -29,7 +29,7 @@ const NAV_PERMISSIONS: Record<Exclude<NavKey, 'config_platform' | 'config_defini
   purchasing: ['purchasing:read'],
   sales: ['sales:read'],
   cash: ['cash:read', 'custody:request', 'custody:approve', 'custody:disburse', 'custody:settle'],
-  fleet: ['fleet:read', 'fleet:manage'],
+  fleet: ['fleet:read', 'fleet:manage', 'fleet:driver:self'],
   users: ['user:read'],
   roles: ['roles.read'],
   org_units: ['org:units:read'],

@@ -3,6 +3,7 @@ import { Truck, UserRound, Plus, RefreshCw, Building2, X, Search, AlertTriangle,
 import { apiFetch } from '../../lib/apiClient.js';
 import { FleetTripsPanel } from './FleetTripsPanel.js';
 import { FleetExpensesPanel } from './FleetExpensesPanel.js';
+import { FleetDriverPortal } from './FleetDriverPortal.js';
 
 interface Company { id: string; code: string; nameAr: string }
 interface OrgUnit { id: string; code: string; nameAr: string }
@@ -28,7 +29,7 @@ interface FleetWorkspaceProps { userRole?: string; permissions?: string[] }
 export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
-  const [tab, setTab] = useState<'vehicles' | 'drivers' | 'trips' | 'expenses'>('vehicles');
+  const [tab, setTab] = useState<'vehicles' | 'drivers' | 'trips' | 'expenses' | 'mine'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [units, setUnits] = useState<OrgUnit[]>([]);
@@ -50,6 +51,10 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
     [userRole, permissions]
   );
   const canManage = can('fleet:manage');
+  // Driver portal: shown only when the role explicitly carries fleet:driver:self. A driver with no office fleet permission sees only this tab.
+  const hasPortal = userRole === 'platform_admin' ? false : permissions.includes('fleet:driver:self');
+  const hasOffice = userRole === 'platform_admin' || permissions.length === 0 || permissions.includes('fleet:read');
+  useEffect(() => { if (hasPortal && !hasOffice) setTab('mine'); }, [hasPortal, hasOffice]);
   const unitLabel = (id: string | null) => { const u = units.find((x) => x.id === id); return u ? `${u.nameAr} (${u.code})` : 'مستوى الشركة'; };
 
   useEffect(() => {
@@ -69,7 +74,7 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
   }, []);
 
   const load = useCallback(async () => {
-    if (!companyId) return;
+    if (!companyId || !hasOffice) return;
     setLoading(true);
     setError(null);
     try {
@@ -96,7 +101,7 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, hasOffice]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -184,7 +189,8 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
       </div>
 
       <div role="tablist" className="flex gap-2">
-        {([['vehicles', 'المركبات', Truck], ['drivers', 'السائقون', UserRound], ['trips', 'الرحلات', Route], ['expenses', 'المصروفات', Wallet]] as const).map(([k, label, Icon]) => (
+        {([['vehicles', 'المركبات', Truck], ['drivers', 'السائقون', UserRound], ['trips', 'الرحلات', Route], ['expenses', 'المصروفات', Wallet], ['mine', 'رحلاتي', Route]] as const)
+          .filter(([k]) => (k === 'mine' ? hasPortal : hasOffice)).map(([k, label, Icon]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setShowForm(false); }}
             className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold cursor-pointer ${tab === k ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300 border border-slate-800'}`}>
             <Icon className="w-3.5 h-3.5" /><span>{label}</span>
@@ -195,15 +201,17 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
       {error && <div role="alert" className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-300">{error}</div>}
       {success && <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-300">{success}</div>}
 
-      {tab === 'expenses' && (
+      {tab === 'mine' && hasPortal && <FleetDriverPortal companyId={companyId} />}
+
+      {tab === 'expenses' && hasOffice && (
         <FleetExpensesPanel companyId={companyId} vehicles={vehicles} can={can} />
       )}
 
-      {tab === 'trips' && (
+      {tab === 'trips' && hasOffice && (
         <FleetTripsPanel companyId={companyId} vehicles={vehicles} drivers={drivers} units={units} can={can} onChanged={() => void load()} />
       )}
 
-      {(tab === 'vehicles' || tab === 'drivers') && (
+      {hasOffice && (tab === 'vehicles' || tab === 'drivers') && (
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           {tab === 'vehicles' ? (
