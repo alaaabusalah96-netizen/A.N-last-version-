@@ -5,6 +5,7 @@ import { defaultOrgUnitRepository, OrgUnitRepository } from '../org/orgUnitRepos
 import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
 import { defaultJournalService, JournalService } from '../accounting/journalService.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
+import { defaultCustodyVoucherService } from '../cash/custodyVoucherService.js';
 import { isUuid } from '../http/validators.js';
 
 export const EXPENSE_STATUSES = ['draft', 'approved', 'rejected', 'posted', 'reversed'] as const;
@@ -32,7 +33,7 @@ export function parseAmount(v: unknown): number {
 export interface ExpenseCategoryView { id: string; companyId: string; code: string; nameAr: string; expenseAccountId: string; isActive: boolean }
 export interface ExpenseView {
   id: string; companyId: string; seq: number; expenseNo: string; orgUnitId: string | null; vehicleId: string; tripId: string | null; categoryId: string;
-  expenseDate: string; amount: number; description: string; referenceNo: string | null; odometerKm: number | null; status: ExpenseStatus;
+  expenseDate: string; amount: number; description: string; referenceNo: string | null; odometerKm: number | null; status: ExpenseStatus; custodyVoucherId: string | null;
   createdBy: string; approvedBy: string | null; approvedAt: string | null; rejectReason: string | null; postedBy: string | null; postedAt: string | null;
   counterAccountId: string | null; journalEntryId: string | null; reversalEntryId: string | null; reverseReason: string | null;
 }
@@ -41,7 +42,7 @@ const CCOLS = `id, company_id AS "companyId", code, name_ar AS "nameAr", expense
 const ECOLS = `id, company_id AS "companyId", seq, expense_no AS "expenseNo", org_unit_id AS "orgUnitId", vehicle_id AS "vehicleId", trip_id AS "tripId",
   category_id AS "categoryId", to_char(expense_date,'YYYY-MM-DD') AS "expenseDate", amount, description, reference_no AS "referenceNo", odometer_km AS "odometerKm",
   status, created_by AS "createdBy", approved_by AS "approvedBy", approved_at AS "approvedAt", reject_reason AS "rejectReason", posted_by AS "postedBy",
-  posted_at AS "postedAt", counter_account_id AS "counterAccountId", journal_entry_id AS "journalEntryId", reversal_entry_id AS "reversalEntryId", reverse_reason AS "reverseReason"`;
+  posted_at AS "postedAt", counter_account_id AS "counterAccountId", journal_entry_id AS "journalEntryId", reversal_entry_id AS "reversalEntryId", reverse_reason AS "reverseReason", custody_voucher_id AS "custodyVoucherId"`;
 const iso = (v: any) => (v === null || v === undefined ? null : new Date(v).toISOString());
 const toExpense = (r: any): ExpenseView => ({ ...r, amount: Number(r.amount), odometerKm: r.odometerKm === null ? null : Number(r.odometerKm),
   approvedAt: iso(r.approvedAt), postedAt: iso(r.postedAt) });
@@ -222,6 +223,7 @@ export class FleetExpenseService {
     return await withTenantTransaction(companyId, async (tx) => {
       const e = await this.lock(companyId, id, tx);
       this.move(e, 'rejected');
+      if (e.custodyVoucherId) throw new ConflictError('للمصروف حافظة عهدة قيد الاعتماد؛ ارفض الحافظة من شاشة العهدة أولا');
       await tx.query(`UPDATE fleet_expenses SET status='rejected', rejected_by=$3, rejected_at=now(), reject_reason=$4, updated_at=now() WHERE company_id=$1 AND id=$2`, [companyId, id, actorId, why]);
       await this.audit(companyId, actorId, 'FLEET_EXPENSE_REJECTED', 'fleet_expenses', id, { expenseNo: e.expenseNo, reason: why }, tx);
       return await this.reload(companyId, id, tx);
@@ -234,6 +236,7 @@ export class FleetExpenseService {
     return await withTenantTransaction(companyId, async (tx) => {
       const e = await this.lock(companyId, id, tx);
       this.move(e, 'posted');
+      if (e.custodyVoucherId) throw new ConflictError('المصروف مرتبط بحافظة عهدة؛ يُرحّل باعتماد الحافظة من شاشة العهدة');
       const cat = (await tx.query<any>(`SELECT ${CCOLS} FROM fleet_expense_categories WHERE company_id=$1 AND id=$2`, [companyId, e.categoryId])).rows[0];
       const expAcc = await this.assertAccount(companyId, cat.expenseAccountId, 'حساب مصروف الفئة', ['expense'], tx);
       const counter = await this.assertAccount(companyId, counterAccountId, 'حساب الطرف المقابل', ['asset', 'liability'], tx);
@@ -257,6 +260,30 @@ export class FleetExpenseService {
     });
   }
 
+  /** Pays an approved expense from an open custody: submits a one-line custody voucher (debit = category expense account on approval, credit = custody receivable).
+   *  The voucher approver (a different person, enforced by the custody module) posts it. Only the custody holder (or an admin) may spend from a custody. */
+  async payFromCustody(companyId: string, id: string, custodyId: unknown, actorId: string, isAdmin = false): Promise<ExpenseView> {
+    this.cid(companyId);
+    if (typeof custodyId !== 'string' || !isUuid(custodyId)) throw new ValidationError('معرف العهدة غير صالح');
+    return await withTenantTransaction(companyId, async (tx) => {
+      const e = await this.lock(companyId, id, tx);
+      if (e.status !== 'approved') throw new ConflictError('الدفع من العهدة متاح للمصروف المعتمد فقط');
+      if (e.custodyVoucherId) throw new ConflictError('المصروف مرتبط بحافظة عهدة بالفعل');
+      const cu = (await tx.query<any>(`SELECT employee_user_id AS "employeeUserId", status FROM custody_records WHERE company_id=$1 AND id=$2`, [companyId, custodyId])).rows[0];
+      if (!cu) throw new NotFoundError('العهدة غير موجودة');
+      if (cu.status !== 'open') throw new ValidationError('العهدة ليست مفتوحة (مصروفة وغير مسوّاة)');
+      if (!isAdmin && cu.employeeUserId !== actorId) throw new ForbiddenError('لا يمكن الصرف إلا من عهدتك الشخصية');
+      const cat = (await tx.query<any>(`SELECT ${CCOLS} FROM fleet_expense_categories WHERE company_id=$1 AND id=$2`, [companyId, e.categoryId])).rows[0];
+      const v = await defaultCustodyVoucherService.submitVoucher(companyId, custodyId, {
+        lines: [{ expenseAccountId: cat.expenseAccountId, amount: Number(e.amount), memo: `${e.expenseNo} - ${cat.nameAr}: ${e.description}`.slice(0, 300) }],
+        memo: `مصروف أسطول ${e.expenseNo}`,
+      }, actorId);
+      await tx.query(`UPDATE fleet_expenses SET custody_voucher_id=$3, updated_at=now() WHERE company_id=$1 AND id=$2`, [companyId, id, v.id]);
+      await this.audit(companyId, actorId, 'FLEET_EXPENSE_CUSTODY_SUBMITTED', 'fleet_expenses', id, { expenseNo: e.expenseNo, custodyId, voucherId: v.id, voucherNo: v.voucherNo }, tx);
+      return await this.reload(companyId, id, tx);
+    });
+  }
+
   /** A posted expense is never edited: it is cancelled by a reversing journal entry. */
   async reverseExpense(companyId: string, id: string, reason: unknown, actorId: string, isPlatformAdmin = false): Promise<ExpenseView> {
     this.cid(companyId);
@@ -264,6 +291,7 @@ export class FleetExpenseService {
     return await withTenantTransaction(companyId, async (tx) => {
       const e = await this.lock(companyId, id, tx);
       this.move(e, 'reversed');
+      if (e.custodyVoucherId) throw new ConflictError('المصروف مدفوع من العهدة؛ اعكس الحافظة من شاشة العهدة وسينعكس المصروف تلقائيا');
       const rev = await this.journalService.reverseEntry(companyId, e.journalEntryId, actorId, `عكس مصروف أسطول ${e.expenseNo}: ${why}`, isPlatformAdmin, tx);
       await tx.query(
         `UPDATE fleet_expenses SET status='reversed', reversed_by=$3, reversed_at=now(), reverse_reason=$4, reversal_entry_id=$5, updated_at=now() WHERE company_id=$1 AND id=$2`,

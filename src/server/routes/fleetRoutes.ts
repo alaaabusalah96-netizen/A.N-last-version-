@@ -148,6 +148,13 @@ fleetRoutes.post('/expenses/:id/post', requireAuth, wrap(async (req: Authenticat
   await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_POST, companyId);
   res.json({ status: 'ok', expense: await defaultFleetExpenseService.postExpense(companyId, req.params.id, req.body?.counterAccountId, req.user!.id, isAdmin(req)) });
 }));
+fleetRoutes.post('/expenses/:id/pay-from-custody', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_POST, companyId);
+  await assertFleetPermission(req.user!, PERMISSIONS.CUSTODY_REQUEST, companyId);
+  const u = req.user!;
+  res.json({ status: 'ok', expense: await defaultFleetExpenseService.payFromCustody(companyId, req.params.id, req.body?.custodyId, u.id, u.role === 'platform_admin') });
+}));
 fleetRoutes.post('/expenses/:id/reverse', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
   const companyId = cid(req);
   await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_POST, companyId);

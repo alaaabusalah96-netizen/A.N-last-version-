@@ -305,6 +305,8 @@ export class CustodyVoucherService {
         },
         { executor: tx }
       );
+      // Fleet link (phase c2): a rejected voucher frees its fleet expense to be paid another way.
+      await tx.query(`UPDATE fleet_expenses SET custody_voucher_id=NULL, updated_at=now() WHERE company_id=$1 AND custody_voucher_id=$2 AND status='approved'`, [companyId, voucherId]);
       return (await this.loadVoucher(companyId, voucherId, tx))!;
     });
   }
@@ -360,6 +362,11 @@ export class CustodyVoucherService {
       await tx.query(
         `UPDATE custody_vouchers SET status='reversed', reversed_by=$3, reversed_at=NOW(), reversal_reason=$4,
            reversal_journal_entry_id=$5, updated_at=NOW() WHERE company_id=$1 AND id=$2`,
+        [companyId, voucherId, actorId, why, reversal.id]
+      );
+      await tx.query(
+        `UPDATE fleet_expenses SET status='reversed', reversed_by=$3, reversed_at=now(), reverse_reason=$4, reversal_entry_id=$5, updated_at=now()
+          WHERE company_id=$1 AND custody_voucher_id=$2 AND status='posted'`,
         [companyId, voucherId, actorId, why, reversal.id]
       );
       await this.auditService.record(
@@ -474,6 +481,12 @@ export class CustodyVoucherService {
         [companyId, voucherId, actorId, posted.id]
       );
 
+      // Fleet link (phase c2): the approved voucher posts its fleet expense with the same journal entry.
+      await tx.query(
+        `UPDATE fleet_expenses SET status='posted', posted_by=$3, posted_at=now(), counter_account_id=$4, journal_entry_id=$5, updated_at=now()
+          WHERE company_id=$1 AND custody_voucher_id=$2 AND status='approved'`,
+        [companyId, voucherId, actorId, gl.custodyReceivableAccountId, posted.id]
+      );
       const newRemaining = toMoney(remaining - v.totalAmount);
       let autoSettled = false;
       if (newRemaining === 0) {

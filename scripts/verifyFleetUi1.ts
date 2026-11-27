@@ -36,5 +36,6 @@ check('F16', 'expenses tab uses only /api/fleet/expenses and categories endpoint
 check('F17', 'create/approve/post actions are gated by fleet:expense:* permissions', ep.includes("can('fleet:expense:create')") && ep.includes("can('fleet:expense:approve')") && ep.includes("can('fleet:expense:post')") && ep.includes('if (!canCreate) return'));
 check('F18', 'posting asks the user to choose the counter account (no hard-coded account), reject/reverse need a reason, confirmation dialog on every action', ep.includes('counterAccountId') && ep.includes('اختر الحساب المقابل') && ep.includes('السبب مطلوب') && ep.includes('fleet-expense-confirm'));
 check('F19', 'expense statuses are shown in Arabic and dialogs have a close button', ['مسودة', 'معتمد', 'مرفوض', 'مرحّل', 'معكوس'].every((w) => ep.includes(w)) && ep.includes('aria-label="إغلاق"'));
+check('F20', 'pay from custody: needs a chosen open custody, uses the pay-from-custody endpoint only, warns when custodies cannot be loaded, and hides actions while a custody voucher is pending', ep.includes('pay-from-custody') && ep.includes('اختر العهدة') && ep.includes('expense-custody-select') && ep.includes('custodyNote') && ep.includes('x.custodyVoucherId'));
 if (failed > 0) { console.log(`[FAIL] ${failed} check(s) failed`); process.exit(1); }
-console.log('[PASS] verifyFleetUi1: 19/19');
+console.log('[PASS] verifyFleetUi1: 20/20');

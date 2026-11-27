@@ -7,8 +7,9 @@ interface Category { id: string; code: string; nameAr: string; expenseAccountId:
 interface Expense {
   id: string; expenseNo: string; vehicleId: string; tripId: string | null; categoryId: string; expenseDate: string; amount: number; description: string;
   referenceNo: string | null; odometerKm: number | null; status: string; rejectReason: string | null; reverseReason: string | null;
-  journalEntryId: string | null; reversalEntryId: string | null; counterAccountId: string | null;
+  journalEntryId: string | null; reversalEntryId: string | null; counterAccountId: string | null; custodyVoucherId?: string | null;
 }
+interface OpenCustody { id: string; custodyNo: string | null; employeeUsername?: string | null; amount: number; purpose: string }
 interface Account { id: string; code: string; nameAr: string; accountType: string; isPostable: boolean; isActive?: boolean }
 
 export const EXPENSE_STATUS_AR: Record<string, string> = { draft: 'مسودة', approved: 'معتمد', rejected: 'مرفوض', posted: 'مرحّل', reversed: 'معكوس' };
@@ -16,8 +17,8 @@ const BADGE: Record<string, string> = {
   draft: 'bg-slate-700 text-slate-200', approved: 'bg-sky-500/20 text-sky-300', rejected: 'bg-red-500/20 text-red-300',
   posted: 'bg-emerald-500/20 text-emerald-300', reversed: 'bg-amber-500/20 text-amber-300',
 };
-type Action = 'approve' | 'reject' | 'post' | 'reverse';
-const ACTION_AR: Record<Action, string> = { approve: 'اعتماد', reject: 'رفض', post: 'ترحيل محاسبي', reverse: 'عكس القيد' };
+type Action = 'approve' | 'reject' | 'post' | 'custody' | 'reverse';
+const ACTION_AR: Record<Action, string> = { approve: 'اعتماد', reject: 'رفض', post: 'ترحيل محاسبي', custody: 'دفع من العهدة', reverse: 'عكس القيد' };
 const money = (n: number) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 interface Props { companyId: string; vehicles: TripVehicle[]; can: (perm: string) => boolean }
@@ -27,6 +28,8 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
   const [cats, setCats] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountsNote, setAccountsNote] = useState<string | null>(null);
+  const [custodies, setCustodies] = useState<OpenCustody[]>([]);
+  const [custodyNote, setCustodyNote] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -107,6 +110,20 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
     } catch (err) { setError(err instanceof Error ? err.message : 'حدث خطأ أثناء الحفظ'); } finally { setBusy(false); }
   };
 
+  const openAction = (x: Expense, a: Action) => {
+    setError(null); setSuccess(null); setActVal(''); setAct({ exp: x, action: a });
+    if (a === 'custody') {
+      setCustodies([]); setCustodyNote(null);
+      (async () => {
+        try {
+          const r = await apiFetch(`/api/cash/custodies?companyId=${encodeURIComponent(companyId)}&status=open`);
+          if (r.ok) { const b = await r.json(); setCustodies(b.custodies || []); }
+          else setCustodyNote('تعذر تحميل العهد المفتوحة. يلزم صلاحية الاطلاع على الخزينة.');
+        } catch { setCustodyNote('تعذر تحميل العهد المفتوحة'); }
+      })();
+    }
+  };
+
   const runAction = async () => {
     if (!act) return;
     const { exp, action } = act;
@@ -115,8 +132,9 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
       const body: Record<string, unknown> = {};
       if (action === 'reject' || action === 'reverse') { if (!actVal.trim()) throw new Error('السبب مطلوب'); body.reason = actVal.trim(); }
       if (action === 'post') { if (!actVal) throw new Error('اختر الحساب المقابل (الدائن)'); body.counterAccountId = actVal; }
-      await post(`/api/fleet/expenses/${exp.id}/${action}`, body, 'تعذر تنفيذ الإجراء');
-      setSuccess(`تم: ${ACTION_AR[action]} (${exp.expenseNo})`);
+      if (action === 'custody') { if (!actVal) throw new Error('اختر العهدة'); body.custodyId = actVal; }
+      await post(`/api/fleet/expenses/${exp.id}/${action === 'custody' ? 'pay-from-custody' : action}`, body, 'تعذر تنفيذ الإجراء');
+      setSuccess(action === 'custody' ? `تم تقديم حافظة عهدة للمصروف (${exp.expenseNo}). يُرحَّل باعتماد الحافظة من شاشة العهدة` : `تم: ${ACTION_AR[action]} (${exp.expenseNo})`);
       setAct(null); setActVal(''); await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'حدث خطأ أثناء التنفيذ'); setAct(null); } finally { setBusy(false); }
   };
@@ -124,9 +142,10 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
   const actionsFor = (x: Expense): Action[] => {
     const a: Action[] = [];
     if (x.status === 'draft' && canApprove) a.push('approve', 'reject');
+    if (x.status === 'approved' && x.custodyVoucherId) return a;
     if (x.status === 'approved' && canApprove) a.push('reject');
-    if (x.status === 'approved' && canPost) a.unshift('post');
-    if (x.status === 'posted' && canPost) a.push('reverse');
+    if (x.status === 'approved' && canPost) a.unshift('post', 'custody');
+    if (x.status === 'posted' && canPost && !x.custodyVoucherId) a.push('reverse');
     return a;
   };
   const inp = 'w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500';
@@ -175,9 +194,11 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
                   <td className="py-3.5 px-4"><span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${BADGE[x.status] || ''}`}>{EXPENSE_STATUS_AR[x.status] || x.status}</span></td>
                   <td className="py-3.5 px-4"><div className="flex flex-wrap gap-1.5">
                     {actionsFor(x).map((a) => (
-                      <button key={a} type="button" disabled={busy} data-testid={`expense-${a}`} onClick={() => { setError(null); setSuccess(null); setActVal(''); setAct({ exp: x, action: a }); }}
+                      <button key={a} type="button" disabled={busy} data-testid={`expense-${a}`} onClick={() => openAction(x, a)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${a === 'reject' || a === 'reverse' ? 'bg-red-500/15 text-red-300 hover:bg-red-500/25' : 'bg-emerald-600/80 text-white hover:bg-emerald-500'}`}>{ACTION_AR[a]}</button>
                     ))}
+                    {x.custodyVoucherId && x.status === 'approved' && <span className="text-[11px] text-amber-300" data-testid="expense-custody-pending">بانتظار اعتماد حافظة العهدة</span>}
+                    {x.custodyVoucherId && x.status === 'posted' && <span className="text-[11px] text-slate-400">مدفوع من العهدة (يُعكس من الحافظة)</span>}
                   </div></td>
                 </tr>
               ))}
@@ -256,6 +277,14 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
                   <option value="">-- اختر (الموردون أو الصندوق) --</option>{counterAccounts.map((a) => (<option key={a.id} value={a.id}>{a.code} - {a.nameAr}</option>))}
                 </select></label>
             )}
+            {act.action === 'custody' && (
+              <label className="block text-xs text-slate-300">العهدة المفتوحة *
+                <select className={inp} value={actVal} onChange={(e) => setActVal(e.target.value)} data-testid="expense-custody-select">
+                  <option value="">-- اختر العهدة --</option>{custodies.map((c) => (<option key={c.id} value={c.id}>{c.custodyNo || c.id.slice(0, 8)} - {c.employeeUsername || ''} - {money(c.amount)}</option>))}
+                </select></label>
+            )}
+            {act.action === 'custody' && custodyNote && <p className="text-[11px] text-amber-300" role="alert">{custodyNote}</p>}
+            {act.action === 'custody' && <p className="text-[11px] text-slate-500">تُقدَّم حافظة عهدة بنفس المبلغ ولا يُرحَّل شيء قبل أن يعتمدها شخص آخر. تصرف من عهدتك الشخصية فقط.</p>}
             {act.action === 'post' && <p className="text-[11px] text-slate-500">القيد: مدين حساب مصروف الفئة، دائن الحساب الذي تختاره. لو فشل القيد لا يُرحَّل شيء.</p>}
             {act.action === 'reverse' && <p className="text-[11px] text-slate-500">يُنشأ قيد عكسي ولا يُحذف القيد الأصلي.</p>}
             {act.action === 'approve' && <p className="text-xs text-slate-300">هل تريد اعتماد هذا المصروف؟ لا يُرحَّل قبل خطوة الترحيل.</p>}
