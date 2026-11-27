@@ -76,6 +76,19 @@ export class CompanyRepository {
     const res = await executor.query<Company>(sql);
     return res.rows;
   }
+  /** Companies the user holds an active membership in. Filtering happens in SQL so the app never loads other tenants' rows. */
+  async listForUser(userId: string, customExecutor?: DbExecutor): Promise<Company[]> {
+    const executor = await this.getExecutor(customExecutor);
+    const sql = `
+      SELECT c.id, c.code, c.name_ar as "nameAr", c.name_en as "nameEn", c.is_active as "isActive", c.created_at as "createdAt", c.created_by as "createdBy"
+      FROM companies c
+      WHERE c.is_active = true
+        AND EXISTS (SELECT 1 FROM company_memberships m WHERE m.company_id = c.id AND m.user_id = $1 AND m.is_active = true)
+      ORDER BY c.created_at DESC;
+    `;
+    const res = await executor.query<Company>(sql, [userId]);
+    return res.rows;
+  }
 }
 
 export const defaultCompanyRepository = new CompanyRepository();

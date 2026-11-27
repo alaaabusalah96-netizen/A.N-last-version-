@@ -24,6 +24,10 @@ export class CompanyStore {
     return this.repo.list(customExecutor);
   }
 
+  async listForUser(userId: string, customExecutor?: DbExecutor): Promise<Company[]> {
+    return this.repo.listForUser(userId, customExecutor);
+  }
+
   clear(): void {
     // No-op for database-backed store
   }

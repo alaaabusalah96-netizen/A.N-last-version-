@@ -1,7 +1,6 @@
 import { Router, Response } from 'express';
 import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
-import { defaultMembershipStore } from '../org/membershipStore.js';
 import { defaultCompanyService } from '../org/companyService.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { requirePermission } from '../rbac/requirePermission.js';
@@ -40,10 +39,7 @@ companyRoutes.get(
     }
 
     // Non-platform user: return only companies where they hold active membership
-    const userMemberships = await defaultMembershipStore.listByUser(user.id);
-    const companyIds = userMemberships.map((m) => m.companyId);
-    const allCompanies = await defaultCompanyStore.list();
-    const filtered = allCompanies.filter((c) => companyIds.includes(c.id));
+    const filtered = await defaultCompanyStore.listForUser(user.id);
 
     return res.status(200).json({ status: 'ok', companies: filtered });
   })

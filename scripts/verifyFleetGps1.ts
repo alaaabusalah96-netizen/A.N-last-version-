@@ -102,6 +102,9 @@ async function run() {
     const del = await c2.query(`DELETE FROM fleet_trip_positions WHERE trip_id=$1`, [T.id]).then(() => false, () => true);
     await c2.query('ROLLBACK'); await c2.end();
     await check('E13: positions are write-once: update and delete are blocked by the database', upd && del);
+    const { defaultCompanyStore } = await import('../src/server/org/companyStore.js');
+    const mineA = (await defaultCompanyStore.listForUser(office.id)).map((c) => c.id); const mineB = (await defaultCompanyStore.listForUser(userB.id)).map((c) => c.id); const none = await defaultCompanyStore.listForUser(nodrv.id);
+    await check('E14: the company list is filtered by membership in SQL: each user sees only their own company', mineA.length === 1 && mineA[0] === compA.id && mineB.length === 1 && mineB[0] === compB.id && none.every((c) => c.id === compA.id));
   } catch (err) {
     await check('Fleet D verification unexpected error', false, err instanceof Error ? err.message : String(err));
   } finally {
