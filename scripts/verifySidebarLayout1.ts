@@ -16,6 +16,7 @@ const ALL_TABS: TabSpec[] = [
   { key: 'inventory', label: 'المخزون', title: 'المخزون' },
   { key: 'purchasing', label: 'المشتريات', title: 'المشتريات' },
   { key: 'cash', label: 'الخزينة والعهد', title: 'الخزينة والعهد' },
+  { key: 'fleet', label: 'الأسطول', title: 'الأسطول' },
   { key: 'users', label: 'المستخدمون', title: 'المستخدمون' },
   { key: 'roles', label: 'الأدوار والصلاحيات', title: 'الأدوار والصلاحيات' },
   { key: 'org_units', label: 'الوحدات التنظيمية', title: 'الوحدات التنظيمية' },

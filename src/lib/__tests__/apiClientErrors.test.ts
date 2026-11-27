@@ -26,7 +26,7 @@ describe('apiClient error normalisation', () => {
 
 describe('sidebar access', () => {
   it('shows nothing sensitive to a user with no permissions', () => {
-    for (const k of ['accounting', 'inventory', 'purchasing', 'sales', 'cash', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields', 'config_platform', 'config_definitions', 'companies'] as const) {
+    for (const k of ['accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields', 'config_platform', 'config_definitions', 'companies'] as const) {
       expect(canAccessNav(k, 'user', [])).toBe(false);
     }
   });

@@ -1,5 +1,5 @@
 import { canAccessNav } from '../../lib/navAccess.js';
-import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, Wallet, SlidersHorizontal, Shield, Sliders, X, TrendingUp } from 'lucide-react';
+import { Building2, BookOpen, LogOut, Layers, UserCheck, Users, Settings, Network, Boxes, ShoppingBag, Wallet, Truck, SlidersHorizontal, Shield, Sliders, X, TrendingUp } from 'lucide-react';
 import { displayRoleLabel } from './roleLabels.js';
 
 type NavKey =
@@ -14,6 +14,7 @@ type NavKey =
   | 'company_settings'
   | 'custom_fields'
   | 'org_units'
+  | 'fleet'
   | 'config_platform'
   | 'config_definitions';
 
@@ -181,6 +182,20 @@ export function AppSidebar({
             <Wallet className="w-4 h-4 shrink-0" />
             <span>الخزينة والعهد</span>
           </button>
+        )}
+
+        {canAccessNav('fleet', userRole, permissions) && (
+        <button
+          onClick={() => onNavigate('fleet')}
+          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+            activeNav === 'fleet'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 border border-indigo-500/30'
+              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+          }`}
+        >
+          <Truck className="w-4 h-4 shrink-0" />
+          <span>الأسطول</span>
+        </button>
         )}
 
         {canAccessNav('users', userRole, permissions) && (

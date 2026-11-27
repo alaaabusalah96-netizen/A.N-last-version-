@@ -28,6 +28,11 @@ const PurchasingWorkspace = lazy(() =>
 const SalesWorkspace = lazy(() =>
   import('./components/sales/SalesWorkspace.js').then((m) => ({ default: m.SalesWorkspace }))
 );
+const FleetWorkspace = lazy(() =>
+  import('./components/fleet/FleetWorkspace.js').then((m) => ({
+    default: m.FleetWorkspace,
+  }))
+);
 const CashCustodyWorkspace = lazy(() =>
   import('./components/cash/CashCustodyWorkspace.js').then((m) => ({
     default: m.CashCustodyWorkspace,
@@ -77,7 +82,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'sales' | 'cash' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'sales' | 'cash' | 'fleet' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     return window.matchMedia('(min-width: 1024px)').matches;
@@ -128,14 +133,14 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     if (canAccessNav(activeNav, currentUser.role, currentUser.permissions)) return;
-    const order: Array<typeof activeNav> = ['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'];
+    const order: Array<typeof activeNav> = ['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'];
     const first = order.find((k) => canAccessNav(k, currentUser.role, currentUser.permissions));
     if (first) setActiveNav(first);
   }, [currentUser, activeNav]);
 
   const noSectionAllowed =
     !!currentUser &&
-    !(['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'] as const).some((k) =>
+    !(['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'] as const).some((k) =>
       canAccessNav(k, currentUser.role, currentUser.permissions)
     );
 
@@ -227,6 +232,8 @@ export default function App() {
                 ? 'المبيعات'
                 : activeNav === 'cash'
                 ? 'الخزينة والعهد'
+                : activeNav === 'fleet'
+                ? 'الأسطول'
                 : activeNav === 'users'
                 ? 'المستخدمون'
                 : activeNav === 'roles'
@@ -254,6 +261,8 @@ export default function App() {
                 ? 'العملاء وأذون التسليم وفواتير المبيعات والتحصيل وأعمار الديون'
                 : activeNav === 'cash'
                 ? 'إدارة الصناديق النقدية وعهد الموظفين والأرصدة المفتوحة'
+                : activeNav === 'fleet'
+                ? 'المركبات والسائقون وحالتهم'
                 : activeNav === 'users'
                 ? 'إدارة الحسابات وصلاحيات الوصول'
                 : activeNav === 'roles'
@@ -301,6 +310,8 @@ export default function App() {
               <SalesWorkspace userRole={currentUser.role} />
             ) : activeNav === 'cash' ? (
               <CashCustodyWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
+            ) : activeNav === 'fleet' ? (
+              <FleetWorkspace userRole={currentUser.role} permissions={currentUser.permissions || []} />
             ) : activeNav === 'users' ? (
               <UsersAdminWorkspace userRole={currentUser.role} />
             ) : activeNav === 'roles' ? (
