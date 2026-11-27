@@ -225,6 +225,11 @@
     "reason": "Per-company write-once stops of a fleet trip (no update, no delete)"
   },
   {
+    "table": "fleet_trip_positions",
+    "scope": "tenant",
+    "reason": "Per-company write-once GPS positions a driver records during a running fleet trip (no update, no delete)"
+  },
+  {
     "table": "fleet_expense_categories",
     "scope": "tenant",
     "reason": "Per-company fleet expense categories mapped to a configurable expense account"

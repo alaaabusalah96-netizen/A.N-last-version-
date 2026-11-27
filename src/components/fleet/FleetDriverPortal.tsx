@@ -13,6 +13,16 @@ const TRIP_AR: Record<string, string> = { dispatched: 'جاهزة للانطلا
 const EXP_AR: Record<string, string> = { draft: 'بانتظار الاعتماد', approved: 'معتمد', rejected: 'مرفوض', posted: 'مرحّل', reversed: 'معكوس' };
 const money = (n: number) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt = (iso: string) => new Date(iso).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' });
+const sharePos = (companyId: string, tripId: string): Promise<string> => new Promise((resolve) => {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) { resolve('المتصفح لا يدعم تحديد الموقع'); return; }
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    try {
+      const res = await apiFetch(`/api/fleet/my/trips/${tripId}/positions`, { method: 'POST', body: JSON.stringify({ companyId, latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracyM: pos.coords.accuracy, recordedAt: new Date(pos.timestamp).toISOString() }) });
+      const d = await res.json().catch(() => ({}));
+      resolve(res.ok ? '' : (d.message || d.error || 'تعذر تسجيل الموقع'));
+    } catch { resolve('تعذر تسجيل الموقع'); }
+  }, (err) => resolve(err.code === 1 ? 'لم تسمح للمتصفح بتحديد موقعك' : 'تعذر تحديد الموقع'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
+});
 const today = () => new Date().toISOString().slice(0, 10);
 
 type Dialog = { kind: 'start' | 'complete'; trip: MyTrip } | { kind: 'expense'; trip: MyTrip } | null;
@@ -30,6 +40,7 @@ export function FleetDriverPortal({ companyId }: { companyId: string }) {
   const [dlg, setDlg] = useState<Dialog>(null);
   const [f, setF] = useState<Record<string, string>>({});
 
+  const [auto, setAuto] = useState(false);
   const q = `companyId=${encodeURIComponent(companyId)}`;
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -48,6 +59,19 @@ export function FleetDriverPortal({ companyId }: { companyId: string }) {
   }, [companyId, q]);
   useEffect(() => { void load(); }, [load]);
 
+  const sendPos = async (tripId: string, manual: boolean) => {
+    const err = await sharePos(companyId, tripId);
+    if (err) { if (manual) setError(err); } else if (manual) { setError(null); setSuccess('تم تسجيل موقعك'); }
+  };
+  useEffect(() => {
+    if (!auto) return;
+    const running = trips.filter((t) => t.status === 'in_progress').map((t) => t.id);
+    if (running.length === 0) return;
+    const go = () => { for (const id of running) void sharePos(companyId, id); };
+    go();
+    const h = setInterval(go, 30000);
+    return () => clearInterval(h);
+  }, [auto, trips, companyId]);
   const send = async (url: string, body: Record<string, unknown>, fallback: string) => {
     const res = await apiFetch(url, { method: 'POST', body: JSON.stringify({ companyId, ...body }) });
     const data = await res.json().catch(() => ({}));
@@ -85,6 +109,12 @@ export function FleetDriverPortal({ companyId }: { companyId: string }) {
       {success && <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-300">{success}</div>}
       {loading && <p className="text-xs text-slate-500">جار التحميل...</p>}
 
+      {trips.some((t) => t.status === 'in_progress') && (
+        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer" data-testid="my-auto-share">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          <span>مشاركة موقعي تلقائياً كل 30 ثانية أثناء الرحلة (والصفحة مفتوحة). يمكنك إيقافها في أي وقت.</span>
+        </label>
+      )}
       <div className="space-y-3" data-testid="my-trips">
         {trips.length === 0 && !loading && !error && <p className="text-xs text-slate-500">لا توجد رحلات مسندة إليك حاليا</p>}
         {trips.map((t) => (
@@ -100,6 +130,7 @@ export function FleetDriverPortal({ companyId }: { companyId: string }) {
             <div className="flex flex-wrap gap-2 pt-1">
               {t.status === 'dispatched' && <button type="button" data-testid="my-trip-start" onClick={() => open({ kind: 'start', trip: t })} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold cursor-pointer">بدء الرحلة</button>}
               {t.status === 'in_progress' && <button type="button" data-testid="my-trip-complete" onClick={() => open({ kind: 'complete', trip: t })} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold cursor-pointer">إنهاء الرحلة</button>}
+              {t.status === 'in_progress' && <button type="button" data-testid="my-trip-position" onClick={() => void sendPos(t.id, true)} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold cursor-pointer">تسجيل موقعي الآن</button>}
               <button type="button" data-testid="my-trip-expense" onClick={() => open({ kind: 'expense', trip: t })} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-100 text-xs font-bold cursor-pointer">تسجيل مصروف</button>
             </div>
           </div>

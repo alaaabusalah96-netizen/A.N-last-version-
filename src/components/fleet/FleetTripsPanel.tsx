@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { FleetTripTrack } from './FleetTripTrack.js';
 import { Plus, X, MapPin, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 
@@ -46,6 +47,7 @@ export function FleetTripsPanel({ companyId, vehicles, drivers, units, can, onCh
   const canCreate = can('fleet:trip:create');
   const canApprove = can('fleet:trip:approve');
   const canDispatch = can('fleet:trip:dispatch');
+  const canTrack = can('fleet:track:read');
   const vLabel = (id: string) => { const v = vehicles.find((x) => x.id === id); return v ? `${v.code} (${v.plateNo})` : '-'; };
   const dLabel = (id: string) => drivers.find((x) => x.id === id)?.fullName || '-';
 
@@ -206,6 +208,9 @@ export function FleetTripsPanel({ companyId, vehicles, drivers, units, can, onCh
                           {t.cancelReason && <div className="text-red-300">سبب الإلغاء: {t.cancelReason}</div>}
                           {t.notes && <div>ملاحظات: {t.notes}</div>}
                         </div>
+                        {canTrack && ['in_progress', 'completed'].includes(t.status) && (
+                          <div className="space-y-1"><div className="text-slate-400">المسار (GPS)</div><FleetTripTrack companyId={companyId} tripId={t.id} /></div>
+                        )}
                       </div>
                     </td></tr>
                   )}

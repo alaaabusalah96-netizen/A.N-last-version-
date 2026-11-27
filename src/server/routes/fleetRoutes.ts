@@ -3,6 +3,7 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultFleetService } from '../fleet/fleetService.js';
 import { defaultFleetTripService } from '../fleet/fleetTripService.js';
+import { defaultFleetTrackService } from '../fleet/fleetTrackService.js';
 import { defaultFleetDriverPortalService } from '../fleet/fleetDriverPortalService.js';
 import { defaultFleetExpenseService } from '../fleet/fleetExpenseService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
@@ -186,6 +187,16 @@ fleetRoutes.post('/my/trips/:id/expenses', requireAuth, wrap(async (req: Authent
   const companyId = cid(req);
   await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
   res.status(201).json({ status: 'ok', expense: await defaultFleetDriverPortalService.logMyExpense(companyId, req.user!.id, req.params.id, req.body || {}) });
+}));
+fleetRoutes.post('/my/trips/:id/positions', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_DRIVER_SELF, companyId);
+  res.status(201).json({ status: 'ok', position: await defaultFleetDriverPortalService.logMyPosition(companyId, req.user!.id, req.params.id, req.body || {}) });
+}));
+fleetRoutes.get('/trips/:id/track', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_TRACK_READ, companyId);
+  res.json({ status: 'ok', ...(await defaultFleetTrackService.tripTrack(companyId, req.params.id)) });
 }));
 fleetRoutes.get('/my/expenses', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
   const companyId = cid(req);

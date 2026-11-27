@@ -4,6 +4,7 @@ import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors.j
 import { isUuid } from '../http/validators.js';
 import { defaultFleetTripService, TripView } from './fleetTripService.js';
 import { defaultFleetExpenseService, ExpenseView } from './fleetExpenseService.js';
+import { defaultFleetTrackService } from './fleetTrackService.js';
 
 /** Trips a driver may see in the portal: dispatched (ready to start), running, and finished. Drafts, approvals and cancelled trips are office matters. */
 export const DRIVER_VISIBLE_TRIP_STATUSES = ['dispatched', 'in_progress', 'completed'] as const;
@@ -75,6 +76,14 @@ export class FleetDriverPortalService {
         vehicleId: t.vehicleId, tripId, categoryId: input?.categoryId, expenseDate: input?.expenseDate, amount: input?.amount,
         description: input?.description, referenceNo: input?.referenceNo,
       }, userId);
+    });
+  }
+
+  /** Driver reports a GPS point on their own running trip. */
+  async logMyPosition(companyId: string, userId: string, tripId: string, input: Record<string, unknown>): Promise<{ id: string }> {
+    return await withTenantTransaction(companyId, async (tx) => {
+      const d = await this.driverOf(companyId, userId, tx);
+      return await defaultFleetTrackService.recordPosition(companyId, d.id, tripId, input || {}, tx);
     });
   }
 
