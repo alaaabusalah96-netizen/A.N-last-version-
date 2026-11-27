@@ -215,6 +215,16 @@
     "reason": "Per-company fleet drivers master (status-based, no delete)"
   },
   {
+    "table": "fleet_trips",
+    "scope": "tenant",
+    "reason": "Per-company fleet trips with approval workflow (status-based, no delete)"
+  },
+  {
+    "table": "fleet_trip_stops",
+    "scope": "tenant",
+    "reason": "Per-company write-once stops of a fleet trip (no update, no delete)"
+  },
+  {
     "table": "custody_limit_policies",
     "scope": "tenant",
     "reason": "Per-company or per-employee versioned ceiling on custody held at one time (append-only)"

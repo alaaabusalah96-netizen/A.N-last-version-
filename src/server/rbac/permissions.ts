@@ -69,6 +69,9 @@ export const PERMISSIONS = {
   // Fleet (الأسطول)
   FLEET_READ: 'fleet:read',
   FLEET_MANAGE: 'fleet:manage',
+  FLEET_TRIP_CREATE: 'fleet:trip:create',
+  FLEET_TRIP_APPROVE: 'fleet:trip:approve',
+  FLEET_TRIP_DISPATCH: 'fleet:trip:dispatch',
 
   // Sales Revenue Cycle (المبيعات ودورة الإيرادات)
   SALES_READ: 'sales:read',
@@ -150,6 +153,9 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
   // الأسطول
   { code: PERMISSIONS.FLEET_READ, labelAr: 'عرض المركبات والسائقين', group: 'الأسطول' },
   { code: PERMISSIONS.FLEET_MANAGE, labelAr: 'إدارة المركبات والسائقين (إضافة وتعديل وتغيير الحالة)', group: 'الأسطول' },
+  { code: PERMISSIONS.FLEET_TRIP_CREATE, labelAr: 'إنشاء طلبات الرحلات', group: 'الأسطول' },
+  { code: PERMISSIONS.FLEET_TRIP_APPROVE, labelAr: 'اعتماد أو رفض الرحلات', group: 'الأسطول' },
+  { code: PERMISSIONS.FLEET_TRIP_DISPATCH, labelAr: 'إرسال الرحلات وتشغيلها وإنهاؤها وإلغاؤها', group: 'الأسطول' },
 
   // المبيعات
   { code: PERMISSIONS.SALES_READ, labelAr: 'عرض العملاء وأذون التسليم والفواتير والتحصيلات', group: 'المبيعات' },
