@@ -3,6 +3,7 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultFleetService } from '../fleet/fleetService.js';
 import { defaultFleetTripService } from '../fleet/fleetTripService.js';
+import { defaultFleetExpenseService } from '../fleet/fleetExpenseService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -97,4 +98,58 @@ fleetRoutes.post('/trips/:id/cancel', requireAuth, wrap(async (req: Authenticate
   const companyId = cid(req);
   await assertFleetPermission(req.user!, PERMISSIONS.FLEET_TRIP_DISPATCH, companyId);
   res.json({ status: 'ok', trip: await defaultFleetTripService.cancelTrip(companyId, req.params.id, req.body?.reason, req.user!.id) });
+}));
+
+// Phase (c1): expenses and accounting link
+const isAdmin = (req: AuthenticatedRequest) => req.user!.role === 'platform_admin';
+fleetRoutes.get('/expense-categories', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_READ, companyId);
+  res.json({ status: 'ok', categories: await defaultFleetExpenseService.listCategories(companyId) });
+}));
+fleetRoutes.post('/expense-categories', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_CREATE, companyId);
+  res.status(201).json({ status: 'ok', category: await defaultFleetExpenseService.createCategory(companyId, req.body || {}, req.user!.id) });
+}));
+fleetRoutes.patch('/expense-categories/:id', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_CREATE, companyId);
+  res.json({ status: 'ok', category: await defaultFleetExpenseService.updateCategory(companyId, req.params.id, req.body || {}, req.user!.id) });
+}));
+fleetRoutes.get('/expenses', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_READ, companyId);
+  res.json({ status: 'ok', expenses: await defaultFleetExpenseService.listExpenses(companyId, {
+    status: (req.query.status as string) || undefined, vehicleId: (req.query.vehicleId as string) || undefined, tripId: (req.query.tripId as string) || undefined }) });
+}));
+fleetRoutes.get('/expenses/:id', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_READ, companyId);
+  res.json({ status: 'ok', expense: await defaultFleetExpenseService.getExpense(companyId, req.params.id) });
+}));
+fleetRoutes.post('/expenses', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_CREATE, companyId);
+  res.status(201).json({ status: 'ok', expense: await defaultFleetExpenseService.createExpense(companyId, req.body || {}, req.user!.id) });
+}));
+fleetRoutes.post('/expenses/:id/approve', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_APPROVE, companyId);
+  res.json({ status: 'ok', expense: await defaultFleetExpenseService.approveExpense(companyId, req.params.id, req.user!.id) });
+}));
+fleetRoutes.post('/expenses/:id/reject', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_APPROVE, companyId);
+  res.json({ status: 'ok', expense: await defaultFleetExpenseService.rejectExpense(companyId, req.params.id, req.body?.reason, req.user!.id) });
+}));
+fleetRoutes.post('/expenses/:id/post', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_POST, companyId);
+  res.json({ status: 'ok', expense: await defaultFleetExpenseService.postExpense(companyId, req.params.id, req.body?.counterAccountId, req.user!.id, isAdmin(req)) });
+}));
+fleetRoutes.post('/expenses/:id/reverse', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_EXPENSE_POST, companyId);
+  res.json({ status: 'ok', expense: await defaultFleetExpenseService.reverseExpense(companyId, req.params.id, req.body?.reason, req.user!.id, isAdmin(req)) });
 }));

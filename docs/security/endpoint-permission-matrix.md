@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 259
+- **Total Mounted Endpoints**: 269
 - **Mounted Route Modules Parsed**: 18
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 251
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 261
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -156,6 +156,16 @@
 | `/api/fleet` | `GET` | `/api/fleet/drivers` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/drivers` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `PATCH` | `/api/fleet/drivers/:id` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/expense-categories` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/expense-categories` | `true` | `PERMISSIONS.FLEET_EXPENSE_CREATE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `PATCH` | `/api/fleet/expense-categories/:id` | `true` | `PERMISSIONS.FLEET_EXPENSE_CREATE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/expenses` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/expenses` | `true` | `PERMISSIONS.FLEET_EXPENSE_CREATE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/expenses/:id` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/expenses/:id/approve` | `true` | `PERMISSIONS.FLEET_EXPENSE_APPROVE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/expenses/:id/post` | `true` | `PERMISSIONS.FLEET_EXPENSE_POST` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/expenses/:id/reject` | `true` | `PERMISSIONS.FLEET_EXPENSE_APPROVE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/expenses/:id/reverse` | `true` | `PERMISSIONS.FLEET_EXPENSE_POST` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/trips` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/trips` | `true` | `PERMISSIONS.FLEET_TRIP_CREATE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/trips/:id` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
