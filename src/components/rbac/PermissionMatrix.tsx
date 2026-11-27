@@ -255,6 +255,13 @@ export function PermissionMatrix({
         </div>
       </div>
 
+      {selectedPerms.size > 0 && !selectedPerms.has('company:read') && (
+        <div role="note" data-testid="company-read-warning" className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-amber-300 text-xs flex items-center gap-2">
+          <Lock className="w-4 h-4 shrink-0 text-amber-400" />
+          <span>تنبيه: هذا الدور بدون صلاحية «قراءة الشركة» (company:read). المستخدم لن يرى أي شركة في الوحدات، فلن يعمل له أي شيء. أضفها لأي دور مخصص.</span>
+        </div>
+      )}
+
       {currentRole?.isSystem && userRole !== 'platform_admin' && (
         <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-amber-300 text-xs flex items-center gap-2">
           <Lock className="w-4 h-4 shrink-0 text-amber-400" />
