@@ -30,5 +30,11 @@ check('F12', 'create/approve/dispatch actions are gated by fleet:trip:* permissi
 check('F13', 'a trip needs two stops in the form and reject/cancel need a reason', tp.includes('محطتين على الأقل') && tp.includes('السبب مطلوب'));
 check('F14', 'every action asks for confirmation, start/complete need the odometer, dialog has close X', tp.includes('fleet-trip-confirm') && tp.includes('قراءة العداد') && tp.includes('aria-label="إغلاق"'));
 check('F15', 'trip statuses are shown in Arabic', ['مسودة', 'معتمدة', 'مرفوضة', 'جارية', 'مكتملة', 'ملغاة'].every((w) => tp.includes(w)));
+
+const ep = read('src/components/fleet/FleetExpensesPanel.tsx');
+check('F16', 'expenses tab uses only /api/fleet/expenses and categories endpoints, offers no delete, and is wired into the workspace', ep.includes('/api/fleet/expenses') && ep.includes('/api/fleet/expense-categories') && !/method:\s*'DELETE'/.test(ep) && ws.includes('<FleetExpensesPanel'));
+check('F17', 'create/approve/post actions are gated by fleet:expense:* permissions', ep.includes("can('fleet:expense:create')") && ep.includes("can('fleet:expense:approve')") && ep.includes("can('fleet:expense:post')") && ep.includes('if (!canCreate) return'));
+check('F18', 'posting asks the user to choose the counter account (no hard-coded account), reject/reverse need a reason, confirmation dialog on every action', ep.includes('counterAccountId') && ep.includes('اختر الحساب المقابل') && ep.includes('السبب مطلوب') && ep.includes('fleet-expense-confirm'));
+check('F19', 'expense statuses are shown in Arabic and dialogs have a close button', ['مسودة', 'معتمد', 'مرفوض', 'مرحّل', 'معكوس'].every((w) => ep.includes(w)) && ep.includes('aria-label="إغلاق"'));
 if (failed > 0) { console.log(`[FAIL] ${failed} check(s) failed`); process.exit(1); }
-console.log('[PASS] verifyFleetUi1: 15/15');
+console.log('[PASS] verifyFleetUi1: 19/19');
