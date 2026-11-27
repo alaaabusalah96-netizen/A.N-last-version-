@@ -3,6 +3,7 @@ import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultFleetService } from '../fleet/fleetService.js';
 import { defaultFleetTripService } from '../fleet/fleetTripService.js';
+import { defaultFleetMaintenanceService } from '../fleet/fleetMaintenanceService.js';
 import { defaultFleetTrackService } from '../fleet/fleetTrackService.js';
 import { defaultFleetDriverPortalService } from '../fleet/fleetDriverPortalService.js';
 import { defaultFleetExpenseService } from '../fleet/fleetExpenseService.js';
@@ -197,6 +198,26 @@ fleetRoutes.get('/trips/:id/track', requireAuth, wrap(async (req: AuthenticatedR
   const companyId = cid(req);
   await assertFleetPermission(req.user!, PERMISSIONS.FLEET_TRACK_READ, companyId);
   res.json({ status: 'ok', ...(await defaultFleetTrackService.tripTrack(companyId, req.params.id)) });
+}));
+fleetRoutes.get('/maintenance/due', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_READ, companyId);
+  res.json({ status: 'ok', ...(await defaultFleetMaintenanceService.due(companyId, { soonDays: req.query.soonDays, soonKm: req.query.soonKm })) });
+}));
+fleetRoutes.get('/vehicles/:id/maintenance', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_READ, companyId);
+  res.json({ status: 'ok', records: await defaultFleetMaintenanceService.listForVehicle(companyId, req.params.id) });
+}));
+fleetRoutes.post('/vehicles/:id/maintenance', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_MANAGE, companyId);
+  res.status(201).json({ status: 'ok', record: await defaultFleetMaintenanceService.create(companyId, req.params.id, req.body || {}, req.user!.id) });
+}));
+fleetRoutes.post('/maintenance/:id/void', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
+  const companyId = cid(req);
+  await assertFleetPermission(req.user!, PERMISSIONS.FLEET_MANAGE, companyId);
+  res.json({ status: 'ok', record: await defaultFleetMaintenanceService.void(companyId, req.params.id, req.body?.reason) });
 }));
 fleetRoutes.get('/my/expenses', requireAuth, wrap(async (req: AuthenticatedRequest, res: Response) => {
   const companyId = cid(req);

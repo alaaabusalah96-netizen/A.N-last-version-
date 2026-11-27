@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 279
+- **Total Mounted Endpoints**: 283
 - **Mounted Route Modules Parsed**: 18
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 271
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 275
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -167,6 +167,8 @@
 | `/api/fleet` | `POST` | `/api/fleet/expenses/:id/post` | `true` | `PERMISSIONS.FLEET_EXPENSE_POST` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/expenses/:id/reject` | `true` | `PERMISSIONS.FLEET_EXPENSE_APPROVE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/expenses/:id/reverse` | `true` | `PERMISSIONS.FLEET_EXPENSE_POST` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/maintenance/:id/void` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/maintenance/due` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/my/expense-categories` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/my/expenses` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/my/profile` | `true` | `PERMISSIONS.FLEET_DRIVER_SELF` | `src/server/routes/fleetRoutes.ts` |
@@ -188,6 +190,8 @@
 | `/api/fleet` | `GET` | `/api/fleet/vehicles` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/vehicles` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `PATCH` | `/api/fleet/vehicles/:id` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `GET` | `/api/fleet/vehicles/:id/maintenance` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
+| `/api/fleet` | `POST` | `/api/fleet/vehicles/:id/maintenance` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/adjustments` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/balances` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/cost-adjustments` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |

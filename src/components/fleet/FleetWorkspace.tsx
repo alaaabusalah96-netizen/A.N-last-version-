@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Truck, UserRound, Plus, RefreshCw, Building2, X, Search, AlertTriangle, Route, Wallet } from 'lucide-react';
+import { Truck, UserRound, Plus, RefreshCw, Building2, X, Search, AlertTriangle, Route, Wallet, Wrench } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { FleetTripsPanel } from './FleetTripsPanel.js';
 import { FleetExpensesPanel } from './FleetExpensesPanel.js';
+import { FleetMaintenancePanel } from './FleetMaintenancePanel.js';
 import { FleetDriverPortal } from './FleetDriverPortal.js';
 
 interface Company { id: string; code: string; nameAr: string }
@@ -29,7 +30,7 @@ interface FleetWorkspaceProps { userRole?: string; permissions?: string[] }
 export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
-  const [tab, setTab] = useState<'vehicles' | 'drivers' | 'trips' | 'expenses' | 'mine'>('vehicles');
+  const [tab, setTab] = useState<'vehicles' | 'drivers' | 'trips' | 'expenses' | 'maintenance' | 'mine'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [units, setUnits] = useState<OrgUnit[]>([]);
@@ -189,7 +190,7 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
       </div>
 
       <div role="tablist" className="flex gap-2">
-        {([['vehicles', 'المركبات', Truck], ['drivers', 'السائقون', UserRound], ['trips', 'الرحلات', Route], ['expenses', 'المصروفات', Wallet], ['mine', 'رحلاتي', Route]] as const)
+        {([['vehicles', 'المركبات', Truck], ['drivers', 'السائقون', UserRound], ['trips', 'الرحلات', Route], ['expenses', 'المصروفات', Wallet], ['maintenance', 'الصيانة', Wrench], ['mine', 'رحلاتي', Route]] as const)
           .filter(([k]) => (k === 'mine' ? hasPortal : hasOffice)).map(([k, label, Icon]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setShowForm(false); }}
             className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold cursor-pointer ${tab === k ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300 border border-slate-800'}`}>
@@ -205,6 +206,10 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
 
       {tab === 'expenses' && hasOffice && (
         <FleetExpensesPanel companyId={companyId} vehicles={vehicles} can={can} />
+      )}
+
+      {tab === 'maintenance' && hasOffice && (
+        <FleetMaintenancePanel companyId={companyId} vehicles={vehicles} can={can} />
       )}
 
       {tab === 'trips' && hasOffice && (
