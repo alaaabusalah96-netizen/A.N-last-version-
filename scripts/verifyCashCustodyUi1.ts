@@ -537,7 +537,7 @@ async function installSessionShim(page: any, getProfile: () => ShimProfile) {
     if (pathname.endsWith('/custom-fields')) {
       return json({ status: 'ok', fields: [] });
     }
-    if (pathname === '/api/accounting/accounts') {
+    if (pathname === '/api/accounting/accounts' || pathname === '/api/cash/accounts') {
       return json({ status: 'ok', accounts });
     }
     if (pathname === '/api/accounting/journals') {

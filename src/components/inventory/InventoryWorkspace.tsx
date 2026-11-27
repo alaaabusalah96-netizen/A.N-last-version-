@@ -122,6 +122,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [documentInitialType, setDocumentInitialType] = useState<'receipt' | 'issue' | 'adjustment' | 'transfer'>('issue');
 
   // Form states
   const [whCode, setWhCode] = useState('');
@@ -566,7 +567,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
               </button>
 
               <button
-                onClick={() => setShowIssueModal(true)}
+                onClick={() => { setDocumentInitialType('issue'); setShowDocumentModal(true); }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-600/20 transition cursor-pointer"
               >
                 <TrendingDown className="w-3.5 h-3.5" />
@@ -582,7 +583,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
               </button>
 
               <button
-                onClick={() => setShowTransferModal(true)}
+                onClick={() => { setDocumentInitialType('transfer'); setShowDocumentModal(true); }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
@@ -590,7 +591,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
               </button>
 
               <button
-                onClick={() => setShowDocumentModal(true)}
+                onClick={() => { setDocumentInitialType('issue'); setShowDocumentModal(true); }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl shadow-lg transition cursor-pointer"
               >
                 <FileText className="w-3.5 h-3.5" />
@@ -1146,6 +1147,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
           companyId={selectedCompanyId}
           warehouses={warehouses}
           items={items}
+          initialType={documentInitialType}
           onClose={() => setShowDocumentModal(false)}
           onDone={async (message) => {
             setShowDocumentModal(false);

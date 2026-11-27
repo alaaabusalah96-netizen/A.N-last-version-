@@ -170,6 +170,8 @@
     "test:fleet-driver-1": "tsx scripts/verifyFleetDriver1.ts",
     "test:fleet-gps-1": "tsx scripts/verifyFleetGps1.ts",
     "test:fleet-maintenance-1": "tsx scripts/verifyFleetMaintenance1.ts",
+    "test:cash-pickers-1": "tsx scripts/verifyCashPickers1.ts",
+    "test:stock-doc-ui-1": "tsx scripts/verifyStockDocUi1.ts",
     "test:fleet-ui-1": "tsx scripts/verifyFleetUi1.ts",
     "test:custody-period-lock-1": "tsx scripts/verifyCustodyPeriodLock1.ts",
     "test:custody-org-units-1": "tsx scripts/verifyCustodyOrgUnits1.ts",

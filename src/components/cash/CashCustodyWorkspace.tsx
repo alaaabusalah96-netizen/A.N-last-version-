@@ -307,7 +307,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
     if (!selectedCompanyId) return;
     (async () => {
       try {
-        const r = await apiFetch(`/api/accounting/journals/org-units?companyId=${encodeURIComponent(selectedCompanyId)}`);
+        const r = await apiFetch(`/api/cash/org-units?companyId=${encodeURIComponent(selectedCompanyId)}`);
         if (!r.ok) return;
         const d = await r.json().catch(() => ({}));
         if (alive) setOrgUnits(((d.units || d.orgUnits || []) as any[]).filter((u) => u.isActive !== false));
@@ -417,7 +417,7 @@ export function CashCustodyWorkspace({ userRole, permissions }: CashCustodyWorks
         apiFetch(`/api/cash/registers?companyId=${encodeURIComponent(selectedCompanyId)}`),
         apiFetch(`/api/cash/custodies?${custodyParams.toString()}`),
         apiFetch(`/api/cash/reports/open-custodies?companyId=${encodeURIComponent(selectedCompanyId)}`),
-        apiFetch(`/api/accounting/accounts?companyId=${encodeURIComponent(selectedCompanyId)}`),
+        apiFetch(`/api/cash/accounts?companyId=${encodeURIComponent(selectedCompanyId)}`),
         apiFetch(`/api/cash/receipt-vouchers?companyId=${encodeURIComponent(selectedCompanyId)}`),
         apiFetch(`/api/cash/payment-vouchers?companyId=${encodeURIComponent(selectedCompanyId)}`),
       ];

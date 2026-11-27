@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 283
+- **Total Mounted Endpoints**: 285
 - **Mounted Route Modules Parsed**: 18
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 275
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 277
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -53,6 +53,7 @@
 | `/api/banking` | `POST` | `/api/banking/accounts/:id/statement-lines` | `true` | `PERMISSIONS.BANKING_WRITE` | `src/server/routes/bankingRoutes.ts` |
 | `/api/banking` | `POST` | `/api/banking/accounts/:id/statement-lines/:lineId/match` | `true` | `PERMISSIONS.BANKING_RECONCILE` | `src/server/routes/bankingRoutes.ts` |
 | `/api/banking` | `POST` | `/api/banking/accounts/:id/statement-lines/:lineId/unmatch` | `true` | `PERMISSIONS.BANKING_RECONCILE` | `src/server/routes/bankingRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/accounts` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custodies` | `true` | `PERMISSIONS.CUSTODY_REQUEST` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/custodies/:id` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
@@ -82,6 +83,7 @@
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/approve` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/reject` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/custody-vouchers/:id/reverse` | `true` | `PERMISSIONS.CUSTODY_APPROVE` | `src/server/routes/cashRoutes.ts` |
+| `/api/cash` | `GET` | `/api/cash/org-units` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/payment-vouchers` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `POST` | `/api/cash/payment-vouchers` | `true` | `PERMISSIONS.CASH_WRITE` | `src/server/routes/cashRoutes.ts` |
 | `/api/cash` | `GET` | `/api/cash/payment-vouchers/:id` | `true` | `PERMISSIONS.CASH_READ` | `src/server/routes/cashRoutes.ts` |

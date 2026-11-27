@@ -11,6 +11,8 @@ import { defaultVoucherService } from '../cash/voucherService.js';
 import { CustodyStatus } from '../cash/cashTypes.js';
 import { VoucherStatus } from '../cash/voucherTypes.js';
 import { defaultOrgUnitService } from '../org/orgUnitService.js';
+import { defaultAccountService } from '../accounting/accountService.js';
+import { buildReservedRoleResolver } from '../accounting/reservedRoleAccounts.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -58,6 +60,44 @@ async function assertCustodyUnitAccess(
     throw new ForbiddenError('ليس لديك صلاحية على الوحدة التنظيمية الخاصة بهذه العهدة');
   }
 }
+
+// Pickers for the cash screens. Scoped to cash:read so a treasurer does not need accounting read access.
+// Minimal fields only: no balances, no parent tree, no audit columns.
+cashRoutes.get(
+  '/accounts',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const listed = await defaultAccountService.listAccounts(companyId);
+    const resolveRole = await buildReservedRoleResolver(companyId);
+    const accounts = listed.map((a: any) => ({
+      id: a.id,
+      code: a.code,
+      nameAr: a.nameAr,
+      nameEn: a.nameEn ?? null,
+      accountType: a.accountType,
+      isPostable: a.isPostable,
+      isActive: a.isActive,
+      reservedRole: resolveRole(a),
+    }));
+    res.json({ status: 'ok', accounts });
+  })
+);
+
+cashRoutes.get(
+  '/org-units',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertCashPermission(user, PERMISSIONS.CASH_READ, companyId);
+    const all = await defaultOrgUnitService.listAccessibleUnits(companyId, user.id, user.role === 'platform_admin');
+    const units = (all as any[]).map((u) => ({ id: u.id, code: u.code, nameAr: u.nameAr, isActive: u.isActive }));
+    res.json({ status: 'ok', units });
+  })
+);
 
 // ============================================================================
 // Cash Registers (الصناديق / الخزائن)
