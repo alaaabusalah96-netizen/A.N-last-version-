@@ -177,6 +177,61 @@ const PO_STATUS_STYLES: Record<PoStatus, string> = {
   cancelled: 'bg-rose-950/60 border border-rose-800/80 text-rose-300',
 };
 
+const PaymentLineRow = React.memo(function PaymentLineRow({
+  ln, idx, opts, canRemove, onInvoice, onAmount, onRemove,
+}: {
+  ln: { invoiceId: string; amount: string };
+  idx: number;
+  opts: any[];
+  canRemove: boolean;
+  onInvoice: (idx: number, invId: string, openAmount: number | null) => void;
+  onAmount: (idx: number, amount: string) => void;
+  onRemove: (idx: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_110px_28px] gap-2 items-center">
+      <select
+        required
+        name={`payInvoiceId-${idx}`}
+        value={ln.invoiceId}
+        onChange={(e) => {
+          const invId = e.target.value;
+          const openItem = opts.find((item) => item.invoiceId === invId);
+          onInvoice(idx, invId, openItem ? openItem.remainingOpenAmount : null);
+        }}
+        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+      >
+        <option value="">-- اختر فاتورة المورد --</option>
+        {opts.map((item) => (
+          <option key={item.invoiceId} value={item.invoiceId}>
+            فاتورة: {item.supplierInvoiceNo} | الرصيد المتبقي: {item.remainingOpenAmount.toFixed(2)}
+          </option>
+        ))}
+      </select>
+      <input
+        type="number"
+        step="0.01"
+        min="0.01"
+        required
+        name={`payAmount-${idx}`}
+        placeholder="0.00"
+        value={ln.amount}
+        onChange={(e) => onAmount(idx, e.target.value)}
+        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono tabular-nums"
+      />
+      <button
+        type="button"
+        disabled={!canRemove}
+        onClick={() => onRemove(idx)}
+        className="text-slate-400 hover:text-red-400 disabled:opacity-30 cursor-pointer"
+        aria-label="حذف السطر"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+});
+
 export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [askConfirm, confirmDialog] = useConfirm();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -293,6 +348,26 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paySupplierId, setPaySupplierId] = useState('');
   const [payLines, setPayLines] = useState<Array<{ invoiceId: string; amount: string }>>([{ invoiceId: '', amount: '' }]);
+  const payBaseOpts = React.useMemo(
+    () =>
+      (paySupplierId
+        ? apOpenItems.filter((i) => i.supplierId === paySupplierId && i.remainingOpenAmount > 0)
+        : apOpenItems.filter((i) => i.remainingOpenAmount > 0)),
+    [apOpenItems, paySupplierId]
+  );
+  const onPayInvoice = useCallback((idx: number, invId: string, openAmount: number | null) => {
+    setPayLines((prev) => prev.map((l, j) => (j === idx ? { invoiceId: invId, amount: openAmount !== null ? String(openAmount) : l.amount } : l)));
+  }, []);
+  const onPayAmount = useCallback((idx: number, amount: string) => {
+    setPayLines((prev) => prev.map((l, j) => (j === idx ? { ...l, amount } : l)));
+  }, []);
+  const onPayRemove = useCallback((idx: number) => {
+    setPayLines((prev) => prev.filter((_, j) => j !== idx));
+  }, []);
+  const payHasDuplicate = React.useMemo(() => {
+    const ids = payLines.map((l) => l.invoiceId).filter(Boolean);
+    return new Set(ids).size !== ids.length;
+  }, [payLines]);
   const [payRegisterId, setPayRegisterId] = useState('');
   const [payReference, setPayReference] = useState('');
   const [payMemo, setPayMemo] = useState('');
@@ -2695,56 +2770,22 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
               <div data-testid="supplier-payment-lines" className="flex flex-col gap-2">
                 <label className="block text-xs font-semibold text-slate-300">فواتير المورد المراد سدادها * (حتى 100 فاتورة)</label>
                 <div data-testid="payment-lines-scroll" className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-                {payLines.map((ln, idx) => {
-                  const usedElsewhere = new Set(payLines.filter((_, j) => j !== idx).map((l) => l.invoiceId));
-                  const opts = (paySupplierId
-                    ? apOpenItems.filter((i) => i.supplierId === paySupplierId && i.remainingOpenAmount > 0)
-                    : apOpenItems.filter((i) => i.remainingOpenAmount > 0)
-                  ).filter((i) => !usedElsewhere.has(i.invoiceId));
-                  return (
-                    <div key={idx} className="grid grid-cols-[1fr_110px_28px] gap-2 items-center">
-                      <select
-                        required
-                        name={`payInvoiceId-${idx}`}
-                        value={ln.invoiceId}
-                        onChange={(e) => {
-                          const invId = e.target.value;
-                          const openItem = apOpenItems.find((item) => item.invoiceId === invId);
-                          setPayLines((prev) => prev.map((l, j) => (j === idx ? { invoiceId: invId, amount: openItem ? String(openItem.remainingOpenAmount) : l.amount } : l)));
-                        }}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
-                      >
-                        <option value="">-- اختر فاتورة المورد --</option>
-                        {opts.map((item) => (
-                          <option key={item.invoiceId} value={item.invoiceId}>
-                            فاتورة: {item.supplierInvoiceNo} | الرصيد المتبقي: {item.remainingOpenAmount.toFixed(2)}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        required
-                        name={`payAmount-${idx}`}
-                        placeholder="0.00"
-                        value={ln.amount}
-                        onChange={(e) => setPayLines((prev) => prev.map((l, j) => (j === idx ? { ...l, amount: e.target.value } : l)))}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono tabular-nums"
-                      />
-                      <button
-                        type="button"
-                        disabled={payLines.length <= 1}
-                        onClick={() => setPayLines((prev) => prev.filter((_, j) => j !== idx))}
-                        className="text-slate-400 hover:text-red-400 disabled:opacity-30 cursor-pointer"
-                        aria-label="حذف السطر"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  );
-                })}
+                {payLines.map((ln, idx) => (
+                  <PaymentLineRow
+                    key={idx}
+                    ln={ln}
+                    idx={idx}
+                    opts={payBaseOpts}
+                    canRemove={payLines.length > 1}
+                    onInvoice={onPayInvoice}
+                    onAmount={onPayAmount}
+                    onRemove={onPayRemove}
+                  />
+                ))}
                 </div>
+                {payHasDuplicate && (
+                  <p data-testid="payment-duplicate-warning" className="text-xs text-red-400">نفس الفاتورة مكررة في أكثر من سطر. اختر كل فاتورة مرة واحدة.</p>
+                )}
                 <div className="flex items-center justify-between text-xs">
                   <button
                     type="button"
@@ -2813,7 +2854,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading || !paySupplierId || !payRegisterId || payLines.some((l) => !l.invoiceId || !(Number(l.amount) > 0))}
+                  disabled={actionLoading || payHasDuplicate || !paySupplierId || !payRegisterId || payLines.some((l) => !l.invoiceId || !(Number(l.amount) > 0))}
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة سند سداد'}
