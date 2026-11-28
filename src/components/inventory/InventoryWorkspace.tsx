@@ -21,6 +21,7 @@ import { InventoryValuationPanel } from './InventoryValuationPanel.js';
 import { StocktakePanel } from './StocktakePanel.js';
 import { CostCenterIssuePanel } from './CostCenterIssuePanel.js';
 import { SupplyListPanel } from './SupplyListPanel.js';
+import { GroupTransfersPanel } from './GroupTransfersPanel.js';
 import { StockDocumentModal } from './StockDocumentModal.js';
 import { EditRecordModal } from '../ui/EditRecordModal.js';
 import {
@@ -112,7 +113,7 @@ export function matchesItemSearch(searchText: string, code?: string, name?: stri
 export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake' | 'ccissues' | 'supply'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake' | 'ccissues' | 'supply' | 'grouptransfers'>('balances');
   const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -770,9 +771,24 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
           <Layers className="w-4 h-4" />
           <span>قائمة التوريد والصلاحية</span>
         </button>
+        <button
+          onClick={() => setActiveTab('grouptransfers')}
+          data-testid="tab-grouptransfers"
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'grouptransfers'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>تحويل بين الشركات</span>
+        </button>
       </div>
 
       {/* Tab Panels */}
+      {activeTab === 'grouptransfers' && (
+        <GroupTransfersPanel companyId={selectedCompanyId} />
+      )}
       {activeTab === 'supply' && (
         <SupplyListPanel companyId={selectedCompanyId} />
       )}

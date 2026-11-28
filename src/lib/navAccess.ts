@@ -34,7 +34,7 @@ const NAV_PERMISSIONS: Record<Exclude<NavKey, 'config_platform' | 'config_defini
   users: ['user:read'],
   roles: ['roles.read'],
   org_units: ['org:units:read'],
-  groups: ['company:read'],
+  groups: ['company:read', 'group:view'],
   company_settings: ['company:settings:read'],
   custom_fields: ['company:settings:read'],
 };

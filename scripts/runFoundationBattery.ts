@@ -177,6 +177,7 @@ const scripts = [
   'scripts/verifyCostCenterIssue1.ts',
   'scripts/verifyStockExpiry1.ts',
   'scripts/verifyCompanyGroups1.ts',
+  'scripts/verifyGroupTransfers1.ts',
   'scripts/verifyPurchPo1.ts',
   'scripts/verifyPurchGrnPoLink1.ts',
   'scripts/verifyPurchPoCi1.ts',

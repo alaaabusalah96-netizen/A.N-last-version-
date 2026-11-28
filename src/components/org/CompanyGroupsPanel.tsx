@@ -71,7 +71,7 @@ export function CompanyGroupsPanel({ userRole }: Props) {
             </button>
           ))}
           {isPlatformAdmin && (
-            <form className="flex flex-col gap-2 border-t border-slate-800 pt-2" onSubmit={(e) => { e.preventDefault(); act(async () => { await call('/api/groups', 'POST', { code, nameAr }); setCode(''); setNameAr(''); }); }}>
+            <form className="flex flex-col gap-2 border-t border-slate-800 pt-2" onSubmit={(e) => { e.preventDefault(); act(async () => { const r = await call('/api/groups', 'POST', { code, nameAr }); setCode(''); setNameAr(''); if (r.group?.id) setSel(r.group.id); }); }}>
               <input required value={code} onChange={(e) => setCode(e.target.value)} placeholder="كود المجموعة" className={inputCls} data-testid="group-code" />
               <input required value={nameAr} onChange={(e) => setNameAr(e.target.value)} placeholder="اسم المجموعة" className={inputCls} data-testid="group-name" />
               <button type="submit" disabled={busy} className={btnCls} data-testid="group-create"><Plus className="w-4 h-4" /> إنشاء مجموعة</button>
@@ -84,6 +84,12 @@ export function CompanyGroupsPanel({ userRole }: Props) {
             <>
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3" data-testid="group-detail">
                 <div className="text-sm font-bold text-white">{detail.nameAr} ({detail.code})</div>
+                {isPlatformAdmin && (
+                  <button disabled={busy} data-testid="group-toggle-active" className="mt-2 px-3 py-1 rounded-xl bg-slate-800 text-slate-100 text-xs cursor-pointer disabled:opacity-40"
+                    onClick={() => act(() => call(`/api/groups/${detail.id}`, 'PUT', { isActive: !detail.isActive }))}>
+                    {detail.isActive ? 'إيقاف المجموعة' : 'إعادة تفعيل المجموعة'}
+                  </button>
+                )}
                 <div className="text-xs text-slate-400 mt-1">دورك: {ROLE_AR[detail.myRole || ''] || detail.myRole}. كل شركة تحتفظ بمستودعاتها وحساباتها وقوائمها المالية.</div>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex flex-col gap-2">

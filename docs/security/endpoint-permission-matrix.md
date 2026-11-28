@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 303
-- **Mounted Route Modules Parsed**: 19
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 286
+- **Total Mounted Endpoints**: 310
+- **Mounted Route Modules Parsed**: 20
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 293
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 6
 - **Authenticated Self-Service (`requireAuth` only)**: 8
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -194,6 +194,13 @@
 | `/api/fleet` | `PATCH` | `/api/fleet/vehicles/:id` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/vehicles/:id/maintenance` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/vehicles/:id/maintenance` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/group-transfers` | `GET` | `/api/group-transfers` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/groupTransferRoutes.ts` |
+| `/api/group-transfers` | `POST` | `/api/group-transfers` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/groupTransferRoutes.ts` |
+| `/api/group-transfers` | `GET` | `/api/group-transfers/:id` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/groupTransferRoutes.ts` |
+| `/api/group-transfers` | `POST` | `/api/group-transfers/:id/receive` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/groupTransferRoutes.ts` |
+| `/api/group-transfers` | `GET` | `/api/group-transfers/accounts` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/groupTransferRoutes.ts` |
+| `/api/group-transfers` | `PUT` | `/api/group-transfers/accounts` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/groupTransferRoutes.ts` |
+| `/api/group-transfers` | `GET` | `/api/group-transfers/partners` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/groupTransferRoutes.ts` |
 | `/api/groups` | `GET` | `/api/groups` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
 | `/api/groups` | `POST` | `/api/groups` | `true` | `requirePlatformAdmin` | `src/server/routes/groupRoutes.ts` |
 | `/api/groups` | `GET` | `/api/groups/:groupId` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |

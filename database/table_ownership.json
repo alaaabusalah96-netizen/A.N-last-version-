@@ -498,5 +498,20 @@
     "table": "company_group_users",
     "scope": "global",
     "reason": "Platform-level company group catalog (groups, member companies, group users); tenant data stays under per-company RLS"
+  },
+  {
+    "table": "company_intercompany_accounts",
+    "scope": "tenant",
+    "reason": "Per-company intercompany receivable and payable control accounts"
+  },
+  {
+    "table": "group_transfers",
+    "scope": "shared",
+    "reason": "Intercompany transfer headers; access enforced by group company membership in the service"
+  },
+  {
+    "table": "group_transfer_lines",
+    "scope": "shared",
+    "reason": "Intercompany transfer lines (no company_id; reached through the transfer)"
   }
 ]

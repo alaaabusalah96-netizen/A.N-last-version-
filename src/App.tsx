@@ -103,10 +103,19 @@ export default function App() {
           baseRole !== 'platform_admin' &&
           Array.isArray(data.memberships) &&
           data.memberships.some((m: any) => m && m.isActive !== false && m.role === 'company_admin');
+        const perms: string[] = Array.isArray(data.permissions) ? [...data.permissions] : [];
+        // A user who belongs to a company group can open the groups screen even without company:read.
+        try {
+          const gRes = await apiFetch('/api/groups');
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            if (Array.isArray(gData.groups) && gData.groups.length > 0) perms.push('group:view');
+          }
+        } catch { /* groups are optional */ }
         setCurrentUser({
           ...(data.user || {}),
           role: isCompanyAdmin ? 'company_admin' : baseRole,
-          permissions: Array.isArray(data.permissions) ? data.permissions : [],
+          permissions: perms,
         });
       } else {
         setCurrentUser(null);
