@@ -18,6 +18,7 @@ import {
 import { apiFetch } from '../../lib/apiClient.js';
 import { ItemCardPanel } from './ItemCardPanel.js';
 import { InventoryValuationPanel } from './InventoryValuationPanel.js';
+import { StocktakePanel } from './StocktakePanel.js';
 import { StockDocumentModal } from './StockDocumentModal.js';
 import { EditRecordModal } from '../ui/EditRecordModal.js';
 import {
@@ -100,15 +101,22 @@ interface InventoryWorkspaceProps {
   permissions?: string[];
 }
 
+/** True when the search text is empty or appears in the item code or name (case-insensitive). */
+export function matchesItemSearch(searchText: string, code?: string, name?: string): boolean {
+  const q = (searchText || '').trim().toLowerCase();
+  return !q || (code || '').toLowerCase().includes(q) || (name || '').toLowerCase().includes(q);
+}
+
 export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake'>('balances');
   const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [searchText, setSearchText] = useState('');
   const [items, setItems] = useState<Item[]>([]);
   const [balances, setBalances] = useState<StockBalance[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -173,6 +181,12 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
   // Each action is gated by the permission the API actually requires (movement for receive/issue/transfer, valuation:adjust for adjustments).
   const canMove = isAdminRole || permissions.includes('inventory:movement');
   const canAdjust = isAdminRole || permissions.includes('inventory:valuation:adjust');
+
+  // Search by item code or name (client-side over the loaded lists).
+  const matches = (code?: string, name?: string) => matchesItemSearch(searchText, code, name);
+  const filteredBalances = balances.filter((b) => matches(b.itemCode, b.itemNameAr));
+  const filteredItems = items.filter((i) => matches(i.code, i.nameAr));
+  const filteredMovements = movements.filter((m) => matches(m.itemCode, m.itemNameAr));
 
   // Fetch companies
   useEffect(() => {
@@ -706,11 +720,47 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
           <Layers className="w-4 h-4" />
           <span>تقييم المخزون والتكلفة</span>
         </button>
+        <button
+          onClick={() => setActiveTab('stocktake')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'stocktake'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>الجرد</span>
+        </button>
       </div>
 
       {/* Tab Panels */}
+      {activeTab === 'stocktake' && (
+        <StocktakePanel companyId={selectedCompanyId} userRole={userRole} permissions={permissions} />
+      )}
       {activeTab === 'valuation' && (
         <InventoryValuationPanel companyId={selectedCompanyId} userRole={userRole} permissions={permissions} />
+      )}
+
+      {(activeTab === 'balances' || activeTab === 'items' || activeTab === 'movements') && (
+        <div className="flex items-center gap-2">
+          <input
+            type="search"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="بحث بكود الصنف أو اسمه"
+            data-testid="inventory-search"
+            className="w-full md:w-80 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+          />
+          {searchText && (
+            <button
+              type="button"
+              onClick={() => setSearchText('')}
+              className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              مسح
+            </button>
+          )}
+        </div>
       )}
 
       {activeTab === 'balances' && (
@@ -727,14 +777,14 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {balances.length === 0 ? (
+                {filteredBalances.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-slate-500">
                       لا توجد أرصدة مخزنية مسجلة حتى الآن. يمكنك استلام أصناف لإظهار الأرصدة.
                     </td>
                   </tr>
                 ) : (
-                  balances.map((b, idx) => (
+                  filteredBalances.map((b, idx) => (
                     <tr key={`${b.warehouseId}-${b.itemId}-${idx}`} className="hover:bg-slate-800/30 transition">
                       <td className="py-3.5 px-4 font-medium text-slate-200">
                         {b.warehouseNameAr} ({b.warehouseCode})
@@ -904,14 +954,14 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {items.length === 0 ? (
+                {filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-slate-500">
                       لا توجد أصناف مسجلة في دليل المنتجات حتى الآن.
                     </td>
                   </tr>
                 ) : (
-                  items.map((item) => (
+                  filteredItems.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-800/30 transition">
                       <td className="py-3.5 px-4 font-mono font-bold text-indigo-300">
                         <button
@@ -974,14 +1024,14 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
-              {movements.length === 0 ? (
+              {filteredMovements.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-500">
                     لا توجد حركات مخزنية مسجلة.
                   </td>
                 </tr>
               ) : (
-                movements.map((m) => (
+                filteredMovements.map((m) => (
                   <tr key={m.id} className="hover:bg-slate-800/30 transition">
                     <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px]">
                       {new Date(m.createdAt).toLocaleString('ar-EG')}

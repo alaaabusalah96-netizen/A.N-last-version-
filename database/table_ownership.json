@@ -473,7 +473,16 @@
     "table": "purch_price_variance_exceptions",
     "scope": "tenant",
     "reason": "Per-company purchasing price variance exception requests and approvals"
+  },
+  {
+    "table": "inv_stocktakes",
+    "scope": "tenant",
+    "reason": "Physical stocktake headers (one per warehouse count); variance is reported only, never posted"
+  },
+  {
+    "table": "inv_stocktake_lines",
+    "scope": "tenant",
+    "reason": "Stocktake lines: system quantity snapshot and counted quantity per item"
   }
 ]
-
 

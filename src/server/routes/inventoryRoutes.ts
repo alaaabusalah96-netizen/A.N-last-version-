@@ -5,6 +5,7 @@ import { defaultWarehouseService } from '../inventory/warehouseService.js';
 import { defaultItemService } from '../inventory/itemService.js';
 import { defaultStockService } from '../inventory/stockService.js';
 import { defaultStockDocumentService } from '../inventory/stockDocumentService.js';
+import { defaultStocktakeService } from '../inventory/stocktakeService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -415,5 +416,79 @@ inventoryRoutes.get(
     const job = await defaultStockDocumentService.advanceJob(companyId, req.params.jobId);
     if (!job) throw new NotFoundError('مهمة الترحيل غير موجودة');
     return res.status(200).json({ status: 'ok', job });
+  })
+);
+
+// Physical stocktake sheets: snapshot, count entry, variance report. Counting never posts to stock or the ledger.
+inventoryRoutes.get(
+  '/stocktakes',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+    return res.status(200).json({ status: 'ok', stocktakes: await defaultStocktakeService.list(companyId) });
+  })
+);
+
+inventoryRoutes.post(
+  '/stocktakes',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
+    const { warehouseId, memo, countDate } = req.body || {};
+    const stocktake = await defaultStocktakeService.create(companyId, { warehouseId, memo, countDate }, user.id);
+    return res.status(201).json({ status: 'ok', stocktake });
+  })
+);
+
+inventoryRoutes.get(
+  '/stocktakes/:id',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+    return res.status(200).json({ status: 'ok', stocktake: await defaultStocktakeService.get(companyId, req.params.id) });
+  })
+);
+
+inventoryRoutes.put(
+  '/stocktakes/:id/counts',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
+    const counts = (Array.isArray(req.body?.counts) ? req.body.counts : []).map((c: any) => ({
+      itemId: c?.itemId,
+      countedQty: c?.countedQty === null || c?.countedQty === '' || c?.countedQty === undefined ? null : Number(c.countedQty),
+    }));
+    const stocktake = await defaultStocktakeService.saveCounts(companyId, req.params.id, counts, user.id);
+    return res.status(200).json({ status: 'ok', stocktake });
+  })
+);
+
+inventoryRoutes.post(
+  '/stocktakes/:id/close',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
+    return res.status(200).json({ status: 'ok', stocktake: await defaultStocktakeService.close(companyId, req.params.id, user.id) });
+  })
+);
+
+inventoryRoutes.post(
+  '/stocktakes/:id/cancel',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
+    return res.status(200).json({ status: 'ok', stocktake: await defaultStocktakeService.cancel(companyId, req.params.id, user.id) });
   })
 );
