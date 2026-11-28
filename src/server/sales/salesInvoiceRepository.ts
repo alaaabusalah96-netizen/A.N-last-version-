@@ -279,26 +279,32 @@ export class SalesInvoiceRepository {
       ]);
       const invoiceId = headerRes.rows[0].id;
 
-      for (const line of computed.lines) {
-        const lineSql = `
-          INSERT INTO sales_invoice_lines (
-            company_id, invoice_id, item_id, delivery_line_id, qty, unit_price,
-            tax_rate, tax_amount, line_total, line_no
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        `;
-        await executor.query(lineSql, [
-          companyId,
-          invoiceId,
-          line.itemId,
-          line.deliveryLineId || null,
-          line.qty,
-          line.unitPrice,
-          line.taxRate,
-          line.taxAmount,
-          line.lineTotal,
-          line.lineNo,
-        ]);
+      if (computed.lines.length > 0) {
+        // One multi-row insert instead of one round trip per line (remote DB).
+        const params: any[] = [companyId, invoiceId];
+        const tuples: string[] = [];
+        for (const line of computed.lines) {
+          const o = params.length;
+          params.push(
+            line.itemId,
+            line.deliveryLineId || null,
+            line.qty,
+            line.unitPrice,
+            line.taxRate,
+            line.taxAmount,
+            line.lineTotal,
+            line.lineNo
+          );
+          tuples.push(`($1, $2, $${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, $${o + 8})`);
+        }
+        await executor.query(
+          `INSERT INTO sales_invoice_lines (
+             company_id, invoice_id, item_id, delivery_line_id, qty, unit_price,
+             tax_rate, tax_amount, line_total, line_no
+           )
+           VALUES ${tuples.join(', ')}`,
+          params
+        );
       }
 
       const created = await this.findById(companyId, invoiceId, executor);

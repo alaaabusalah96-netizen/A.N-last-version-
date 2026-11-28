@@ -454,6 +454,21 @@ export class SalesReturnService {
         }
       }
 
+      // One grouped query for previously returned amounts instead of one per line.
+      const prevRes = await tx.query<any>(
+        `SELECT srl.invoice_line_id,
+                COALESCE(SUM(srl.qty), 0)::text as returned_qty,
+                COALESCE(SUM(srl.tax_amount), 0)::text as returned_tax,
+                COALESCE(SUM(srl.line_total), 0)::text as returned_total
+         FROM sales_return_lines srl
+         INNER JOIN sales_returns sr ON sr.id = srl.return_id AND sr.company_id = srl.company_id
+         WHERE srl.company_id = $1 AND srl.invoice_line_id = ANY($2::uuid[]) AND sr.status = 'posted' AND sr.id <> $3
+         GROUP BY srl.invoice_line_id`,
+        [companyId, ret.lines.map((l: any) => l.invoiceLineId), id]
+      );
+      const prevMap = new Map<string, any>(prevRes.rows.map((r: any) => [r.invoice_line_id, r]));
+      const lineUpdates: Array<{ lineId: string; taxAmount: string; lineTotal: string; cogsCost: string; valuationMovementId: string | null }> = [];
+
       let subtotalUnits = 0n;
       let taxAmountUnits = 0n;
       let totalAmountUnits = 0n;
@@ -466,21 +481,13 @@ export class SalesReturnService {
           throw new ValidationError('بيانات بند الفاتورة المرتبطة ببند المرتجع غير متطابقة');
         }
 
-        const prevRes = await tx.query<any>(
-          `SELECT COALESCE(SUM(srl.qty), 0)::text as returned_qty,
-                  COALESCE(SUM(srl.tax_amount), 0)::text as returned_tax,
-                  COALESCE(SUM(srl.line_total), 0)::text as returned_total
-           FROM sales_return_lines srl
-           INNER JOIN sales_returns sr ON sr.id = srl.return_id AND sr.company_id = srl.company_id
-           WHERE srl.company_id = $1 AND srl.invoice_line_id = $2 AND sr.status = 'posted' AND sr.id <> $3`,
-          [companyId, line.invoiceLineId, id]
-        );
+        const prev = prevMap.get(line.invoiceLineId);
         const origQtyU = parseExactUnits(invLine.qty, QTY_SCALE, 'origQty');
         const origTaxU = parseExactUnits(invLine.tax_amount, MONEY_SCALE, 'origTax');
         const origTotalU = parseExactUnits(invLine.line_total, MONEY_SCALE, 'origTotal');
-        const prevQtyU = toMinorUnits(prevRes.rows[0]?.returned_qty ?? '0', QTY_SCALE);
-        const prevTaxU = toMinorUnits(prevRes.rows[0]?.returned_tax ?? '0', MONEY_SCALE);
-        const prevTotalU = toMinorUnits(prevRes.rows[0]?.returned_total ?? '0', MONEY_SCALE);
+        const prevQtyU = toMinorUnits(prev?.returned_qty ?? '0', QTY_SCALE);
+        const prevTaxU = toMinorUnits(prev?.returned_tax ?? '0', MONEY_SCALE);
+        const prevTotalU = toMinorUnits(prev?.returned_total ?? '0', MONEY_SCALE);
         const lineQtyU = toMinorUnits(line.qty, QTY_SCALE);
         const remainingQtyU = origQtyU > prevQtyU ? origQtyU - prevQtyU : 0n;
 
@@ -575,16 +582,16 @@ export class SalesReturnService {
         }
 
         totalCogsMoneyUnits += lineCogsMoneyUnits;
-        await this.returnRepo.updateLineComputedValues(
-          companyId,
-          line.id,
-          fromMinorUnits(computed.taxUnits, MONEY_SCALE),
-          fromMinorUnits(computed.totalUnits, MONEY_SCALE),
-          fromMinorUnits(lineCogsMoneyUnits, MONEY_SCALE),
-          lineValMovId,
-          tx
-        );
+        lineUpdates.push({
+          lineId: line.id,
+          taxAmount: fromMinorUnits(computed.taxUnits, MONEY_SCALE),
+          lineTotal: fromMinorUnits(computed.totalUnits, MONEY_SCALE),
+          cogsCost: fromMinorUnits(lineCogsMoneyUnits, MONEY_SCALE),
+          valuationMovementId: lineValMovId,
+        });
       }
+
+      await this.returnRepo.updateLinesComputedValues(companyId, lineUpdates, tx);
 
       if (!(totalAmountUnits > 0n)) {
         throw new ValidationError('قيمة مرتجع المبيعات الإجمالية يجب أن تكون أكبر من الصفر لترحيله');

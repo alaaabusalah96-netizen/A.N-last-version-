@@ -227,16 +227,13 @@ export class SalesReturnRepository {
       ]);
       const returnId = headerRes.rows[0].id;
 
-      for (const line of data.lines) {
-        await executor.query(
-          `INSERT INTO sales_return_lines (
-             company_id, return_id, invoice_line_id, delivery_line_id, item_id,
-             qty, unit_price, tax_rate, tax_amount, line_total, line_no
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-          [
-            companyId,
-            returnId,
+      if (data.lines.length > 0) {
+        // One multi-row insert instead of one round trip per line (remote DB).
+        const params: any[] = [companyId, returnId];
+        const tuples: string[] = [];
+        for (const line of data.lines) {
+          const o = params.length;
+          params.push(
             line.invoiceLineId,
             line.deliveryLineId || null,
             line.itemId,
@@ -245,8 +242,17 @@ export class SalesReturnRepository {
             line.taxRate,
             line.taxAmount,
             line.lineTotal,
-            line.lineNo,
-          ]
+            line.lineNo
+          );
+          tuples.push(`($1, $2, $${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, $${o + 8}, $${o + 9})`);
+        }
+        await executor.query(
+          `INSERT INTO sales_return_lines (
+             company_id, return_id, invoice_line_id, delivery_line_id, item_id,
+             qty, unit_price, tax_rate, tax_amount, line_total, line_no
+           )
+           VALUES ${tuples.join(', ')}`,
+          params
         );
       }
 
@@ -272,6 +278,31 @@ export class SalesReturnRepository {
        SET tax_amount = $3, line_total = $4, cogs_cost = $5, valuation_movement_id = $6
        WHERE company_id = $1 AND id = $2`,
       [companyId, lineId, taxAmount, lineTotal, cogsCost, valuationMovementId]
+    );
+  }
+
+  async updateLinesComputedValues(
+    companyId: string,
+    rows: Array<{ lineId: string; taxAmount: string; lineTotal: string; cogsCost: string; valuationMovementId: string | null }>,
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `UPDATE sales_return_lines AS l
+       SET tax_amount = v.tax_amount, line_total = v.line_total, cogs_cost = v.cogs_cost, valuation_movement_id = v.val_id
+       FROM (
+         SELECT * FROM unnest($2::uuid[], $3::numeric[], $4::numeric[], $5::numeric[], $6::uuid[])
+           AS t(id, tax_amount, line_total, cogs_cost, val_id)
+       ) v
+       WHERE l.company_id = $1 AND l.id = v.id`,
+      [
+        companyId,
+        rows.map((r) => r.lineId),
+        rows.map((r) => r.taxAmount),
+        rows.map((r) => r.lineTotal),
+        rows.map((r) => r.cogsCost),
+        rows.map((r) => r.valuationMovementId),
+      ]
     );
   }
 

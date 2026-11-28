@@ -1108,6 +1108,7 @@ describe('Package 7B — PPV, MA Purchase Returns, Sales Returns, Reconciliation
             cogsAmount: 160,
           }),
         updateLineComputedValues: vi.fn().mockResolvedValue(undefined),
+        updateLinesComputedValues: vi.fn().mockResolvedValue(undefined),
         markPosted: vi.fn().mockResolvedValue(undefined),
       };
       const stockRepo: any = {
