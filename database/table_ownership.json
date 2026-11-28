@@ -315,6 +315,11 @@
     "reason": "Per-invoice allocation lines of multi-invoice sales collections"
   },
   {
+    "table": "purch_supplier_payment_lines",
+    "scope": "tenant",
+    "reason": "Per-invoice allocation lines of multi-invoice supplier payments"
+  },
+  {
     "table": "cash_payment_vouchers",
     "scope": "tenant",
     "reason": "Per-company general cash payment vouchers posted directly from cash registers and GL"

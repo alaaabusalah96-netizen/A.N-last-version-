@@ -635,10 +635,10 @@ purchasingRoutes.post(
     const user = req.user!;
     const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
     await assertPurchasingPermission(user, PERMISSIONS.PURCHASING_WRITE, companyId);
-    const { supplierId, invoiceId, registerId, paymentDate, amount, reference, memo } = req.body || {};
+    const { supplierId, invoiceId, lines, registerId, paymentDate, amount, reference, memo } = req.body || {};
     const payment = await defaultSupplierPaymentService.createPayment(
       companyId,
-      { supplierId, invoiceId, registerId, paymentDate, amount, reference, memo },
+      { supplierId, invoiceId, lines, registerId, paymentDate, amount, reference, memo },
       user.id
     );
     return res.status(201).json({ status: 'ok', payment });

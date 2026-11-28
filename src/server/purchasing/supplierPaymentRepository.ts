@@ -3,7 +3,16 @@ import { withTenantTransaction } from '../db/transactionManager.js';
 import { toDecimal } from '../lib/numeric.js';
 import { toCalendarDate } from '../lib/calendarDate.js';
 
+export interface SupplierPaymentLine {
+  lineNo: number;
+  invoiceId: string;
+  supplierInvoiceNo?: string | null;
+  amount: number;
+}
+
 export interface SupplierPayment {
+  lines?: SupplierPaymentLine[];
+  linesCount?: number;
   id: string;
   companyId: string;
   supplierId: string;
@@ -31,10 +40,13 @@ export interface SupplierPayment {
 
 export interface CreateSupplierPaymentInput {
   supplierId: string;
-  invoiceId: string;
+  /** Legacy single-invoice form (invoiceId + amount). Ignored when lines is given. */
+  invoiceId?: string;
+  /** Multi-invoice form: one line per invoice, up to 100. */
+  lines?: Array<{ invoiceId: string; amount: number }>;
   registerId: string;
   paymentDate?: string;
-  amount: number;
+  amount?: number;
   reference?: string;
   memo?: string;
 }
@@ -64,6 +76,7 @@ function mapPayment(row: any): SupplierPayment {
     paymentNo: row.paymentNo ?? null,
     paymentDate: toIsoDate(row.paymentDate),
     amount: toDecimal(row.amount, 2),
+    linesCount: row.linesCount !== undefined && row.linesCount !== null ? Number(row.linesCount) : undefined,
     status: row.status as 'draft' | 'posted' | 'cancelled',
     reference: row.reference ?? null,
     memo: row.memo ?? null,
@@ -104,7 +117,8 @@ export class SupplierPaymentRepository {
           sp.posted_by as "postedBy",
           sp.created_by as "createdBy",
           sp.created_at as "createdAt",
-          sp.updated_at as "updatedAt"
+          sp.updated_at as "updatedAt",
+          GREATEST(1, (SELECT COUNT(*) FROM purch_supplier_payment_lines l WHERE l.company_id = sp.company_id AND l.payment_id = sp.id))::int as "linesCount"
         FROM purch_supplier_payments sp
         INNER JOIN purch_suppliers s ON s.id = sp.supplier_id AND s.company_id = sp.company_id
         INNER JOIN purch_supplier_invoices si ON si.id = sp.invoice_id AND si.company_id = sp.company_id
@@ -157,11 +171,28 @@ export class SupplierPaymentRepository {
       `;
       const res = await executor.query<any>(sql, [companyId, id]);
       if (res.rows.length === 0) return null;
-      return mapPayment(res.rows[0]);
+      const out = mapPayment(res.rows[0]);
+      out.lines = await this.loadLines(companyId, id, executor, out);
+      out.linesCount = out.lines.length;
+      return out;
     };
 
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);
+  }
+
+  async loadLines(companyId: string, id: string, executor: DbExecutor, header: SupplierPayment): Promise<SupplierPaymentLine[]> {
+    const res = await executor.query<any>(
+      `SELECT l.line_no, l.invoice_id, l.amount, si.invoice_no
+       FROM purch_supplier_payment_lines l
+       INNER JOIN purch_supplier_invoices si ON si.id = l.invoice_id AND si.company_id = l.company_id
+       WHERE l.company_id = $1 AND l.payment_id = $2 ORDER BY l.line_no`,
+      [companyId, id]
+    );
+    if (res.rows.length === 0) {
+      return [{ lineNo: 1, invoiceId: header.invoiceId, supplierInvoiceNo: header.supplierInvoiceNo || null, amount: header.amount }];
+    }
+    return res.rows.map((x: any) => ({ lineNo: x.line_no, invoiceId: x.invoice_id, supplierInvoiceNo: x.invoice_no || null, amount: toDecimal(x.amount, 2) }));
   }
 
   async findByIdForUpdate(companyId: string, id: string, tx: DbExecutor): Promise<SupplierPayment | null> {
@@ -192,6 +223,8 @@ export class SupplierPaymentRepository {
     customExecutor?: DbExecutor
   ): Promise<SupplierPayment> {
     const run = async (executor: DbExecutor) => {
+      const lines = input.lines && input.lines.length > 0 ? input.lines : [{ invoiceId: input.invoiceId as string, amount: input.amount as number }];
+      const total = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
       const sql = `
         INSERT INTO purch_supplier_payments (
           company_id,
@@ -228,15 +261,24 @@ export class SupplierPaymentRepository {
       const res = await executor.query<any>(sql, [
         companyId,
         input.supplierId,
-        input.invoiceId,
+        lines[0].invoiceId,
         input.registerId,
         input.paymentDate || null,
-        toDecimal(input.amount, 2),
+        toDecimal(total, 2),
         input.reference?.trim() || null,
         input.memo?.trim() || null,
         actorId || null,
       ]);
       const row = res.rows[0];
+      const ids: string[] = [];
+      const nos: number[] = [];
+      const amts: number[] = [];
+      lines.forEach((l, i) => { ids.push(l.invoiceId); nos.push(i + 1); amts.push(l.amount); });
+      await executor.query(
+        `INSERT INTO purch_supplier_payment_lines (company_id, payment_id, line_no, invoice_id, amount)
+         SELECT $1, $2, n, i, a FROM unnest($3::int[], $4::uuid[], $5::numeric[]) AS t(n, i, a)`,
+        [companyId, row.id, nos, ids, amts]
+      );
       const full = await this.findById(companyId, row.id, executor);
       return full || mapPayment(row);
     };

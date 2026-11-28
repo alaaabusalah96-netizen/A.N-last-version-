@@ -10,6 +10,9 @@ import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { defaultConfigService, ConfigService } from '../config-platform/configService.js';
 import { defaultAccountRepository, AccountRepository } from '../accounting/accountRepository.js';
 import { GlMappingService } from '../accounting/glMappingService.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
+import { POSTED_PAYMENT_ALLOCATIONS_SQL } from './paymentAllocationSql.js';
+import type { DbExecutor } from '../db/types.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { NotFoundError, ValidationError } from '../http/errors.js';
 import { toDecimal, toMinorUnits } from '../lib/numeric.js';
@@ -70,15 +73,24 @@ export class SupplierPaymentService {
     if (!input.supplierId || typeof input.supplierId !== 'string') {
       throw new ValidationError('المورد مطلوب');
     }
-    if (!input.invoiceId || typeof input.invoiceId !== 'string') {
-      throw new ValidationError('الفاتورة المستهدفة مطلوبة');
-    }
     if (!input.registerId || typeof input.registerId !== 'string') {
       throw new ValidationError('صندوق النقدية مطلوب');
     }
-    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
-      throw new ValidationError('مبلغ السداد يجب أن يكون أكبر من الصفر');
-    }
+    assertMaxDocumentLines(input.lines);
+    const rawLines: Array<{ invoiceId: string; amount: number }> =
+      Array.isArray(input.lines) && input.lines.length > 0
+        ? input.lines.map((l) => ({ invoiceId: l?.invoiceId, amount: l?.amount as number }))
+        : [{ invoiceId: input.invoiceId as string, amount: input.amount as number }];
+    const seen = new Set<string>();
+    rawLines.forEach((l, i) => {
+      if (!l.invoiceId || typeof l.invoiceId !== 'string') throw new ValidationError(`الفاتورة المستهدفة مطلوبة في السطر ${i + 1}`);
+      if (typeof l.amount !== 'number' || !Number.isFinite(l.amount) || l.amount <= 0) {
+        throw new ValidationError(`مبلغ السداد في السطر ${i + 1} يجب أن يكون أكبر من الصفر`);
+      }
+      l.amount = toDecimal(l.amount, 2);
+      if (seen.has(l.invoiceId)) throw new ValidationError(`الفاتورة مكررة في السطر ${i + 1}؛ استخدم سطراً واحداً لكل فاتورة`);
+      seen.add(l.invoiceId);
+    });
     const validatedPaymentDate = assertOptionalCalendarDate(input.paymentDate, 'تاريخ السداد');
 
     return await withTenantTransaction(companyId, async (tx) => {
@@ -92,12 +104,21 @@ export class SupplierPaymentService {
         throw new ValidationError('صندوق النقدية المحدد غير موجود أو غير نشط');
       }
 
-      const invoice = await this.invoiceRepo.findById(companyId, input.invoiceId, tx);
-      if (!invoice || invoice.status !== 'posted') {
-        throw new ValidationError('فاتورة المورد غير موجودة أو غير مرحلة');
-      }
-      if (invoice.supplierId !== input.supplierId) {
-        throw new ValidationError('المورد المحدد لا يطابق مورد الفاتورة');
+      const bal = await this.loadInvoiceBalances(companyId, rawLines.map((l) => l.invoiceId), tx);
+      for (let i = 0; i < rawLines.length; i++) {
+        const l = rawLines[i];
+        const inv = bal.get(l.invoiceId);
+        if (!inv || inv.status !== 'posted') {
+          throw new ValidationError(`فاتورة المورد في السطر ${i + 1} غير موجودة أو غير مرحلة`);
+        }
+        if (inv.supplierId !== input.supplierId) {
+          throw new ValidationError(`المورد المحدد لا يطابق مورد فاتورة السطر ${i + 1}`);
+        }
+        if (toMinorUnits(l.amount, 2) > toMinorUnits(inv.open, 2)) {
+          throw new ValidationError(
+            `مبلغ السداد (${l.amount.toFixed(2)}) في السطر ${i + 1} يتجاوز الرصيد المتبقي المفتوح للفاتورة (${inv.open.toFixed(2)})`
+          );
+        }
       }
 
       const effectivePaymentDate = validatedPaymentDate ?? (await resolveCompanyToday(companyId, tx));
@@ -106,10 +127,9 @@ export class SupplierPaymentService {
         companyId,
         {
           supplierId: input.supplierId,
-          invoiceId: input.invoiceId,
+          lines: rawLines,
           registerId: input.registerId,
           paymentDate: effectivePaymentDate,
-          amount: input.amount,
           reference: input.reference,
           memo: input.memo,
         },
@@ -124,13 +144,42 @@ export class SupplierPaymentService {
           action: 'SUPPLIER_PAYMENT_CREATE',
           entityType: 'purch_supplier_payments',
           entityId: created.id,
-          metadata: { amount: input.amount, invoiceId: input.invoiceId, registerId: input.registerId },
+          metadata: { amount: created.amount, linesCount: rawLines.length, registerId: input.registerId },
         },
         { executor: tx }
       );
 
       return created;
     });
+  }
+
+  /** One query for all invoices of a payment: status, supplier and open balance (total - returns - posted payments). */
+  private async loadInvoiceBalances(
+    companyId: string,
+    invoiceIds: string[],
+    tx: DbExecutor,
+    opts: { lock?: boolean; excludePaymentId?: string } = {}
+  ): Promise<Map<string, { status: string; supplierId: string; open: number }>> {
+    const sorted = [...invoiceIds].sort();
+    const res = await tx.query<any>(
+      `SELECT si.id, si.status, si.supplier_id,
+         COALESCE((SELECT SUM(qty * unit_cost) FROM purch_supplier_invoice_lines WHERE company_id = $1 AND invoice_id = si.id), 0) AS total,
+         COALESCE((SELECT SUM(prl.qty * prl.unit_cost) FROM purch_return_lines prl INNER JOIN purch_returns pr ON pr.id = prl.return_id AND pr.company_id = prl.company_id WHERE pr.company_id = $1 AND pr.status = 'posted' AND pr.invoice_id = si.id), 0) AS credited,
+         COALESCE((SELECT SUM(a.amount) FROM ${POSTED_PAYMENT_ALLOCATIONS_SQL} a WHERE a.invoice_id = si.id AND a.payment_id <> $3), 0) AS paid
+       FROM purch_supplier_invoices si
+       WHERE si.company_id = $1 AND si.id = ANY($2::uuid[])
+       ${opts.lock ? 'ORDER BY si.id FOR UPDATE OF si' : ''}`,
+      [companyId, sorted, opts.excludePaymentId || '00000000-0000-0000-0000-000000000000']
+    );
+    const m = new Map<string, { status: string; supplierId: string; open: number }>();
+    for (const r of res.rows) {
+      m.set(r.id, {
+        status: r.status,
+        supplierId: r.supplier_id,
+        open: Math.max(0, toDecimal(r.total || 0, 2) - toDecimal(r.credited || 0, 2) - toDecimal(r.paid || 0, 2)),
+      });
+    }
+    return m;
   }
 
   private async resolveApAccount(companyId: string): Promise<string> {
@@ -181,40 +230,21 @@ export class SupplierPaymentService {
         throw new ValidationError('صندوق النقدية غير مرتبط بحساب محاسبي (glAccountId)');
       }
 
-      const invLocked = await this.invoiceRepo.findByIdForUpdate(companyId, payment.invoiceId, tx);
-      if (!invLocked || invLocked.status !== 'posted') {
-        throw new ValidationError('الفاتورة المرتبطة غير موجودة أو غير مرحلة');
-      }
-
-      const balanceRes = await tx.query<any>(
-        `SELECT
-           COALESCE(inv_tot.total, 0) as "invoiceTotal",
-           COALESCE(ret_tot.total, 0) as "creditedTotal",
-           COALESCE(pay_tot.total, 0) as "paidTotal"
-         FROM purch_supplier_invoices si
-         LEFT JOIN (
-           SELECT invoice_id, SUM(qty * unit_cost) as total FROM purch_supplier_invoice_lines WHERE company_id = $1 AND invoice_id = $2 GROUP BY invoice_id
-         ) inv_tot ON TRUE
-         LEFT JOIN (
-           SELECT pr.invoice_id, SUM(prl.qty * prl.unit_cost) as total FROM purch_return_lines prl INNER JOIN purch_returns pr ON pr.id = prl.return_id AND pr.company_id = prl.company_id WHERE pr.company_id = $1 AND pr.status = 'posted' AND pr.invoice_id = $2 GROUP BY pr.invoice_id
-         ) ret_tot ON TRUE
-         LEFT JOIN (
-           SELECT invoice_id, SUM(amount) as total FROM purch_supplier_payments WHERE company_id = $1 AND status = 'posted' AND invoice_id = $2 AND id <> $3 GROUP BY invoice_id
-         ) pay_tot ON TRUE
-         WHERE si.company_id = $1 AND si.id = $2;`,
-        [companyId, payment.invoiceId, paymentId]
-      );
-
-      const r = (balanceRes.rows[0] || {}) as { invoiceTotal?: any; creditedTotal?: any; paidTotal?: any };
-      const invoiceTotal = toDecimal(r.invoiceTotal || 0, 2);
-      const creditedTotal = toDecimal(r.creditedTotal || 0, 2);
-      const paidTotal = toDecimal(r.paidTotal || 0, 2);
-      const remainingOpen = Math.max(0, invoiceTotal - creditedTotal - paidTotal);
-
-      if (toMinorUnits(payment.amount, 2) > toMinorUnits(remainingOpen, 2)) {
-        throw new ValidationError(
-          `مبلغ السداد (${payment.amount}) يتجاوز الرصيد المتبقي المفتوح للفاتورة (${remainingOpen})`
-        );
+      const payLines = payment.lines && payment.lines.length > 0
+        ? payment.lines
+        : [{ lineNo: 1, invoiceId: payment.invoiceId, supplierInvoiceNo: payment.supplierInvoiceNo, amount: payment.amount }];
+      // Lock all invoices in one statement in id order (stable order avoids deadlocks) and check balances.
+      const balPost = await this.loadInvoiceBalances(companyId, payLines.map((l) => l.invoiceId), tx, { lock: true, excludePaymentId: paymentId });
+      for (const l of payLines) {
+        const inv = balPost.get(l.invoiceId);
+        if (!inv || inv.status !== 'posted') {
+          throw new ValidationError(`الفاتورة ${l.supplierInvoiceNo || ''} المرتبطة غير موجودة أو غير مرحلة`);
+        }
+        if (toMinorUnits(l.amount, 2) > toMinorUnits(inv.open, 2)) {
+          throw new ValidationError(
+            `مبلغ السداد (${l.amount}) يتجاوز الرصيد المتبقي المفتوح للفاتورة ${l.supplierInvoiceNo || ''} (${inv.open})`
+          );
+        }
       }
 
       const registerBalance = await this.registerService.getBalance(companyId, payment.registerId, tx);
@@ -236,12 +266,12 @@ export class SupplierPaymentService {
           entryDate,
           memo: `ترحيل سند سداد مورد رقم ${paymentNo} من صندوق ${regLocked.nameAr} (مورد: ${payment.supplierNameAr})`,
           lines: [
-            {
+            ...payLines.map((l) => ({
               accountId: apAccountId,
-              debit: payment.amount,
+              debit: l.amount,
               credit: 0,
-              lineMemo: `سداد المورد فاتورة ${payment.supplierInvoiceNo || ''} سند ${paymentNo}`,
-            },
+              lineMemo: `سداد المورد فاتورة ${l.supplierInvoiceNo || ''} سند ${paymentNo}`,
+            })),
             {
               accountId: regLocked.glAccountId,
               debit: 0,
@@ -269,6 +299,7 @@ export class SupplierPaymentService {
           metadata: {
             paymentNo,
             amount: payment.amount,
+            linesCount: payLines.length,
             registerId: payment.registerId,
             journalEntryId: postedJe.id,
           },

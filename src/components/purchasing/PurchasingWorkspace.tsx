@@ -292,9 +292,8 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
   const [cashRegisters, setCashRegisters] = useState<any[]>([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paySupplierId, setPaySupplierId] = useState('');
-  const [payInvoiceId, setPayInvoiceId] = useState('');
+  const [payLines, setPayLines] = useState<Array<{ invoiceId: string; amount: string }>>([{ invoiceId: '', amount: '' }]);
   const [payRegisterId, setPayRegisterId] = useState('');
-  const [payAmount, setPayAmount] = useState('');
   const [payReference, setPayReference] = useState('');
   const [payMemo, setPayMemo] = useState('');
 
@@ -437,16 +436,15 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
         body: JSON.stringify({
           companyId: selectedCompanyId,
           supplierId: paySupplierId,
-          invoiceId: payInvoiceId,
+          lines: payLines.map((l) => ({ invoiceId: l.invoiceId, amount: Number(l.amount) })),
           registerId: payRegisterId,
-          amount: Number(payAmount),
           reference: payReference || undefined,
           memo: payMemo || undefined,
         }),
       });
       setSuccess('تم إنشاء مسودة سند السداد النقدي بنجاح');
       setShowPaymentModal(false);
-      setPayAmount('');
+      setPayLines([{ invoiceId: '', amount: '' }]);
       setPayReference('');
       setPayMemo('');
       await loadData();
@@ -1155,9 +1153,8 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
               onClick={() => {
                 setShowPaymentModal(true);
                 setPaySupplierId('');
-                setPayInvoiceId('');
+                setPayLines([{ invoiceId: '', amount: '' }]);
                 setPayRegisterId('');
-                setPayAmount('');
                 setPayReference('');
                 setPayMemo('');
               }}
@@ -1892,8 +1889,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                             onClick={() => {
                               setShowPaymentModal(true);
                               setPaySupplierId(item.supplierId);
-                              setPayInvoiceId(item.invoiceId);
-                              setPayAmount(String(item.remainingOpenAmount));
+                              setPayLines([{ invoiceId: item.invoiceId, amount: String(item.remainingOpenAmount) }]);
                             }}
                             className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer whitespace-nowrap"
                           >
@@ -1941,7 +1937,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                     <tr key={pay.id} className="hover:bg-slate-800/30 transition">
                       <td className="py-3.5 px-4 font-mono font-bold text-white">{pay.paymentNo || pay.id.slice(0, 8)}</td>
                       <td className="py-3.5 px-4 font-semibold">{pay.supplierNameAr || pay.supplierCode || 'مورد'}</td>
-                      <td className="py-3.5 px-4 font-mono text-violet-400">{pay.supplierInvoiceNo || pay.invoiceId.slice(0, 8)}</td>
+                      <td className="py-3.5 px-4 font-mono text-violet-400">{pay.supplierInvoiceNo || (pay.invoiceId || '').slice(0, 8)}{Number(pay.linesCount) > 1 && (<span data-testid="payment-lines-badge" className="mr-1 px-1.5 py-0.5 rounded bg-violet-950/60 border border-violet-800/80 text-violet-300 text-[10px]">+{Number(pay.linesCount) - 1} فاتورة</span>)}</td>
                       <td className="py-3.5 px-4 font-medium text-amber-300">{pay.registerNameAr || pay.registerCode || 'صندوق'}</td>
                       <td className="py-3.5 px-4 text-center font-mono">{pay.paymentDate?.slice(0, 10)}</td>
                       <td className="py-3.5 px-4 text-center font-mono font-bold text-emerald-400 text-sm">
@@ -2683,7 +2679,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                   onChange={(e) => {
                     const suppId = e.target.value;
                     setPaySupplierId(suppId);
-                    setPayInvoiceId('');
+                    setPayLines([{ invoiceId: '', amount: '' }]);
                   }}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
@@ -2696,44 +2692,72 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">فاتورة المورد المراد سدادها *</label>
-                <select
-                  required
-                  value={payInvoiceId}
-                  onChange={(e) => {
-                    const invId = e.target.value;
-                    setPayInvoiceId(invId);
-                    const openItem = apOpenItems.find((item) => item.invoiceId === invId);
-                    if (openItem) {
-                      setPayAmount(String(openItem.remainingOpenAmount));
-                    }
-                  }}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
-                >
-                  <option value="">-- اختر فاتورة المورد --</option>
-                  {(paySupplierId
+              <div data-testid="supplier-payment-lines" className="flex flex-col gap-2">
+                <label className="block text-xs font-semibold text-slate-300">فواتير المورد المراد سدادها * (حتى 100 فاتورة)</label>
+                {payLines.map((ln, idx) => {
+                  const usedElsewhere = new Set(payLines.filter((_, j) => j !== idx).map((l) => l.invoiceId));
+                  const opts = (paySupplierId
                     ? apOpenItems.filter((i) => i.supplierId === paySupplierId && i.remainingOpenAmount > 0)
                     : apOpenItems.filter((i) => i.remainingOpenAmount > 0)
-                  ).map((item) => (
-                    <option key={item.invoiceId} value={item.invoiceId}>
-                      فاتورة: {item.supplierInvoiceNo} | الرصيد المتبقي: {item.remainingOpenAmount.toFixed(2)}
-                    </option>
-                  ))}
-                  {/* Fallback to posted invoices if apOpenItems is empty or doesn't have it */}
-                  {invoices
-                    .filter(
-                      (inv) =>
-                        inv.status === 'posted' &&
-                        (!paySupplierId || inv.supplierId === paySupplierId) &&
-                        !apOpenItems.some((aoi) => aoi.invoiceId === inv.id)
-                    )
-                    .map((inv) => (
-                      <option key={inv.id} value={inv.id}>
-                        فاتورة: {inv.supplierInvoiceNo} ({inv.invoiceNo || inv.id.slice(0, 8)})
-                      </option>
-                    ))}
-                </select>
+                  ).filter((i) => !usedElsewhere.has(i.invoiceId));
+                  return (
+                    <div key={idx} className="grid grid-cols-[1fr_110px_28px] gap-2 items-center">
+                      <select
+                        required
+                        name={`payInvoiceId-${idx}`}
+                        value={ln.invoiceId}
+                        onChange={(e) => {
+                          const invId = e.target.value;
+                          const openItem = apOpenItems.find((item) => item.invoiceId === invId);
+                          setPayLines((prev) => prev.map((l, j) => (j === idx ? { invoiceId: invId, amount: openItem ? String(openItem.remainingOpenAmount) : l.amount } : l)));
+                        }}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                      >
+                        <option value="">-- اختر فاتورة المورد --</option>
+                        {opts.map((item) => (
+                          <option key={item.invoiceId} value={item.invoiceId}>
+                            فاتورة: {item.supplierInvoiceNo} | الرصيد المتبقي: {item.remainingOpenAmount.toFixed(2)}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        name={`payAmount-${idx}`}
+                        placeholder="0.00"
+                        value={ln.amount}
+                        onChange={(e) => setPayLines((prev) => prev.map((l, j) => (j === idx ? { ...l, amount: e.target.value } : l)))}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono tabular-nums"
+                      />
+                      <button
+                        type="button"
+                        disabled={payLines.length <= 1}
+                        onClick={() => setPayLines((prev) => prev.filter((_, j) => j !== idx))}
+                        className="text-slate-400 hover:text-red-400 disabled:opacity-30 cursor-pointer"
+                        aria-label="حذف السطر"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between text-xs">
+                  <button
+                    type="button"
+                    data-testid="payment-add-line"
+                    disabled={payLines.length >= 100}
+                    onClick={() => setPayLines((prev) => (prev.length >= 100 ? prev : [...prev, { invoiceId: '', amount: '' }]))}
+                    className="px-3 py-1.5 bg-slate-800 text-emerald-300 rounded-lg font-semibold disabled:opacity-40 cursor-pointer"
+                  >
+                    + سطر
+                  </button>
+                  <span data-testid="payment-lines-count" className="text-slate-400">{payLines.length} / 100 سطر</span>
+                  <span data-testid="payment-lines-total" className="font-mono font-bold text-emerald-400">
+                    الإجمالي: {payLines.reduce((a, l) => a + (Number(l.amount) || 0), 0).toFixed(2)}
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -2744,7 +2768,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                   onChange={(e) => setPayRegisterId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
-                  <option value="">-- اختر الصندوق المسدد منه --</option>
+                  <option value="">{cashRegisters.length === 0 ? '-- لا توجد صناديق متاحة لك --' : '-- اختر الصندوق المسدد منه --'}</option>
                   {cashRegisters.map((reg) => (
                     <option key={reg.id} value={reg.id}>
                       {reg.nameAr || reg.name} ({reg.code}) {Number.isFinite(Number(reg.currentBalance ?? reg.balance)) && (reg.currentBalance ?? reg.balance) !== null && (reg.currentBalance ?? reg.balance) !== undefined ? `| الرصيد: ${Number(reg.currentBalance ?? reg.balance).toFixed(2)}` : ''}
@@ -2754,19 +2778,6 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">مبلغ السداد *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    placeholder="0.00"
-                    value={payAmount}
-                    onChange={(e) => setPayAmount(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono tabular-nums"
-                  />
-                </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">رقم الإيصال / السند المرجعي</label>
                   <input
@@ -2800,7 +2811,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading || !paySupplierId || !payInvoiceId || !payRegisterId || !payAmount || Number(payAmount) <= 0}
+                  disabled={actionLoading || !paySupplierId || !payRegisterId || payLines.some((l) => !l.invoiceId || !(Number(l.amount) > 0))}
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة سند سداد'}

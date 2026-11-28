@@ -1,4 +1,5 @@
 import { DbExecutor } from '../db/types.js';
+import { POSTED_PAYMENT_ALLOCATIONS_SQL } from './paymentAllocationSql.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { MONEY_SCALE, fromMinorUnits, toMinorUnits } from '../lib/numeric.js';
 import {
@@ -114,8 +115,7 @@ export class ApOpenItemsService {
         ) ret_totals ON ret_totals.invoice_id = si.id
         LEFT JOIN (
           SELECT invoice_id, SUM(amount) as paid_total
-          FROM purch_supplier_payments
-          WHERE company_id = $1 AND status = 'posted'
+          FROM ${POSTED_PAYMENT_ALLOCATIONS_SQL} alloc
           GROUP BY invoice_id
         ) pay_totals ON pay_totals.invoice_id = si.id
         WHERE si.company_id = $1 AND si.status = 'posted' ${supplierClause}
