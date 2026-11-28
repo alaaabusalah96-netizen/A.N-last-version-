@@ -138,6 +138,7 @@ export class GrnService {
         }
       }
 
+      const itemMap = await this.itemRepo.findByIds(companyId, input.lines.map((l) => l.itemId), tx);
       for (const line of input.lines) {
         const lineExt = line as any;
         if (!line.itemId || typeof line.itemId !== 'string') {
@@ -174,7 +175,7 @@ export class GrnService {
             throw new ValidationError('تكلفة الوحدة في البند لا يمكن أن تكون بالسالب');
           }
         }
-        const item = await this.itemRepo.findById(companyId, line.itemId, tx);
+        const item = itemMap.get(line.itemId);
         if (!item) {
           throw new NotFoundError('أحد الأصناف المحددة في البنود غير موجود');
         }
@@ -190,14 +191,22 @@ export class GrnService {
           `UPDATE purch_grn SET po_id = $1 WHERE id = $2 AND company_id = $3`,
           [poId, grn.id, companyId]
         );
+        const lineIds: string[] = [];
+        const poLineIds: string[] = [];
         for (let i = 0; i < input.lines.length; i++) {
           const lExt = input.lines[i] as any;
           if (lExt.poLineId && grn.lines && grn.lines[i]) {
-            await tx.query(
-              `UPDATE purch_grn_lines SET po_line_id = $1 WHERE id = $2 AND company_id = $3`,
-              [lExt.poLineId, grn.lines[i].id, companyId]
-            );
+            lineIds.push(grn.lines[i].id);
+            poLineIds.push(lExt.poLineId);
           }
+        }
+        if (lineIds.length > 0) {
+          await tx.query(
+            `UPDATE purch_grn_lines g SET po_line_id = v.po_line_id
+             FROM unnest($1::uuid[], $2::uuid[]) AS v(id, po_line_id)
+             WHERE g.id = v.id AND g.company_id = $3`,
+            [lineIds, poLineIds, companyId]
+          );
         }
       }
 
@@ -381,8 +390,9 @@ export class GrnService {
       }
 
       // READ-ONLY validation — no stock/GL writes yet
+      const postItemMap = await this.itemRepo.findByIds(companyId, grn.lines.map((l) => l.itemId), tx);
       for (const line of grn.lines) {
-        const item = await this.itemRepo.findById(companyId, line.itemId, tx);
+        const item = postItemMap.get(line.itemId);
         if (!item || !item.isActive) {
           throw new ValidationError(`الصنف بـ ID (${line.itemId}) غير موجود أو غير نشط`);
         }

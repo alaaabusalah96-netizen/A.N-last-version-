@@ -78,6 +78,7 @@ async function run() {
 
     const itemRepo = {
       findById: async () => ({ id: 'item-1', code: 'ITM1', nameAr: 'صنف 1', isActive: true }),
+      findByIds: async (_c: string, ids: string[]) => new Map(ids.map((id) => [id, { id, code: 'ITM1', nameAr: 'صنف 1', isActive: true }])),
     };
 
     const stockRepo = {

@@ -73,6 +73,7 @@ export class PurchaseOrderService {
         throw new ValidationError('المورد المحدد غير نشط');
       }
 
+      const itemMap = await this.itemRepo.findByIds(companyId, input.lines.map((l) => l.itemId), tx);
       for (const line of input.lines) {
         if (!line.itemId || typeof line.itemId !== 'string') {
           throw new ValidationError('كافة بنود أمر الشراء تتطلب صنفاً محدداً');
@@ -89,7 +90,7 @@ export class PurchaseOrderService {
             throw new ValidationError('تكلفة الوحدة في البند لا يمكن أن تكون بالسالب');
           }
         }
-        const item = await this.itemRepo.findById(companyId, line.itemId, tx);
+        const item = itemMap.get(line.itemId);
         if (!item) {
           throw new NotFoundError('أحد الأصناف المحددة في البنود غير موجود');
         }

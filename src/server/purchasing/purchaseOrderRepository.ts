@@ -175,36 +175,30 @@ export class PurchaseOrderRepository {
       const header = headerRes.rows[0];
 
       const lines: PoLine[] = [];
-      for (let i = 0; i < input.lines.length; i++) {
-        const lineInput = input.lines[i];
-        const lineSql = `
-          INSERT INTO purch_po_lines (po_id, company_id, item_id, qty, unit_cost, received_qty, line_no)
-          VALUES ($1, $2, $3, $4, $5, 0, $6)
-          RETURNING
-            id,
-            po_id as "poId",
-            company_id as "companyId",
-            item_id as "itemId",
-            qty as "qty",
-            unit_cost as "unitCost",
-            received_qty as "receivedQty",
-            line_no as "lineNo"
-        `;
-        const lineRes = await executor.query<any>(lineSql, [
-          header.id,
-          companyId,
-          lineInput.itemId,
-          lineInput.qty,
-          lineInput.unitCost ?? null,
-          i + 1,
-        ]);
-        const row = lineRes.rows[0];
-        lines.push({
-          ...row,
-          qty: toDecimal(row.qty, 4),
-          unitCost: row.unitCost === null || row.unitCost === undefined ? null : toDecimal(row.unitCost, 4),
-          receivedQty: toDecimal(row.receivedQty, 4),
+      if (input.lines.length > 0) {
+        const params: any[] = [header.id, companyId];
+        const values: string[] = [];
+        input.lines.forEach((lineInput, i) => {
+          const o = params.length;
+          params.push(lineInput.itemId, lineInput.qty, lineInput.unitCost ?? null, i + 1);
+          values.push(`($1, $2, $${o + 1}, $${o + 2}, $${o + 3}, 0, $${o + 4})`);
         });
+        const lineRes = await executor.query<any>(
+          `INSERT INTO purch_po_lines (po_id, company_id, item_id, qty, unit_cost, received_qty, line_no)
+           VALUES ${values.join(', ')}
+           RETURNING id, po_id as "poId", company_id as "companyId", item_id as "itemId", qty as "qty",
+             unit_cost as "unitCost", received_qty as "receivedQty", line_no as "lineNo"`,
+          params
+        );
+        const rows = [...lineRes.rows].sort((a: any, b: any) => a.lineNo - b.lineNo);
+        for (const row of rows) {
+          lines.push({
+            ...row,
+            qty: toDecimal(row.qty, 4),
+            unitCost: row.unitCost === null || row.unitCost === undefined ? null : toDecimal(row.unitCost, 4),
+            receivedQty: toDecimal(row.receivedQty, 4),
+          });
+        }
       }
 
       header.lines = lines;

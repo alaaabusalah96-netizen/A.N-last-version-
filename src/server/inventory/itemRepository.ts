@@ -27,6 +27,25 @@ export class ItemRepository {
     return await withTenantTransaction(companyId, run);
   }
 
+  /** Batched lookup: one query for many ids (remote-DB round trips make per-line lookups slow). */
+  async findByIds(companyId: string, itemIds: string[], customExecutor?: DbExecutor): Promise<Map<string, Item>> {
+    const ids = Array.from(new Set(itemIds.filter((x) => typeof x === 'string' && x !== '')));
+    const out = new Map<string, Item>();
+    if (ids.length === 0) return out;
+    const run = async (executor: DbExecutor) => {
+      const res = await executor.query<Item>(
+        `SELECT id, company_id as "companyId", code, name_ar as "nameAr", name_en as "nameEn", uom,
+                is_active as "isActive", created_at as "createdAt"
+         FROM inv_items WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+        [companyId, ids]
+      );
+      for (const r of res.rows) out.set(r.id, r);
+      return out;
+    };
+    if (customExecutor) return await run(customExecutor);
+    return await withTenantTransaction(companyId, run);
+  }
+
   async findById(companyId: string, itemId: string, customExecutor?: DbExecutor): Promise<Item | null> {
     const run = async (executor: DbExecutor) => {
       const sql = `
