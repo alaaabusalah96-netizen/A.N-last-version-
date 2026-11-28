@@ -432,26 +432,24 @@ export class InvoiceRepository {
       const invoiceId = headerRow.id;
 
       const lines: SupplierInvoiceLine[] = [];
-      for (let i = 0; i < input.lines.length; i++) {
-        const l = input.lines[i];
-        // We need itemId from grn_line
-        const grnLineRes = await executor.query<{ itemId: string }>(
-          `SELECT item_id as "itemId" FROM purch_grn_lines WHERE id = $1 AND company_id = $2`,
-          [l.grnLineId, companyId]
+      if (input.lines.length > 0) {
+        // Batched: one lookup + one multi-row insert (was 2 queries per line).
+        const grnLineIds = input.lines.map((l) => l.grnLineId.trim());
+        const itemRes = await executor.query<{ id: string; itemId: string }>(
+          `SELECT id, item_id as "itemId" FROM purch_grn_lines WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+          [companyId, grnLineIds]
         );
-        const itemId = grnLineRes.rows[0]?.itemId;
-
-        const lineSql = `
+        const itemByLine = new Map<string, string>();
+        for (const r of itemRes.rows) itemByLine.set(r.id, r.itemId);
+        const lineRes = await executor.query(
+          `
           INSERT INTO purch_supplier_invoice_lines (
-            invoice_id,
-            company_id,
-            grn_line_id,
-            item_id,
-            qty,
-            unit_cost,
-            line_no
+            invoice_id, company_id, grn_line_id, item_id, qty, unit_cost, line_no
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          SELECT $1::uuid, $2::uuid, t.grn_line_id, t.item_id, t.qty, t.unit_cost, t.line_no
+          FROM unnest($3::uuid[], $4::uuid[], $5::numeric[], $6::numeric[], $7::int[])
+            AS t(grn_line_id, item_id, qty, unit_cost, line_no)
+          ORDER BY t.line_no
           RETURNING
             id,
             invoice_id as "invoiceId",
@@ -461,17 +459,20 @@ export class InvoiceRepository {
             qty,
             unit_cost as "unitCost",
             line_no as "lineNo";
-        `;
-        const lineRes = await executor.query(lineSql, [
-          invoiceId,
-          companyId,
-          l.grnLineId.trim(),
-          itemId,
-          toDecimal(l.qty, 4),
-          toDecimal(l.unitCost, 4),
-          i + 1,
-        ]);
-        lines.push(mapInvoiceLine(lineRes.rows[0]));
+          `,
+          [
+            invoiceId,
+            companyId,
+            grnLineIds,
+            grnLineIds.map((id) => itemByLine.get(id) ?? null),
+            input.lines.map((l) => toDecimal(l.qty, 4)),
+            input.lines.map((l) => toDecimal(l.unitCost, 4)),
+            input.lines.map((_, i) => i + 1),
+          ]
+        );
+        const mapped = lineRes.rows.map(mapInvoiceLine);
+        mapped.sort((x: any, y: any) => Number(x.lineNo) - Number(y.lineNo));
+        lines.push(...mapped);
       }
 
       return mapInvoiceHeader(headerRow, lines);

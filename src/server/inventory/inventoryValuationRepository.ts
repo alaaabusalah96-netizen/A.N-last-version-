@@ -1217,6 +1217,23 @@ export class InventoryValuationRepository {
     return res.rows.map(mapAdjustment);
   }
 
+  /** Invoice-line ids (of the given ones) that already have a cost adjustment. One query. */
+  async findInvoiceLineIdsWithAdjustments(
+    companyId: string,
+    invoiceLineIds: string[],
+    executor: DbExecutor
+  ): Promise<Set<string>> {
+    const out = new Set<string>();
+    if (invoiceLineIds.length === 0) return out;
+    const res = await executor.query<{ id: string }>(
+      `SELECT DISTINCT invoice_line_id::text as id FROM inv_cost_adjustments
+       WHERE company_id = $1 AND invoice_line_id = ANY($2::uuid[]);`,
+      [companyId, invoiceLineIds]
+    );
+    for (const r of res.rows) out.add(r.id);
+    return out;
+  }
+
   async findCostAdjustmentsByGrnLine(
     companyId: string,
     grnLineId: string,
@@ -1968,3 +1985,4 @@ export class InventoryValuationRepository {
 }
 
 export const defaultInventoryValuationRepository = new InventoryValuationRepository();
+

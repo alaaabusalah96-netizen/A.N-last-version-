@@ -53,7 +53,8 @@ export class InvoiceService {
     private valuationService: Pick<
       InventoryValuationService,
       'applyPurchasePriceVariance' | 'linkCostAdjustmentsJournal'
-    > = defaultInventoryValuationService
+    > &
+      Partial<Pick<InventoryValuationService, 'prefetchPurchasePriceVarianceContext'>> = defaultInventoryValuationService
   ) {
     this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
   }
@@ -457,6 +458,15 @@ export class InvoiceService {
       let totalConsumedCogsAdjUnits = 0n;
       const adjustmentIds: string[] = [];
 
+      const ppvPre = this.valuationService.prefetchPurchasePriceVarianceContext
+        ? await this.valuationService.prefetchPurchasePriceVarianceContext(
+            companyId,
+            invoice.lines.map((l) => l.id),
+            invoice.lines.map((l) => lockedGrnMap.get(l.grnLineId)!.itemId),
+            tx
+          )
+        : null;
+
       for (const line of invoice.lines) {
         const grnSummary = lockedGrnMap.get(line.grnLineId)!;
         const ppv = await this.valuationService.applyPurchasePriceVariance(
@@ -475,7 +485,13 @@ export class InvoiceService {
             approvedBy: actorId || null,
             createdBy: actorId || null,
           },
-          tx
+          tx,
+          ppvPre
+            ? {
+                noExistingAdjustment: !ppvPre.withAdjustments.has(line.id),
+                costing: ppvPre.costing.get(grnSummary.itemId),
+              }
+            : undefined
         );
 
         totalClearingDebitUnits += ppv.grnMoneyUnits;

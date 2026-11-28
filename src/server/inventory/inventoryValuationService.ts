@@ -1700,6 +1700,30 @@ export class InventoryValuationService {
   }
 
   /**
+   * Read-only prefetch for applyPurchasePriceVariance over many invoice lines: two queries instead of two
+   * per line. Items without an active costing assignment are left out so the per-line path raises the
+   * same error in the same order as before.
+   */
+  async prefetchPurchasePriceVarianceContext(
+    companyId: string,
+    invoiceLineIds: string[],
+    itemIds: string[],
+    tx: DbExecutor
+  ): Promise<{ withAdjustments: Set<string>; costing: Map<string, { method: CostingMethod; profileId: string }> } | null> {
+    const repo: any = this.valuationRepo;
+    if (typeof repo.findInvoiceLineIdsWithAdjustments !== 'function' || typeof repo.getItemAssignmentsBulk !== 'function') {
+      return null; // repository without batch reads (e.g. test doubles): caller uses the per-line path
+    }
+    const withAdjustments = await this.valuationRepo.findInvoiceLineIdsWithAdjustments(companyId, invoiceLineIds, tx);
+    const found = await this.valuationRepo.getItemAssignmentsBulk(companyId, Array.from(new Set(itemIds)), tx);
+    const costing = new Map<string, { method: CostingMethod; profileId: string }>();
+    for (const [id, a] of found) {
+      if (a && a.profileId && a.costingMethod) costing.set(id, { method: a.costingMethod, profileId: a.profileId });
+    }
+    return { withAdjustments, costing };
+  }
+
+  /**
    * Allocates Purchase Price Variance (final supplier invoice unit cost vs GRN estimated unit cost)
    * proportionally between Remaining Inventory (even after inter-warehouse transfers) and Consumed/COGS.
    * Never creates artificial quantity movements and prevents duplicate reconciliation.
@@ -1707,24 +1731,23 @@ export class InventoryValuationService {
   async applyPurchasePriceVariance(
     companyId: string,
     input: PurchasePriceVarianceInput,
-    tx: DbExecutor
+    tx: DbExecutor,
+    prefetched?: { noExistingAdjustment?: boolean; costing?: { method: CostingMethod; profileId: string } }
   ): Promise<PurchasePriceVarianceResult> {
     if (!input.grnId || !input.grnLineId || !input.invoiceId || !input.invoiceLineId) {
       throw new ValidationError('معرّفات إذن الاستلام وفاتورة المورد مطلوبة لتسوية فرق السعر');
     }
 
-    const existingAdjs = await this.valuationRepo.findCostAdjustmentsByInvoiceLine(
-      companyId,
-      input.invoiceLineId,
-      tx
-    );
+    const existingAdjs = prefetched?.noExistingAdjustment
+      ? []
+      : await this.valuationRepo.findCostAdjustmentsByInvoiceLine(companyId, input.invoiceLineId, tx);
     if (existingAdjs.length > 0) {
       throw new ValidationError(
         `IDEMPOTENT_DUPLICATE: تم تسوية فرق السعر لسطر فاتورة المورد (${input.invoiceLineId}) مسبقاً.`
       );
     }
 
-    const { method } = await this.getItemCostingMethod(companyId, input.itemId, tx);
+    const { method } = prefetched?.costing ?? (await this.getItemCostingMethod(companyId, input.itemId, tx));
 
     const qtyBasisUnits = parseExactUnits(input.invoicedQty, QTY_SCALE, 'invoicedQty');
     if (qtyBasisUnits <= 0n) {

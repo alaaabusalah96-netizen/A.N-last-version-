@@ -45,6 +45,7 @@ interface Item {
   id: string;
   code: string;
   nameAr: string;
+  nameEn?: string;
   uom: string;
   isActive: boolean;
 }
@@ -107,6 +108,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [balances, setBalances] = useState<StockBalance[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -168,6 +170,9 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
 
   const isAdminRole = userRole === 'platform_admin' || userRole === 'company_admin';
   const canWrite = isAdminRole || permissions.includes('inventory:write');
+  // Each action is gated by the permission the API actually requires (movement for receive/issue/transfer, valuation:adjust for adjustments).
+  const canMove = isAdminRole || permissions.includes('inventory:movement');
+  const canAdjust = isAdminRole || permissions.includes('inventory:valuation:adjust');
 
   // Fetch companies
   useEffect(() => {
@@ -353,7 +358,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
 
   const handleMovement = async (type: 'receive' | 'issue', e: React.FormEvent) => {
     e.preventDefault();
-    if (!canWrite) return;
+    if (!canMove) return;
     setActionLoading(true);
     setError(null);
     setSuccess(null);
@@ -407,7 +412,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
 
   const handleAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canWrite) return;
+    if (!canAdjust) return;
     setActionLoading(true);
     setError(null);
     setSuccess(null);
@@ -456,7 +461,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
 
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canWrite) return;
+    if (!canMove) return;
     setActionLoading(true);
     setError(null);
     setSuccess(null);
@@ -501,7 +506,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
         itemId={cardItemId}
         warehouses={warehouses}
         onClose={() => setCardItemId(null)}
-        onQuickAction={(actionType, selectedItemId) => {
+        onQuickAction={!canMove ? undefined : (actionType, selectedItemId) => {
           if (actionType === 'receive') {
             setMovementItemId(selectedItemId);
             setShowReceiveModal(true);
@@ -558,8 +563,9 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
-          {canWrite && (
+          {(canMove || canAdjust) && (
             <div className="flex flex-wrap items-center gap-2">
+              {canMove && (
               <button
                 onClick={() => setShowReceiveModal(true)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition cursor-pointer"
@@ -567,7 +573,9 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 <TrendingUp className="w-3.5 h-3.5" />
                 <span>إذن استلام</span>
               </button>
+              )}
 
+              {canMove && (
               <button
                 onClick={() => { setDocumentInitialType('issue'); setShowDocumentModal(true); }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-600/20 transition cursor-pointer"
@@ -575,7 +583,9 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 <TrendingDown className="w-3.5 h-3.5" />
                 <span>إذن صرف</span>
               </button>
+              )}
 
+              {canAdjust && (
               <button
                 onClick={() => setShowAdjustmentModal(true)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/20 transition cursor-pointer"
@@ -583,7 +593,9 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 <Layers className="w-3.5 h-3.5" />
                 <span>تسوية / إتلاف</span>
               </button>
+              )}
 
+              {canMove && (
               <button
                 onClick={() => { setDocumentInitialType('transfer'); setShowDocumentModal(true); }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
@@ -591,7 +603,9 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 <ArrowRightLeft className="w-3.5 h-3.5" />
                 <span>إذن تحويل</span>
               </button>
+              )}
 
+              {(canMove || canAdjust) && (
               <button
                 onClick={() => { setDocumentInitialType('issue'); setShowDocumentModal(true); }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl shadow-lg transition cursor-pointer"
@@ -599,6 +613,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                 <FileText className="w-3.5 h-3.5" />
                 <span>مستند متعدد الأسطر</span>
               </button>
+              )}
             </div>
           )}
         </div>
@@ -834,6 +849,35 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
         />
       )}
 
+      {editingItem && (
+        <EditRecordModal
+          title={`تعديل الصنف ${editingItem.code}`}
+          initial={editingItem}
+          fields={[
+            { key: 'nameAr', label: 'اسم الصنف (عربي)', required: true },
+            { key: 'nameEn', label: 'الاسم بالإنجليزية' },
+            { key: 'isActive', label: 'نشط', type: 'checkbox' },
+          ]}
+          onClose={() => setEditingItem(null)}
+          onSave={async (v) => {
+            const res = await apiFetch(`/api/inventory/items/${editingItem.id}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                companyId: selectedCompanyId,
+                nameAr: String(v.nameAr).trim(),
+                nameEn: String(v.nameEn || '').trim() || undefined,
+                isActive: !!v.isActive,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'فشل تعديل الصنف');
+            setEditingItem(null);
+            setSuccess('تم تعديل الصنف');
+            await loadData();
+          }}
+        />
+      )}
+
       {activeTab === 'items' && (
         <div className="flex flex-col gap-4">
           <div className="flex justify-end">
@@ -880,11 +924,25 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                       <td className="py-3.5 px-4 text-slate-200">{item.nameAr}</td>
                       <td className="py-3.5 px-4 text-center text-slate-400 font-mono">{item.uom}</td>
                       <td className="py-3.5 px-4 text-center">
-                        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/80 text-emerald-400">
-                          نشط
-                        </span>
+                        {item.isActive === false ? (
+                          <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 border border-slate-700 text-slate-400">
+                            غير نشط
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/80 text-emerald-400">
+                            نشط
+                          </span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-center">
+                        {canWrite && (
+                          <button
+                            onClick={() => setEditingItem(item)}
+                            className="px-2.5 py-1 mx-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer"
+                          >
+                            تعديل
+                          </button>
+                        )}
                         <button
                           onClick={() => setCardItemId(item.id)}
                           className="px-2.5 py-1 bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:text-white hover:bg-indigo-600 rounded-lg text-xs font-semibold transition cursor-pointer inline-flex items-center gap-1"
@@ -979,7 +1037,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
       {activeTab === 'transfers' && (
         <div className="flex flex-col gap-4">
           <div className="flex justify-end">
-            {canWrite && (
+            {canMove && (
               <button
                 onClick={() => setShowTransferModal(true)}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition cursor-pointer"
