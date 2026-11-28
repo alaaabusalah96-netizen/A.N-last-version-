@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { getLocalTodayDateString } from '../../lib/calendarDate.js';
+import { SalesReturnsPanel } from './SalesReturnsPanel.js';
 
 interface Company {
   id: string;
@@ -50,7 +51,7 @@ interface SalesWorkspaceProps {
   userRole?: string;
 }
 
-type SalesTab = 'customers' | 'deliveries' | 'invoices' | 'collections' | 'aging';
+type SalesTab = 'customers' | 'deliveries' | 'invoices' | 'collections' | 'returns' | 'aging';
 
 function sumCollectionLines(rows: Array<{ amount: string }>): number {
   let t = 0;
@@ -735,6 +736,18 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
         </button>
 
         <button
+          onClick={() => setActiveTab('returns')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+            activeTab === 'returns'
+              ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/20'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>مرتجعات المبيعات</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('aging')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
             activeTab === 'aging'
@@ -1034,6 +1047,16 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
       )}
 
       {/* Tab 5: AR Aging Report */}
+      {activeTab === 'returns' && (
+        <SalesReturnsPanel
+          companyId={selectedCompanyId}
+          canWrite={canWrite}
+          canPost={canPost}
+          invoices={invoices}
+          warehouses={warehouses}
+        />
+      )}
+
       {activeTab === 'aging' && (
         <div className="flex flex-col gap-6">
           {/* Aging Summary Metric Cards */}
