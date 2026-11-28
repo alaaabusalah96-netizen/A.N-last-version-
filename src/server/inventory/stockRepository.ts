@@ -96,6 +96,71 @@ export class StockRepository {
     return { ...row, qty: toDecimal(row.qty) };
   }
 
+  /** Locks and reads stock balances for many items in one query (item_id order). Missing rows are absent from the map. */
+  async lockBalancesForUpdate(
+    companyId: string,
+    warehouseId: string,
+    itemIds: string[],
+    executor: DbExecutor
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const ids = Array.from(new Set(itemIds));
+    if (ids.length === 0) return out;
+    const res = await executor.query<any>(
+      `SELECT item_id as "itemId", qty::text as "qty"
+       FROM inv_stock_balances
+       WHERE company_id = $1 AND warehouse_id = $2 AND item_id = ANY($3::uuid[])
+       ORDER BY item_id
+       FOR UPDATE`,
+      [companyId, warehouseId, ids]
+    );
+    for (const r of res.rows) out.set(r.itemId, r.qty);
+    return out;
+  }
+
+  /** Same effect as incrementBalance per item, in one statement. Items must be distinct. */
+  async incrementBalancesBulk(
+    companyId: string,
+    warehouseId: string,
+    items: { itemId: string; qty: number }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (items.length === 0) return;
+    await executor.query(
+      `INSERT INTO inv_stock_balances (company_id, warehouse_id, item_id, qty, updated_at)
+       SELECT $1, $2, v.item_id, v.qty, NOW()
+       FROM unnest($3::uuid[], $4::numeric[]) AS v(item_id, qty)
+       ON CONFLICT (company_id, warehouse_id, item_id)
+       DO UPDATE SET qty = inv_stock_balances.qty + EXCLUDED.qty, updated_at = NOW()`,
+      [companyId, warehouseId, items.map((i) => i.itemId), items.map((i) => i.qty)]
+    );
+  }
+
+  /** Same effect as createMovement per row (one row per input line, in order), in one statement. */
+  async createMovementsBulk(
+    companyId: string,
+    warehouseId: string,
+    rows: { itemId: string; qty: number }[],
+    movementType: MovementType,
+    memo: string | null,
+    createdBy: string | null,
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    for (const r of rows) {
+      if (!Number.isFinite(r.qty) || r.qty <= 0) {
+        throw new Error('Stock movement qty must be > 0; direction is expressed by movement_type');
+      }
+    }
+    await executor.query(
+      `INSERT INTO inv_stock_movements (company_id, warehouse_id, item_id, movement_type, qty, memo, created_by, transfer_id)
+       SELECT $1, $2, v.item_id, $3, v.qty, $4, $5, NULL
+       FROM unnest($6::uuid[], $7::numeric[]) WITH ORDINALITY AS v(item_id, qty, ord)
+       ORDER BY v.ord`,
+      [companyId, warehouseId, movementType, memo, createdBy, rows.map((r) => r.itemId), rows.map((r) => r.qty)]
+    );
+  }
+
   async decrementBalance(
     companyId: string,
     warehouseId: string,

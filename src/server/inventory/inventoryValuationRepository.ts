@@ -454,6 +454,316 @@ export class InventoryValuationRepository {
     return mapBalance(res.rows[0]);
   }
 
+  // ===== Bulk receipt helpers (one statement per table instead of per line) =====
+
+  async getItemAssignmentsBulk(
+    companyId: string,
+    itemIds: string[],
+    executor: DbExecutor
+  ): Promise<Map<string, { profileId: string; costingMethod: CostingMethod }>> {
+    const out = new Map<string, { profileId: string; costingMethod: CostingMethod }>();
+    const ids = Array.from(new Set(itemIds));
+    if (ids.length === 0) return out;
+    const res = await executor.query<any>(
+      `SELECT icp.item_id as "itemId", icp.profile_id as "profileId", cp.costing_method as "costingMethod"
+       FROM inv_item_costing_profiles icp
+       JOIN inv_items i ON icp.company_id = i.company_id AND icp.item_id = i.id
+       JOIN inv_costing_profiles cp ON icp.company_id = cp.company_id AND icp.profile_id = cp.id
+       WHERE icp.company_id = $1 AND icp.item_id = ANY($2::uuid[]) AND cp.is_active = true;`,
+      [companyId, ids]
+    );
+    for (const r of res.rows) {
+      if (r.profileId && r.costingMethod) out.set(r.itemId, { profileId: r.profileId, costingMethod: r.costingMethod });
+    }
+    return out;
+  }
+
+  /** Idempotency: returns the sourceLineIds that already have a valuation movement of this type for the source. */
+  async findExistingMovementLineIds(
+    companyId: string,
+    warehouseId: string,
+    movementType: ValuationMovementType,
+    sourceType: string,
+    sourceId: string,
+    itemIds: string[],
+    executor: DbExecutor
+  ): Promise<{ itemId: string; sourceLineId: string | null }[]> {
+    const ids = Array.from(new Set(itemIds));
+    if (ids.length === 0) return [];
+    const res = await executor.query<any>(
+      `SELECT item_id as "itemId", source_line_id as "sourceLineId"
+       FROM inv_valuation_movements
+       WHERE company_id = $1 AND warehouse_id = $2 AND movement_type = $3
+         AND source_type = $4 AND source_id = $5 AND item_id = ANY($6::uuid[]);`,
+      [companyId, warehouseId, movementType, sourceType, sourceId, ids]
+    );
+    return res.rows;
+  }
+
+  /** Ensures rows exist, then locks and reads them for many items (item_id order). */
+  async lockValuationBalancesBulk(
+    companyId: string,
+    warehouseId: string,
+    itemIds: string[],
+    executor: DbExecutor
+  ): Promise<Map<string, { quantity: string; totalCost: string }>> {
+    const out = new Map<string, { quantity: string; totalCost: string }>();
+    const ids = Array.from(new Set(itemIds)).sort();
+    if (ids.length === 0) return out;
+    await executor.query(
+      `INSERT INTO inv_valuation_balances (company_id, warehouse_id, item_id, quantity, total_cost, unit_cost)
+       SELECT $1, $2, v.item_id, 0, 0, 0 FROM unnest($3::uuid[]) AS v(item_id)
+       ON CONFLICT (company_id, warehouse_id, item_id) DO NOTHING;`,
+      [companyId, warehouseId, ids]
+    );
+    const res = await executor.query<any>(
+      `SELECT item_id as "itemId", quantity::text as "quantity", total_cost::text as "totalCost"
+       FROM inv_valuation_balances
+       WHERE company_id = $1 AND warehouse_id = $2 AND item_id = ANY($3::uuid[])
+       ORDER BY item_id
+       FOR UPDATE;`,
+      [companyId, warehouseId, ids]
+    );
+    for (const r of res.rows) out.set(r.itemId, { quantity: r.quantity, totalCost: r.totalCost });
+    return out;
+  }
+
+  async setValuationBalancesBulk(
+    companyId: string,
+    warehouseId: string,
+    rows: { itemId: string; quantity: string; totalCost: string; unitCost: string }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `UPDATE inv_valuation_balances b
+       SET quantity = v.quantity::numeric, total_cost = v.total_cost::numeric, unit_cost = v.unit_cost::numeric, updated_at = now()
+       FROM unnest($3::uuid[], $4::text[], $5::text[], $6::text[]) AS v(item_id, quantity, total_cost, unit_cost)
+       WHERE b.company_id = $1 AND b.warehouse_id = $2 AND b.item_id = v.item_id;`,
+      [
+        companyId,
+        warehouseId,
+        rows.map((r) => r.itemId),
+        rows.map((r) => r.quantity),
+        rows.map((r) => r.totalCost),
+        rows.map((r) => r.unitCost),
+      ]
+    );
+  }
+
+  async createCostLayersBulk(
+    companyId: string,
+    common: {
+      warehouseId: string;
+      sourceType: string;
+      sourceId: string;
+      originLayerId?: string | null;
+      originSourceType?: string | null;
+      originSourceId?: string | null;
+      effectiveDate?: string | null;
+    },
+    rows: { itemId: string; qty: string; unitCost: string; totalCost: string; sourceLineId: string | null; originSourceLineId: string | null }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `INSERT INTO inv_cost_layers (
+         company_id, warehouse_id, item_id, original_qty, remaining_qty,
+         unit_cost, total_cost, source_type, source_id, source_line_id,
+         origin_layer_id, origin_source_type, origin_source_id, origin_source_line_id,
+         effective_date
+       )
+       SELECT $1, $2, v.item_id, v.qty::numeric, v.qty::numeric, v.unit_cost::numeric, v.total_cost::numeric,
+              $3, $4, v.source_line_id, $5, $6, $7, v.origin_source_line_id, COALESCE($8::timestamptz, now())
+       FROM unnest($9::uuid[], $10::text[], $11::text[], $12::text[], $13::uuid[], $14::uuid[])
+            WITH ORDINALITY AS v(item_id, qty, unit_cost, total_cost, source_line_id, origin_source_line_id, ord)
+       ORDER BY v.ord;`,
+      [
+        companyId,
+        common.warehouseId,
+        common.sourceType,
+        common.sourceId,
+        common.originLayerId || null,
+        common.originSourceType || common.sourceType,
+        common.originSourceId || common.sourceId,
+        common.effectiveDate || null,
+        rows.map((r) => r.itemId),
+        rows.map((r) => r.qty),
+        rows.map((r) => r.unitCost),
+        rows.map((r) => r.totalCost),
+        rows.map((r) => r.sourceLineId),
+        rows.map((r) => r.originSourceLineId),
+      ]
+    );
+  }
+
+  /** Returns a map sourceLineId -> movement id (sourceLineId must be unique within the batch). */
+  async createValuationMovementsBulk(
+    companyId: string,
+    common: {
+      warehouseId: string;
+      movementType: ValuationMovementType;
+      sourceType: string;
+      sourceId: string;
+      journalEntryId?: string | null;
+      reason?: string | null;
+      costSource?: string | null;
+      referenceMovementId?: string | null;
+      notes?: string | null;
+      createdBy?: string | null;
+    },
+    rows: { itemId: string; qty: string; unitCost: string; totalCost: string; sourceLineId: string | null; costingMethod: CostingMethod }[],
+    executor: DbExecutor
+  ): Promise<Map<string | null, string>> {
+    const out = new Map<string | null, string>();
+    if (rows.length === 0) return out;
+    const res = await executor.query<any>(
+      `INSERT INTO inv_valuation_movements (
+         company_id, warehouse_id, item_id, movement_type, qty, unit_cost, total_cost,
+         source_type, source_id, source_line_id, journal_entry_id,
+         reason, cost_source, costing_method, reference_movement_id, notes, created_by
+       )
+       SELECT $1, $2, v.item_id, $3, v.qty::numeric, v.unit_cost::numeric, v.total_cost::numeric,
+              $4, $5, v.source_line_id, $6, $7, $8, v.costing_method, $9, $10, $11
+       FROM unnest($12::uuid[], $13::text[], $14::text[], $15::text[], $16::uuid[], $17::text[])
+            WITH ORDINALITY AS v(item_id, qty, unit_cost, total_cost, source_line_id, costing_method, ord)
+       ORDER BY v.ord
+       RETURNING id, source_line_id as "sourceLineId";`,
+      [
+        companyId,
+        common.warehouseId,
+        common.movementType,
+        common.sourceType,
+        common.sourceId,
+        common.journalEntryId || null,
+        common.reason || null,
+        common.costSource || null,
+        common.referenceMovementId || null,
+        common.notes || null,
+        common.createdBy || null,
+        rows.map((r) => r.itemId),
+        rows.map((r) => r.qty),
+        rows.map((r) => r.unitCost),
+        rows.map((r) => r.totalCost),
+        rows.map((r) => r.sourceLineId),
+        rows.map((r) => r.costingMethod),
+      ]
+    );
+    for (const r of res.rows) out.set(r.sourceLineId ?? null, r.id);
+    return out;
+  }
+
+  async upsertMaSourceBalancesBulk(
+    companyId: string,
+    common: { warehouseId: string; sourceType: string; sourceId: string; originSourceType: string; originSourceId: string },
+    rows: { itemId: string; sourceLineId: string | null; originSourceLineId: string | null; grnId: string | null; grnLineId: string | null; qty: string; totalCost: string }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `INSERT INTO inv_ma_source_balances (
+         company_id, warehouse_id, item_id,
+         source_type, source_id, source_line_id,
+         origin_source_type, origin_source_id, origin_source_line_id,
+         grn_id, grn_line_id,
+         received_qty, remaining_qty, consumed_qty,
+         original_value, remaining_value, consumed_value
+       )
+       SELECT $1, $2, v.item_id, $3, $4, v.source_line_id, $5, $6, v.origin_source_line_id,
+              v.grn_id, v.grn_line_id,
+              v.qty::numeric, v.qty::numeric, '0.0000'::numeric,
+              v.total_cost::numeric, v.total_cost::numeric, '0.0000'::numeric
+       FROM unnest($7::uuid[], $8::uuid[], $9::uuid[], $10::uuid[], $11::uuid[], $12::text[], $13::text[])
+            WITH ORDINALITY AS v(item_id, source_line_id, origin_source_line_id, grn_id, grn_line_id, qty, total_cost, ord)
+       ORDER BY v.ord
+       ON CONFLICT (
+         company_id, warehouse_id, item_id, source_type, source_id,
+         COALESCE(source_line_id, '00000000-0000-0000-0000-000000000000'::uuid),
+         origin_source_type, origin_source_id,
+         COALESCE(origin_source_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       )
+       DO UPDATE SET
+         grn_id = COALESCE(inv_ma_source_balances.grn_id, EXCLUDED.grn_id),
+         grn_line_id = COALESCE(inv_ma_source_balances.grn_line_id, EXCLUDED.grn_line_id),
+         received_qty = EXCLUDED.received_qty,
+         remaining_qty = EXCLUDED.remaining_qty,
+         consumed_qty = EXCLUDED.consumed_qty,
+         original_value = EXCLUDED.original_value,
+         remaining_value = EXCLUDED.remaining_value,
+         consumed_value = EXCLUDED.consumed_value,
+         updated_at = now();`,
+      [
+        companyId,
+        common.warehouseId,
+        common.sourceType,
+        common.sourceId,
+        common.originSourceType,
+        common.originSourceId,
+        rows.map((r) => r.itemId),
+        rows.map((r) => r.sourceLineId),
+        rows.map((r) => r.originSourceLineId),
+        rows.map((r) => r.grnId),
+        rows.map((r) => r.grnLineId),
+        rows.map((r) => r.qty),
+        rows.map((r) => r.totalCost),
+      ]
+    );
+  }
+
+  async createMaSourceEventsBulk(
+    companyId: string,
+    common: {
+      warehouseId: string;
+      sourceType: string;
+      sourceId: string;
+      originSourceType: string;
+      originSourceId: string;
+      eventType: MaSourceEventType;
+    },
+    rows: { itemId: string; sourceLineId: string | null; originSourceLineId: string | null; grnId: string | null; grnLineId: string | null; qty: string; totalCost: string; referenceMovementId: string | null }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `INSERT INTO inv_ma_source_events (
+         company_id, item_id, warehouse_id,
+         source_type, source_id, source_line_id,
+         origin_source_type, origin_source_id, origin_source_line_id,
+         grn_id, grn_line_id,
+         event_type, quantity, value_delta, reference_movement_id
+       )
+       SELECT $1, v.item_id, $2, $3, $4, v.source_line_id, $5, $6, v.origin_source_line_id,
+              v.grn_id, v.grn_line_id, $7, v.qty::numeric, v.total_cost::numeric, v.reference_movement_id
+       FROM unnest($8::uuid[], $9::uuid[], $10::uuid[], $11::uuid[], $12::uuid[], $13::text[], $14::text[], $15::uuid[])
+            WITH ORDINALITY AS v(item_id, source_line_id, origin_source_line_id, grn_id, grn_line_id, qty, total_cost, reference_movement_id, ord)
+       ORDER BY v.ord
+       ON CONFLICT (
+         company_id, event_type, warehouse_id, item_id, origin_source_type, origin_source_id,
+         COALESCE(origin_source_line_id, '00000000-0000-0000-0000-000000000000'::uuid),
+         source_type, source_id,
+         COALESCE(source_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       )
+       DO NOTHING;`,
+      [
+        companyId,
+        common.warehouseId,
+        common.sourceType,
+        common.sourceId,
+        common.originSourceType,
+        common.originSourceId,
+        common.eventType,
+        rows.map((r) => r.itemId),
+        rows.map((r) => r.sourceLineId),
+        rows.map((r) => r.originSourceLineId),
+        rows.map((r) => r.grnId),
+        rows.map((r) => r.grnLineId),
+        rows.map((r) => r.qty),
+        rows.map((r) => r.totalCost),
+        rows.map((r) => r.referenceMovementId),
+      ]
+    );
+  }
+
   async createCostLayer(
     companyId: string,
     input: {

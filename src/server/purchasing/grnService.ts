@@ -49,7 +49,8 @@ export class GrnService {
     private settingsRepo: CompanySettingsRepository = defaultCompanySettingsRepository,
     private configService: Pick<ConfigService, 'resolveConfig'> = defaultConfigService,
     private accountRepo: AccountRepository = defaultAccountRepository,
-    private valuationService: Pick<InventoryValuationService, 'processReceipt' | 'getItemCostingMethod'> = defaultInventoryValuationService
+    private valuationService: Pick<InventoryValuationService, 'processReceipt' | 'getItemCostingMethod'> & Partial<Pick<InventoryValuationService, 'processReceiptBatch' | 'getItemCostingMethods'>> = defaultInventoryValuationService,
+    private options: { perLineReceipt?: boolean } = {}
   ) {
     this.glMappingService = new GlMappingService(this.configService, this.accountRepo);
   }
@@ -425,8 +426,17 @@ export class GrnService {
       }
 
       // Validate every item has an explicit approved costing profile before creating GL journal entries
-      for (const line of grn.lines) {
-        await this.valuationService.getItemCostingMethod(companyId, line.itemId, tx);
+      const useBatch =
+        !this.options.perLineReceipt &&
+        typeof this.valuationService.processReceiptBatch === 'function' &&
+        typeof this.valuationService.getItemCostingMethods === 'function' &&
+        typeof (this.stockRepo as any).lockBalancesForUpdate === 'function';
+      if (useBatch) {
+        await this.valuationService.getItemCostingMethods!(companyId, grn.lines.map((l) => l.itemId), tx);
+      } else {
+        for (const line of grn.lines) {
+          await this.valuationService.getItemCostingMethod(companyId, line.itemId, tx);
+        }
       }
 
       await this.assertGlAccountsUsable(companyId, gl, tx);
@@ -452,6 +462,74 @@ export class GrnService {
       const postedJournal = await defaultJournalService.postEntry(companyId, journalEntry.id, actorId || '', false, tx);
 
       // WRITE phase — Single coordinated transaction: stock balance + stock movement + valuation layer/pool + movement
+      if (useBatch) {
+        const preStocks = await this.stockRepo.lockBalancesForUpdate(companyId, grn.warehouseId, grn.lines.map((l) => l.itemId), tx);
+        const runningStock = new Map<string, bigint>();
+        for (const [itemId, qtyText] of preStocks) {
+          runningStock.set(itemId, parseExactUnits(qtyText, QTY_SCALE, 'stockQty'));
+        }
+        const batchLines: {
+          itemId: string;
+          qty: number;
+          unitCost: number;
+          totalCost: number;
+          sourceLineId: string;
+          expectedPreStockQty: number;
+          expectedPostStockQty: number;
+        }[] = [];
+        const incrementByItem = new Map<string, bigint>();
+        const movementRows: { itemId: string; qty: number }[] = [];
+        for (const line of grn.lines) {
+          const lineQtyUnits = parseExactUnits(line.qty, QTY_SCALE, 'qty');
+          const lineUnitCostUnits = parseExactUnits(line.unitCost ?? 0, COST_SCALE, 'unitCost');
+          const lineTotalCostUnits = mulExactUnits(lineQtyUnits, QTY_SCALE, lineUnitCostUnits, COST_SCALE, COST_SCALE);
+          const lineQty = unitsToSafeNumber(lineQtyUnits, QTY_SCALE);
+          const preUnits = runningStock.get(line.itemId) ?? 0n;
+          const postUnits = preUnits + lineQtyUnits;
+          runningStock.set(line.itemId, postUnits);
+          incrementByItem.set(line.itemId, (incrementByItem.get(line.itemId) ?? 0n) + lineQtyUnits);
+          movementRows.push({ itemId: line.itemId, qty: lineQty });
+          batchLines.push({
+            itemId: line.itemId,
+            qty: fromMinorUnits(lineQtyUnits, QTY_SCALE) as any,
+            unitCost: fromMinorUnits(lineUnitCostUnits, COST_SCALE) as any,
+            totalCost: fromMinorUnits(lineTotalCostUnits, COST_SCALE) as any,
+            sourceLineId: line.id,
+            expectedPreStockQty: unitsToSafeNumber(preUnits, QTY_SCALE),
+            expectedPostStockQty: unitsToSafeNumber(postUnits, QTY_SCALE),
+          });
+        }
+        await this.stockRepo.incrementBalancesBulk(
+          companyId,
+          grn.warehouseId,
+          Array.from(incrementByItem, ([itemId, units]) => ({ itemId, qty: unitsToSafeNumber(units, QTY_SCALE) })),
+          tx
+        );
+        await this.stockRepo.createMovementsBulk(
+          companyId,
+          grn.warehouseId,
+          movementRows,
+          'receive',
+          `استلام بضائع سند ${grnNo}`,
+          actorId || null,
+          tx
+        );
+        await this.valuationService.processReceiptBatch!(
+          companyId,
+          {
+            warehouseId: grn.warehouseId,
+            sourceType: 'GRN',
+            sourceId: grnId,
+            journalEntryId: postedJournal.id,
+            movementType: 'RECEIVE',
+            reason: `ترحيل سند استلام ${grnNo}`,
+            costSource: 'GRN',
+          },
+          batchLines,
+          actorId,
+          tx
+        );
+      } else {
       for (const line of grn.lines) {
         const lineQtyUnits = parseExactUnits(line.qty, QTY_SCALE, 'qty');
         const lineUnitCostUnits = parseExactUnits(line.unitCost ?? 0, COST_SCALE, 'unitCost');
@@ -500,6 +578,7 @@ export class GrnService {
           actorId,
           tx
         );
+      }
       }
 
       await this.grnRepo.markPosted(companyId, grnId, grnNo, actorId || '', postedJournal.id, tx);

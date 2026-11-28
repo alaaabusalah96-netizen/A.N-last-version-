@@ -15,6 +15,7 @@ import {
   ValuationBalance,
   CostLayer,
   ValuationMovement,
+  ValuationMovementType,
   CostAllocationRecord,
   CostAdjustmentRecord,
   OpeningValuationInput,
@@ -350,6 +351,259 @@ export class InventoryValuationService {
       );
     }
     return { method: assignment.costingMethod, profileId: assignment.profileId };
+  }
+
+  /**
+   * Costing methods for many items in one query. Throws the same COSTING_PROFILE_REQUIRED error as
+   * getItemCostingMethod for the first item (in input order) that has no active assignment.
+   */
+  async getItemCostingMethods(
+    companyId: string,
+    itemIds: string[],
+    client: DbExecutor
+  ): Promise<Map<string, { method: CostingMethod; profileId: string }>> {
+    const found = await this.valuationRepo.getItemAssignmentsBulk(companyId, itemIds, client);
+    const out = new Map<string, { method: CostingMethod; profileId: string }>();
+    for (const id of itemIds) {
+      const a = found.get(id);
+      if (!a) {
+        // Reuse the single-item path so the error text stays identical.
+        await this.getItemCostingMethod(companyId, id, client);
+        throw new ValidationError('COSTING_PROFILE_REQUIRED');
+      }
+      out.set(id, { method: a.costingMethod, profileId: a.profileId });
+    }
+    return out;
+  }
+
+  /**
+   * Batched equivalent of calling processReceipt once per line, in order, for ONE warehouse and ONE source
+   * (e.g. one GRN) with stockSyncMode 'external_verified'. Same BigInt math and checks, but it reads
+   * everything it needs up front, keeps running balances in memory (so repeated items behave exactly
+   * like sequential per-line calls) and writes each table with one statement.
+   */
+  async processReceiptBatch(
+    companyId: string,
+    common: {
+      warehouseId: string;
+      sourceType: string;
+      sourceId: string;
+      journalEntryId?: string | null;
+      movementType?: ValuationMovementType;
+      reason?: string | null;
+      costSource?: string | null;
+      effectiveDate?: string | null;
+    },
+    lines: {
+      itemId: string;
+      qty: string | number;
+      unitCost?: string | number | null;
+      totalCost?: string | number | null;
+      sourceLineId: string;
+      expectedPreStockQty?: string | number;
+      expectedPostStockQty?: string | number;
+    }[],
+    userId: string | undefined,
+    tx: DbExecutor
+  ): Promise<void> {
+    if (lines.length === 0) return;
+    const movementType: ValuationMovementType = common.movementType || 'RECEIVE';
+    const seenLineIds = new Set<string>();
+
+    // 1) per-line validation and exact units (identical to processReceipt)
+    const prepared = lines.map((input) => {
+      if (seenLineIds.has(input.sourceLineId)) {
+        throw new ValidationError('تكرار معرّف بند المصدر داخل نفس الدفعة');
+      }
+      seenLineIds.add(input.sourceLineId);
+      const qtyUnits = parseExactUnits(input.qty, QTY_SCALE, 'qty');
+      if (qtyUnits <= 0n) {
+        throw new ValidationError('كمية الاستلام يجب أن تكون أكبر من الصفر');
+      }
+      let totalCostUnits: bigint;
+      let unitCostUnits: bigint;
+      if (input.totalCost !== undefined && input.totalCost !== null) {
+        totalCostUnits = parseExactUnits(input.totalCost, COST_SCALE, 'totalCost');
+        if (totalCostUnits < 0n) {
+          throw new ValidationError('التكلفة الإجمالية لا يمكن أن تكون سالبة');
+        }
+        unitCostUnits =
+          input.unitCost !== undefined && input.unitCost !== null
+            ? parseExactUnits(input.unitCost, COST_SCALE, 'unitCost')
+            : divExactUnits(totalCostUnits, COST_SCALE, qtyUnits, QTY_SCALE, COST_SCALE);
+      } else if (input.unitCost !== undefined && input.unitCost !== null) {
+        unitCostUnits = parseExactUnits(input.unitCost, COST_SCALE, 'unitCost');
+        if (unitCostUnits < 0n) {
+          throw new ValidationError('تكلفة الوحدة لا يمكن أن تكون سالبة');
+        }
+        totalCostUnits = mulExactUnits(qtyUnits, QTY_SCALE, unitCostUnits, COST_SCALE, COST_SCALE);
+      } else {
+        throw new ValidationError('يجب تحديد تكلفة الوحدة أو التكلفة الإجمالية للاستلام');
+      }
+      if (unitCostUnits < 0n) {
+        throw new ValidationError('تكلفة الوحدة لا يمكن أن تكون سالبة');
+      }
+      if (
+        (movementType === 'OPENING' ||
+          movementType === 'ADJUSTMENT' ||
+          common.sourceType === 'MANUAL_RECEIPT' ||
+          common.sourceType === 'STOCK_ADJUSTMENT') &&
+        totalCostUnits <= 0n
+      ) {
+        throw new ValidationError('لا يُسمح بإنشاء مخزون مالي بتكلفة صفرية في الاستلام اليدوي أو التسوية');
+      }
+      return { input, qtyUnits, unitCostUnits, totalCostUnits };
+    });
+
+    const itemIds = prepared.map((p) => p.input.itemId);
+
+    // 2) idempotency guard (one query)
+    const existing = await this.valuationRepo.findExistingMovementLineIds(
+      companyId,
+      common.warehouseId,
+      movementType,
+      common.sourceType,
+      common.sourceId,
+      itemIds,
+      tx
+    );
+    for (const e of existing) {
+      const hit = prepared.find((p) => p.input.itemId === e.itemId && (p.input.sourceLineId ?? null) === (e.sourceLineId ?? null));
+      if (hit) {
+        throw new ValidationError(
+          `IDEMPOTENT_DUPLICATE: تم تسجيل حركة تقييم (${movementType}) مسبقاً للمصدر (${common.sourceType}:${common.sourceId}) والبند.`
+        );
+      }
+    }
+
+    // 3) lock balances and read costing methods (one query each)
+    const balances = await this.valuationRepo.lockValuationBalancesBulk(companyId, common.warehouseId, itemIds, tx);
+    const methods = await this.getItemCostingMethods(companyId, itemIds, tx);
+
+    // 4) sequential in-memory pass (same math and checks as the per-line path)
+    const running = new Map<string, { qty: bigint; total: bigint }>();
+    for (const [id, b] of balances) {
+      running.set(id, {
+        qty: parseExactUnits(b.quantity, QTY_SCALE, 'prevQty'),
+        total: parseExactUnits(b.totalCost, COST_SCALE, 'prevTotalCost'),
+      });
+    }
+    const movementRows: { itemId: string; qty: string; unitCost: string; totalCost: string; sourceLineId: string | null; costingMethod: CostingMethod }[] = [];
+    const layerRows: { itemId: string; qty: string; unitCost: string; totalCost: string; sourceLineId: string | null; originSourceLineId: string | null }[] = [];
+    const maRows: { itemId: string; sourceLineId: string | null; originSourceLineId: string | null; grnId: string | null; grnLineId: string | null; qty: string; totalCost: string }[] = [];
+    const originSourceType = common.sourceType;
+    const originSourceId = common.sourceId;
+
+    for (const p of prepared) {
+      const { input, qtyUnits, unitCostUnits, totalCostUnits } = p;
+      const cur = running.get(input.itemId) || { qty: 0n, total: 0n };
+      const prevQtyUnits = cur.qty;
+      const prevTotalUnits = cur.total;
+      const method = methods.get(input.itemId)!.method;
+
+      const newQtyUnits = prevQtyUnits + qtyUnits;
+      const newTotalUnits = prevTotalUnits + totalCostUnits;
+
+      if (input.expectedPreStockQty !== undefined) {
+        const preUnits = parseExactUnits(input.expectedPreStockQty, QTY_SCALE, 'expectedPreStockQty');
+        if (preUnits !== prevQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: رصيد المخزون قبل الاستلام (${fromMinorUnits(preUnits, QTY_SCALE)}) لا يطابق رصيد التقييم (${fromMinorUnits(prevQtyUnits, QTY_SCALE)}).`
+          );
+        }
+      }
+      if (input.expectedPostStockQty !== undefined) {
+        const postUnits = parseExactUnits(input.expectedPostStockQty, QTY_SCALE, 'expectedPostStockQty');
+        if (postUnits !== newQtyUnits) {
+          throw new ValidationError(
+            `VALUATION_INTEGRITY_ERROR: رصيد المخزون بعد الاستلام (${fromMinorUnits(postUnits, QTY_SCALE)}) لا يطابق رصيد التقييم بعد الاستلام (${fromMinorUnits(newQtyUnits, QTY_SCALE)}).`
+          );
+        }
+      }
+
+      running.set(input.itemId, { qty: newQtyUnits, total: newTotalUnits });
+
+      const qtyStr = fromMinorUnits(qtyUnits, QTY_SCALE);
+      const unitStr = fromMinorUnits(unitCostUnits, COST_SCALE);
+      const totalStr = fromMinorUnits(totalCostUnits, COST_SCALE);
+      movementRows.push({ itemId: input.itemId, qty: qtyStr, unitCost: unitStr, totalCost: totalStr, sourceLineId: input.sourceLineId, costingMethod: method });
+      if (method === 'FIFO') {
+        layerRows.push({ itemId: input.itemId, qty: qtyStr, unitCost: unitStr, totalCost: totalStr, sourceLineId: input.sourceLineId, originSourceLineId: input.sourceLineId });
+      }
+      if (method === 'PERPETUAL_MOVING_AVERAGE') {
+        const isGrn = originSourceType === 'GRN';
+        maRows.push({
+          itemId: input.itemId,
+          sourceLineId: input.sourceLineId,
+          originSourceLineId: input.sourceLineId,
+          grnId: isGrn ? originSourceId : null,
+          grnLineId: isGrn ? input.sourceLineId : null,
+          qty: qtyStr,
+          totalCost: totalStr,
+        });
+      }
+    }
+
+    // 5) writes: one statement per table
+    if (layerRows.length > 0) {
+      await this.valuationRepo.createCostLayersBulk(
+        companyId,
+        {
+          warehouseId: common.warehouseId,
+          sourceType: common.sourceType,
+          sourceId: common.sourceId,
+          originSourceType,
+          originSourceId,
+          effectiveDate: common.effectiveDate ?? null,
+        },
+        layerRows,
+        tx
+      );
+    }
+    const balanceRows: { itemId: string; quantity: string; totalCost: string; unitCost: string }[] = [];
+    for (const [itemId, r] of running) {
+      const unit = r.qty > 0n ? divExactUnits(r.total, COST_SCALE, r.qty, QTY_SCALE, COST_SCALE) : 0n;
+      balanceRows.push({
+        itemId,
+        quantity: fromMinorUnits(r.qty, QTY_SCALE),
+        totalCost: fromMinorUnits(r.total, COST_SCALE),
+        unitCost: fromMinorUnits(unit, COST_SCALE),
+      });
+    }
+    await this.valuationRepo.setValuationBalancesBulk(companyId, common.warehouseId, balanceRows, tx);
+
+    const movementIds = await this.valuationRepo.createValuationMovementsBulk(
+      companyId,
+      {
+        warehouseId: common.warehouseId,
+        movementType,
+        sourceType: common.sourceType,
+        sourceId: common.sourceId,
+        journalEntryId: common.journalEntryId ?? null,
+        reason: common.reason ?? null,
+        costSource: common.costSource ?? null,
+        createdBy: userId ?? null,
+      },
+      movementRows,
+      tx
+    );
+
+    if (maRows.length > 0) {
+      const maEventType: MaSourceEventType =
+        movementType === 'OPENING' ? 'OPENING' : movementType === 'TRANSFER_IN' ? 'TRANSFER_IN' : 'RECEIPT';
+      await this.valuationRepo.upsertMaSourceBalancesBulk(
+        companyId,
+        { warehouseId: common.warehouseId, sourceType: common.sourceType, sourceId: common.sourceId, originSourceType, originSourceId },
+        maRows,
+        tx
+      );
+      await this.valuationRepo.createMaSourceEventsBulk(
+        companyId,
+        { warehouseId: common.warehouseId, sourceType: common.sourceType, sourceId: common.sourceId, originSourceType, originSourceId, eventType: maEventType },
+        maRows.map((r) => ({ ...r, referenceMovementId: movementIds.get(r.sourceLineId) ?? null })),
+        tx
+      );
+    }
   }
 
   /**
