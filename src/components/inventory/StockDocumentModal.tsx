@@ -19,6 +19,7 @@ interface Line {
   itemId: string;
   qty: string;
   unitCost: string;
+  expiryDate?: string;
   direction: 'increase' | 'decrease';
 }
 
@@ -81,13 +82,13 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
     pasteText.split(/\r?\n/).forEach((raw, idx) => {
       const row = raw.trim();
       if (!row) return;
-      const [code, qty, cost] = row.split(/[,\t;]/).map((p) => p.trim());
+      const [code, qty, cost, expiry] = row.split(/[,\t;]/).map((p) => p.trim());
       const id = byCode.get((code || '').toLowerCase());
       if (!id) {
         unknown.push(`السطر ${idx + 1}: كود الصنف غير معروف (${code || 'فارغ'})`);
         return;
       }
-      parsed.push({ itemId: id, qty: qty || '', unitCost: cost || '', direction: 'increase' });
+      parsed.push({ itemId: id, qty: qty || '', unitCost: cost || '', expiryDate: expiry || '', direction: 'increase' });
     });
     if (unknown.length > 0) {
       setError(unknown.slice(0, 5).join(' | ') + (unknown.length > 5 ? ` ... (+${unknown.length - 5})` : ''));
@@ -122,6 +123,7 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
           itemId: l.itemId,
           qty: Number(l.qty),
           unitCost: l.unitCost !== '' ? Number(l.unitCost) : undefined,
+          expiryDate: docType === 'receipt' && l.expiryDate ? l.expiryDate : undefined,
           direction: docType === 'adjustment' ? l.direction : undefined,
         })),
       };
@@ -273,6 +275,7 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
                   {docType === 'adjustment' && <th className="p-2 w-28">الاتجاه</th>}
                   <th className="p-2 w-28">الكمية</th>
                   {needsCost && <th className="p-2 w-28">تكلفة الوحدة</th>}
+                  {docType === 'receipt' && <th className="p-2 w-36">تاريخ الصلاحية</th>}
                   <th className="p-2 w-10" />
                 </tr>
               </thead>
@@ -310,6 +313,11 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
                           onChange={(e) => updateLine(i, { unitCost: e.target.value })}
                           className={inputCls}
                         />
+                      </td>
+                    )}
+                    {docType === 'receipt' && (
+                      <td className="p-2">
+                        <input type="date" value={l.expiryDate || ''} data-testid={`line-expiry-${i}`} onChange={(e) => updateLine(i, { expiryDate: e.target.value })} className={inputCls} />
                       </td>
                     )}
                     <td className="p-2">

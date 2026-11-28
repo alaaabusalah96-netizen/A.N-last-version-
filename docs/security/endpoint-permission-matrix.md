@@ -4,9 +4,9 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 293
+- **Total Mounted Endpoints**: 294
 - **Mounted Route Modules Parsed**: 18
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 285
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 286
 - **Platform Admin-Only (`requirePlatformAdmin`)**: 3
 - **Authenticated Self-Service (`requireAuth` only)**: 2
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
@@ -220,6 +220,7 @@
 | `/api/inventory` | `POST` | `/api/inventory/opening-valuations/:id/reject` | `true` | `PERMISSIONS.INVENTORY_OPENING_APPROVE` | `src/server/inventory/inventoryValuationRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/receive` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/reports/cost-center-issues` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
+| `/api/inventory` | `GET` | `/api/inventory/reports/supply-list` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/stocktakes` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/stocktakes` | `true` | `PERMISSIONS.INVENTORY_MOVEMENT` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/stocktakes/:id` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |

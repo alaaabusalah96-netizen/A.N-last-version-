@@ -7,6 +7,7 @@ import { defaultItemService } from '../inventory/itemService.js';
 import { defaultStockService } from '../inventory/stockService.js';
 import { defaultStockDocumentService } from '../inventory/stockDocumentService.js';
 import { defaultStocktakeService } from '../inventory/stocktakeService.js';
+import { defaultSupplyListService } from '../inventory/supplyListService.js';
 import { defaultCostCenterIssueReportService } from '../inventory/costCenterIssueReportService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
@@ -242,7 +243,7 @@ inventoryRoutes.post(
 
     await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
 
-    const { warehouseId, itemId, qty, unitCost, costSource, reason, memo, entryDate, expenseAccountId } = req.body;
+    const { warehouseId, itemId, qty, unitCost, costSource, reason, memo, entryDate, expenseAccountId, expiryDate } = req.body;
     const result = await defaultStockService.receiveStock(
       companyId,
       {
@@ -255,6 +256,7 @@ inventoryRoutes.post(
         memo,
         entryDate,
         expenseAccountId,
+        expiryDate: expiryDate || undefined,
       },
       user.id
     );
@@ -369,6 +371,7 @@ inventoryRoutes.post(
         adjustmentType: b.adjustmentType,
         lines: b.lines.map((l: any) => ({
           costCenterId: l?.costCenterId,
+          expiryDate: l?.expiryDate || undefined,
           itemId: l?.itemId,
           qty: Number(l?.qty),
           unitCost: num(l?.unitCost),
@@ -526,6 +529,26 @@ inventoryRoutes.get(
       to: q('to'),
       costCenterId: q('costCenterId'),
       itemId: q('itemId'),
+    });
+    return res.status(200).json({ status: 'ok', report });
+  })
+);
+
+// Supply list: receipts by date with expiry dates (read only).
+inventoryRoutes.get(
+  '/reports/supply-list',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+    const q = (k: string) => (typeof req.query[k] === 'string' && req.query[k] !== '' ? (req.query[k] as string) : undefined);
+    const report = await defaultSupplyListService.report(companyId, {
+      from: q('from'),
+      to: q('to'),
+      itemId: q('itemId'),
+      warehouseId: q('warehouseId'),
+      expiringBy: q('expiringBy'),
     });
     return res.status(200).json({ status: 'ok', report });
   })

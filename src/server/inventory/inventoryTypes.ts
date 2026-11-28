@@ -104,6 +104,8 @@ export interface RecordMovementInput {
   expenseAccountId?: string;
   /** Optional cost center (org unit of type cost_center) the issue is charged to. Issues only. */
   costCenterId?: string;
+  /** Optional expiry date (YYYY-MM-DD) for receipts only. */
+  expiryDate?: string;
 }
 
 export type StockAdjustmentKind = 'adjustment' | 'write_off' | 'damage' | 'internal_consumption';

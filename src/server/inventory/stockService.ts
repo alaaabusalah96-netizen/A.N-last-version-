@@ -250,6 +250,7 @@ export class StockService {
 
     const qtyNum = unitsToSafeNumber(qtyUnits, QTY_SCALE);
     const requestedEntryDate = assertOptionalCalendarDate(input.entryDate, 'تاريخ الحركة');
+    const expiryDate = assertOptionalCalendarDate(input.expiryDate, 'تاريخ الصلاحية') ?? null;
 
     return await withTenantTransaction(companyId, async (tx) => {
       const entryDate = requestedEntryDate ?? (await memoPerTx(tx, `today:${companyId}`, () => resolveCompanyToday(companyId, tx)));
@@ -287,6 +288,12 @@ export class StockService {
         undefined,
         tx
       );
+      if (expiryDate) {
+        await tx.query(
+          'UPDATE inv_stock_movements SET expiry_date = $1::date WHERE company_id = $2 AND id = $3',
+          [expiryDate, companyId, movement.id]
+        );
+      }
 
       const postedJe = await this.emitJournal(companyId, tx, actorId, collector, {
           entryDate,

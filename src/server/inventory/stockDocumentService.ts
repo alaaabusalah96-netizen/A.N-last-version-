@@ -22,6 +22,7 @@ export interface StockDocumentLineInput {
   adjustmentType?: StockAdjustmentKind;
   expenseAccountId?: string;
   costCenterId?: string;
+  expiryDate?: string;
 }
 
 export interface StockDocumentInput {
@@ -169,6 +170,7 @@ export class StockDocumentService {
               warehouseId, itemId: l.itemId, qty: Number(l.qty), unitCost: l.unitCost,
               costSource: l.costSource || input.costSource, reason, memo: memo ? `${memo} [${tag}]` : tag,
               entryDate: input.entryDate, expenseAccountId: l.expenseAccountId || input.expenseAccountId,
+              expiryDate: l.expiryDate || undefined,
             }, actorId, collector);
             movementIds = [r.movement.id]; journalEntryId = r.journalEntryId;
           } else if (input.docType === 'issue') {

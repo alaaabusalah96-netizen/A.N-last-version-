@@ -20,6 +20,7 @@ import { ItemCardPanel } from './ItemCardPanel.js';
 import { InventoryValuationPanel } from './InventoryValuationPanel.js';
 import { StocktakePanel } from './StocktakePanel.js';
 import { CostCenterIssuePanel } from './CostCenterIssuePanel.js';
+import { SupplyListPanel } from './SupplyListPanel.js';
 import { StockDocumentModal } from './StockDocumentModal.js';
 import { EditRecordModal } from '../ui/EditRecordModal.js';
 import {
@@ -111,7 +112,7 @@ export function matchesItemSearch(searchText: string, code?: string, name?: stri
 export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake' | 'ccissues'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake' | 'ccissues' | 'supply'>('balances');
   const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -134,6 +135,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [costCenters, setCostCenters] = useState<{ id: string; code: string; nameAr: string }[]>([]);
   const [movementCostCenterId, setMovementCostCenterId] = useState('');
+  const [movementExpiryDate, setMovementExpiryDate] = useState('');
   useEffect(() => {
     if (!selectedCompanyId) return;
     let live = true;
@@ -403,6 +405,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
       if (type === 'receive') {
         payload.unitCost = Number(movementUnitCost);
         payload.costSource = movementCostSource;
+        if (movementExpiryDate) payload.expiryDate = movementExpiryDate;
       }
 
       const res = await apiFetch(endpoint, {
@@ -755,9 +758,24 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
           <Layers className="w-4 h-4" />
           <span>الصرف لمراكز التكلفة</span>
         </button>
+        <button
+          onClick={() => setActiveTab('supply')}
+          data-testid="tab-supply"
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'supply'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>قائمة التوريد والصلاحية</span>
+        </button>
       </div>
 
       {/* Tab Panels */}
+      {activeTab === 'supply' && (
+        <SupplyListPanel companyId={selectedCompanyId} />
+      )}
       {activeTab === 'ccissues' && (
         <CostCenterIssuePanel companyId={selectedCompanyId} costCenters={costCenters} />
       )}
@@ -1435,6 +1453,16 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                       <option value="PURCHASE_ORDER">أمر شراء (PURCHASE_ORDER)</option>
                       <option value="PHYSICAL_COUNT">جرد فعلي معتمد (PHYSICAL_COUNT)</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">تاريخ الصلاحية (اختياري، يترك فارغا للأصناف بدون صلاحية)</label>
+                    <input
+                      type="date"
+                      value={movementExpiryDate}
+                      onChange={(e) => setMovementExpiryDate(e.target.value)}
+                      data-testid="receive-expiry"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
                   </div>
                 </>
               )}
