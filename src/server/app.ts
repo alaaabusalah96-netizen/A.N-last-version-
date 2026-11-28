@@ -18,6 +18,7 @@ import { cashRoutes } from './routes/cashRoutes.js';
 import { fleetRoutes } from './routes/fleetRoutes.js';
 import { groupRoutes } from './routes/groupRoutes.js';
 import { groupTransferRoutes } from './routes/groupTransferRoutes.js';
+import { standardsRoutes } from './routes/standardsRoutes.js';
 import { bankingRoutes } from './routes/bankingRoutes.js';
 import { configPlatformRoutes } from './routes/configRoutes.js';
 import { rbacRoutes } from './routes/roleRoutes.js';
@@ -69,6 +70,7 @@ export function createApp(): Express {
   app.use('/api/fleet', fleetRoutes);
   app.use('/api/groups', groupRoutes);
   app.use('/api/group-transfers', groupTransferRoutes);
+  app.use('/api/standards', standardsRoutes);
   app.use('/api/banking', bankingRoutes);
 
   // Configuration Platform — global definitions catalog (Wave A / A2)

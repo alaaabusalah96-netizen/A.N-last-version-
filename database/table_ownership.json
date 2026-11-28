@@ -513,5 +513,20 @@
     "table": "group_transfer_lines",
     "scope": "shared",
     "reason": "Intercompany transfer lines (no company_id; reached through the transfer)"
+  },
+  {
+    "table": "accounting_frameworks",
+    "scope": "global",
+    "reason": "Accounting framework catalog (IFRS, IFRS for SMEs, EAS); platform-level, read-only for the app"
+  },
+  {
+    "table": "accounting_policies",
+    "scope": "global",
+    "reason": "Append-only versioned accounting policy catalog with effective dates; platform-level, written by platform admin"
+  },
+  {
+    "table": "company_accounting_profiles",
+    "scope": "tenant",
+    "reason": "Per-company accounting framework and country by effective date, append-only history"
   }
 ]

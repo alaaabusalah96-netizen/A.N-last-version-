@@ -4,11 +4,11 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 310
-- **Mounted Route Modules Parsed**: 20
-- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 293
-- **Platform Admin-Only (`requirePlatformAdmin`)**: 6
-- **Authenticated Self-Service (`requireAuth` only)**: 8
+- **Total Mounted Endpoints**: 317
+- **Mounted Route Modules Parsed**: 21
+- **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 296
+- **Platform Admin-Only (`requirePlatformAdmin`)**: 8
+- **Authenticated Self-Service (`requireAuth` only)**: 10
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
 - **Conditional Env-Gated Endpoints**: 2 (`ENABLE_TENANT_DEMO=1`, non-production only)
 
@@ -320,6 +320,13 @@
 | `/api/sales` | `DELETE` | `/api/sales/returns/:id` | `true` | `PERMISSIONS.SALES_WRITE` | `src/server/routes/salesRoutes.ts` |
 | `/api/sales` | `GET` | `/api/sales/returns/:id` | `true` | `PERMISSIONS.SALES_READ` | `src/server/routes/salesRoutes.ts` |
 | `/api/sales` | `POST` | `/api/sales/returns/:id/post` | `true` | `PERMISSIONS.SALES_POST` | `src/server/routes/salesRoutes.ts` |
+| `/api/standards` | `POST` | `/api/standards/dataset` | `true` | `requirePlatformAdmin` | `src/server/routes/standardsRoutes.ts` |
+| `/api/standards` | `GET` | `/api/standards/frameworks` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/standardsRoutes.ts` |
+| `/api/standards` | `GET` | `/api/standards/policies` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/standardsRoutes.ts` |
+| `/api/standards` | `POST` | `/api/standards/policies` | `true` | `requirePlatformAdmin` | `src/server/routes/standardsRoutes.ts` |
+| `/api/standards` | `GET` | `/api/standards/profile` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/standardsRoutes.ts` |
+| `/api/standards` | `PUT` | `/api/standards/profile` | `true` | `PERMISSIONS.COMPANY_SETTINGS_WRITE` | `src/server/routes/standardsRoutes.ts` |
+| `/api/standards` | `GET` | `/api/standards/resolve` | `true` | `PERMISSIONS.COMPANY_SETTINGS_READ` | `src/server/routes/standardsRoutes.ts` |
 | `/api/users` | `GET` | `/api/users` | `true` | `PERMISSIONS.USER_READ` | `src/server/routes/userAdminRoutes.ts` |
 | `/api/users` | `POST` | `/api/users` | `true` | `PERMISSIONS.USER_WRITE` | `src/server/routes/userAdminRoutes.ts` |
 | `/api/users` | `PATCH` | `/api/users/:userId` | `true` | `PERMISSIONS.USER_WRITE` | `src/server/routes/userAdminRoutes.ts` |

@@ -54,5 +54,9 @@
   {
     "file": "src/server/org/companyGroupService.ts",
     "reason": "Platform-level company group catalog; uses the default executor like the other org services"
+  },
+  {
+    "file": "src/server/standards/standardsService.ts",
+    "reason": "Platform-level accounting standards catalog; uses the default executor like the company group service"
   }
 ]

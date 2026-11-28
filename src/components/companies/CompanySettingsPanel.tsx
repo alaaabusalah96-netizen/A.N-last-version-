@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, Save, RefreshCw, AlertCircle, CheckCircle, Globe, DollarSign, Clock, Calendar } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 import { usableAccounts } from '../../lib/accountRules.js';
+import { StandardsPanel } from './StandardsPanel.js';
 
 interface Company {
   id: string;
@@ -529,6 +530,7 @@ export function CompanySettingsPanel({ userRole, permissions = [] }: CompanySett
           <div className="py-20 text-center text-slate-400">يرجى اختيار شركة لعرض إعداداتها</div>
         )}
       </div>
+      {selectedCompanyId && <StandardsPanel companyId={selectedCompanyId} canWrite={!isReadOnly} isPlatformAdmin={userRole === 'platform_admin'} />}
     </div>
   );
 }

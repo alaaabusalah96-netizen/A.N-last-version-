@@ -127,6 +127,8 @@
     "test:stock-expiry-1": "tsx scripts/verifyStockExpiry1.ts",
     "test:company-groups-1": "tsx scripts/verifyCompanyGroups1.ts",
     "test:group-transfers-1": "tsx scripts/verifyGroupTransfers1.ts",
+    "test:standards-1": "tsx scripts/verifyStandards1.ts",
+    "test:standards-ui-1": "tsx scripts/verifyStandardsUi1.ts",
     "test:purch-po-1": "tsx scripts/verifyPurchPo1.ts",
     "test:purch-grn-po-link-1": "tsx scripts/verifyPurchGrnPoLink1.ts",
     "test:purch-po-ci-1": "tsx scripts/verifyPurchPoCi1.ts",

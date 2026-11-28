@@ -46,6 +46,9 @@ const ALLOWED_SELF_SERVICE_ENDPOINTS = new Set([
   'POST /api/groups/:groupId/users',
   'PUT /api/groups/:groupId/users/:userId',
   'DELETE /api/groups/:groupId/users/:userId',
+  // Accounting standards catalog: reference data readable by any signed-in user (no company data)
+  'GET /api/standards/frameworks',
+  'GET /api/standards/policies',
 ]);
 
 const MATRIX_DOC_REL = 'docs/security/endpoint-permission-matrix.md';
