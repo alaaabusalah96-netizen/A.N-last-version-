@@ -58,6 +58,61 @@ function sumCollectionLines(rows: Array<{ amount: string }>): number {
   return Math.round(t * 100) / 100;
 }
 
+const CollectionLineRow = React.memo(function CollectionLineRow({
+  line, idx, opts, canRemove, onInvoice, onAmount, onRemove,
+}: {
+  line: { invoiceId: string; amount: string };
+  idx: number;
+  opts: any[];
+  canRemove: boolean;
+  onInvoice: (idx: number, invId: string, openAmount: number | null) => void;
+  onAmount: (idx: number, amount: string) => void;
+  onRemove: (idx: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        name={`colInvoiceId-${idx}`}
+        required
+        value={line.invoiceId}
+        onChange={(e) => {
+          const invId = e.target.value;
+          const out = opts.find((o) => o.invoiceId === invId);
+          onInvoice(idx, invId, out ? out.remainingOpenAmount : null);
+        }}
+        className="flex-1 min-w-0 px-2 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
+      >
+        <option value="">-- اختر الفاتورة --</option>
+        {opts.map((o) => (
+          <option key={o.invoiceId} value={o.invoiceId}>
+            فاتورة: {o.invoiceNo} | المتبقي: {o.remainingOpenAmount.toFixed(2)}
+          </option>
+        ))}
+      </select>
+      <input
+        name={`colAmount-${idx}`}
+        type="number"
+        step="0.01"
+        min="0.01"
+        required
+        placeholder="0.00"
+        value={line.amount}
+        onChange={(e) => onAmount(idx, e.target.value)}
+        className="w-24 px-2 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono"
+      />
+      <button
+        type="button"
+        disabled={!canRemove}
+        onClick={() => onRemove(idx)}
+        className="px-2 py-2 text-slate-400 hover:text-rose-400 disabled:opacity-30 cursor-pointer"
+        aria-label={`حذف السطر ${idx + 1}`}
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+});
+
 export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
@@ -121,6 +176,23 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   // Form states - Collection
   const [colCustomerId, setColCustomerId] = useState('');
   const [colLines, setColLines] = useState<Array<{ invoiceId: string; amount: string }>>([{ invoiceId: '', amount: '' }]);
+  const colBaseOpts = React.useMemo(
+    () => (colCustomerId ? outstandingInvoices.filter((o) => o.customerId === colCustomerId) : outstandingInvoices),
+    [outstandingInvoices, colCustomerId]
+  );
+  const onColInvoice = React.useCallback((idx: number, invId: string, openAmount: number | null) => {
+    setColLines((prev) => prev.map((l, k) => (k === idx ? { invoiceId: invId, amount: openAmount !== null ? String(openAmount) : l.amount } : l)));
+  }, []);
+  const onColAmount = React.useCallback((idx: number, amount: string) => {
+    setColLines((prev) => prev.map((l, k) => (k === idx ? { ...l, amount } : l)));
+  }, []);
+  const onColRemove = React.useCallback((idx: number) => {
+    setColLines((prev) => prev.filter((_, k) => k !== idx));
+  }, []);
+  const colHasDuplicate = React.useMemo(() => {
+    const ids = colLines.map((l) => l.invoiceId).filter(Boolean);
+    return new Set(ids).size !== ids.length;
+  }, [colLines]);
   const [colRegisterId, setColRegisterId] = useState('');
   const [colDate, setColDate] = useState(() => getLocalTodayDateString());
   const [colRef, setColRef] = useState('');
@@ -1421,55 +1493,26 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                 </div>
                 <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
                   {colLines.map((line, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <select
-                        name={`colInvoiceId-${idx}`}
-                        required
-                        value={line.invoiceId}
-                        onChange={(e) => {
-                          const invId = e.target.value;
-                          const out = outstandingInvoices.find((o) => o.invoiceId === invId);
-                          setColLines(colLines.map((l, k) => (k === idx ? { invoiceId: invId, amount: out ? String(out.remainingOpenAmount) : l.amount } : l)));
-                        }}
-                        className="flex-1 min-w-0 px-2 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
-                      >
-                        <option value="">-- اختر الفاتورة --</option>
-                        {(colCustomerId ? outstandingInvoices.filter((o) => o.customerId === colCustomerId) : outstandingInvoices)
-                          .filter((o) => o.invoiceId === line.invoiceId || !colLines.some((l) => l.invoiceId === o.invoiceId))
-                          .map((o) => (
-                            <option key={o.invoiceId} value={o.invoiceId}>
-                              فاتورة: {o.invoiceNo} | المتبقي: {o.remainingOpenAmount.toFixed(2)}
-                            </option>
-                          ))}
-                      </select>
-                      <input
-                        name={`colAmount-${idx}`}
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        required
-                        placeholder="0.00"
-                        value={line.amount}
-                        onChange={(e) => setColLines(colLines.map((l, k) => (k === idx ? { ...l, amount: e.target.value } : l)))}
-                        className="w-24 px-2 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono"
-                      />
-                      <button
-                        type="button"
-                        disabled={colLines.length <= 1}
-                        onClick={() => setColLines(colLines.filter((_, k) => k !== idx))}
-                        className="px-2 py-2 text-slate-400 hover:text-rose-400 disabled:opacity-30 cursor-pointer"
-                        aria-label={`حذف السطر ${idx + 1}`}
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <CollectionLineRow
+                      key={idx}
+                      line={line}
+                      idx={idx}
+                      opts={colBaseOpts}
+                      canRemove={colLines.length > 1}
+                      onInvoice={onColInvoice}
+                      onAmount={onColAmount}
+                      onRemove={onColRemove}
+                    />
                   ))}
                 </div>
+                {colHasDuplicate && (
+                  <p data-testid="collection-duplicate-warning" className="text-xs text-rose-400">نفس الفاتورة مكررة في أكثر من سطر. اختر كل فاتورة مرة واحدة.</p>
+                )}
                 <button
                   type="button"
                   data-testid="collection-add-line"
                   disabled={colLines.length >= 100}
-                  onClick={() => setColLines([...colLines, { invoiceId: '', amount: '' }])}
+                  onClick={() => setColLines((prev) => (prev.length >= 100 ? prev : [...prev, { invoiceId: '', amount: '' }]))}
                   className="self-start px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-semibold disabled:opacity-40 cursor-pointer"
                 >
                   + سطر
@@ -1523,7 +1566,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading || !colCustomerId || !colRegisterId || colLines.some((l) => !l.invoiceId || !l.amount)}
+                  disabled={actionLoading || colHasDuplicate || !colCustomerId || !colRegisterId || colLines.some((l) => !l.invoiceId || !l.amount)}
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة تحصيل'}
