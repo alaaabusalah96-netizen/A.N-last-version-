@@ -19,6 +19,7 @@ import { apiFetch } from '../../lib/apiClient.js';
 import { ItemCardPanel } from './ItemCardPanel.js';
 import { InventoryValuationPanel } from './InventoryValuationPanel.js';
 import { StocktakePanel } from './StocktakePanel.js';
+import { CostCenterIssuePanel } from './CostCenterIssuePanel.js';
 import { StockDocumentModal } from './StockDocumentModal.js';
 import { EditRecordModal } from '../ui/EditRecordModal.js';
 import {
@@ -110,7 +111,7 @@ export function matchesItemSearch(searchText: string, code?: string, name?: stri
 export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'warehouses' | 'items' | 'movements' | 'transfers' | 'valuation' | 'stocktake' | 'ccissues'>('balances');
   const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -131,6 +132,17 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
   const [showItemModal, setShowItemModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
+  const [costCenters, setCostCenters] = useState<{ id: string; code: string; nameAr: string }[]>([]);
+  const [movementCostCenterId, setMovementCostCenterId] = useState('');
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    let live = true;
+    apiFetch(`/api/inventory/cost-centers?companyId=${encodeURIComponent(selectedCompanyId)}`)
+      .then((r) => r.json())
+      .then((d) => { if (live && Array.isArray(d.costCenters)) setCostCenters(d.costCenters); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [selectedCompanyId]);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
@@ -387,6 +399,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
         memo: movementMemo,
         expenseAccountId: movementExpenseAccountId || undefined,
       };
+      if (type === 'issue' && movementCostCenterId) payload.costCenterId = movementCostCenterId;
       if (type === 'receive') {
         payload.unitCost = Number(movementUnitCost);
         payload.costSource = movementCostSource;
@@ -731,9 +744,23 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
           <Layers className="w-4 h-4" />
           <span>الجرد</span>
         </button>
+        <button
+          onClick={() => setActiveTab('ccissues')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'ccissues'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+              : 'bg-slate-900 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>الصرف لمراكز التكلفة</span>
+        </button>
       </div>
 
       {/* Tab Panels */}
+      {activeTab === 'ccissues' && (
+        <CostCenterIssuePanel companyId={selectedCompanyId} costCenters={costCenters} />
+      )}
       {activeTab === 'stocktake' && (
         <StocktakePanel companyId={selectedCompanyId} userRole={userRole} permissions={permissions} />
       )}
@@ -1423,6 +1450,23 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
+
+              {showIssueModal && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">مركز التكلفة (اختياري)</label>
+                  <select
+                    value={movementCostCenterId}
+                    onChange={(e) => setMovementCostCenterId(e.target.value)}
+                    data-testid="issue-cost-center"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="">-- بدون مركز تكلفة --</option>
+                    {costCenters.map((c) => (
+                      <option key={c.id} value={c.id}>{c.nameAr} ({c.code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">الحساب المقابل (اختياري — افتراضي حساب التسويات)</label>

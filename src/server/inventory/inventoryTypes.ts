@@ -102,6 +102,8 @@ export interface RecordMovementInput {
   memo?: string;
   entryDate?: string;
   expenseAccountId?: string;
+  /** Optional cost center (org unit of type cost_center) the issue is charged to. Issues only. */
+  costCenterId?: string;
 }
 
 export type StockAdjustmentKind = 'adjustment' | 'write_off' | 'damage' | 'internal_consumption';

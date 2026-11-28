@@ -21,6 +21,7 @@ export interface StockDocumentLineInput {
   direction?: StockAdjustmentDirection;
   adjustmentType?: StockAdjustmentKind;
   expenseAccountId?: string;
+  costCenterId?: string;
 }
 
 export interface StockDocumentInput {
@@ -33,6 +34,7 @@ export interface StockDocumentInput {
   costSource?: string;
   entryDate?: string;
   expenseAccountId?: string;
+  costCenterId?: string;
   adjustmentType?: StockAdjustmentKind;
   lines: StockDocumentLineInput[];
 }
@@ -174,6 +176,7 @@ export class StockDocumentService {
               warehouseId, itemId: l.itemId, qty: Number(l.qty), reason,
               memo: memo ? `${memo} [${tag}]` : tag, entryDate: input.entryDate,
               expenseAccountId: l.expenseAccountId || input.expenseAccountId,
+              costCenterId: l.costCenterId || input.costCenterId,
             }, actorId, collector);
             movementIds = [r.movement.id]; journalEntryId = r.journalEntryId;
           } else if (input.docType === 'adjustment') {

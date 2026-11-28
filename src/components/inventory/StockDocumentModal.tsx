@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
 
@@ -54,6 +54,14 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
   const [destWarehouseId, setDestWarehouseId] = useState('');
   const [reason, setReason] = useState('');
   const [memo, setMemo] = useState('');
+  const [costCenterId, setCostCenterId] = useState('');
+  const [costCenters, setCostCenters] = useState<{ id: string; code: string; nameAr: string }[]>([]);
+  useEffect(() => {
+    apiFetch(`/api/inventory/cost-centers?companyId=${encodeURIComponent(companyId)}`)
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d.costCenters)) setCostCenters(d.costCenters); })
+      .catch(() => {});
+  }, [companyId]);
   const [costSource, setCostSource] = useState('APPROVED_VALUATION');
   const [adjustmentType, setAdjustmentType] = useState<'adjustment' | 'write_off' | 'damage' | 'internal_consumption'>('adjustment');
   const [lines, setLines] = useState<Line[]>([emptyLine()]);
@@ -125,6 +133,7 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
       }
       if (needsCost) body.costSource = costSource;
       if (docType === 'adjustment') body.adjustmentType = adjustmentType;
+      if (docType === 'issue' && costCenterId) body.costCenterId = costCenterId;
       const large = real.length > 50;
       if (large) body.async = true;
       const res = await apiFetch('/api/inventory/documents', {
@@ -213,6 +222,17 @@ export function StockDocumentModal({ companyId, warehouses, items, initialType =
                   <option value="write_off">شطب</option>
                   <option value="damage">إتلاف</option>
                   <option value="internal_consumption">استهلاك داخلي</option>
+                </select>
+              </div>
+            )}
+            {docType === 'issue' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">مركز التكلفة (اختياري)</label>
+                <select value={costCenterId} onChange={(e) => setCostCenterId(e.target.value)} className={inputCls} data-testid="doc-cost-center">
+                  <option value="">-- بدون مركز تكلفة --</option>
+                  {costCenters.map((c) => (
+                    <option key={c.id} value={c.id}>{c.nameAr} ({c.code})</option>
+                  ))}
                 </select>
               </div>
             )}

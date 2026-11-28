@@ -5,6 +5,7 @@ import { defaultAuditService, AuditService } from '../audit/auditService.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { DbExecutor } from '../db/types.js';
 import { ValidationError, NotFoundError } from '../http/errors.js';
+import { isUuid } from '../http/validators.js';
 import {
   StockBalance,
   StockMovement,
@@ -394,6 +395,17 @@ export class StockService {
       if (!item) throw new NotFoundError('الصنف المحدد غير موجود');
       if (!item.isActive) throw new ValidationError('الصنف المحدد غير نشط');
 
+      if (input.costCenterId) {
+        if (!isUuid(input.costCenterId)) throw new ValidationError('مركز التكلفة غير صالح');
+        const cc = await tx.query<any>(
+          `SELECT unit_type as "unitType", is_active as "isActive" FROM org_units WHERE company_id = $1 AND id = $2`,
+          [companyId, input.costCenterId]
+        );
+        if (cc.rows.length === 0) throw new NotFoundError('مركز التكلفة المحدد غير موجود');
+        if (cc.rows[0].unitType !== 'cost_center') throw new ValidationError('الوحدة المحددة ليست مركز تكلفة');
+        if (!cc.rows[0].isActive) throw new ValidationError('مركز التكلفة المحدد غير نشط');
+      }
+
       await this.valuationService.getItemCostingMethod(companyId, input.itemId, tx);
       const gl = await this.resolveInventoryAccountingAccounts(companyId, input.expenseAccountId, tx);
 
@@ -432,6 +444,12 @@ export class StockService {
         undefined,
         tx
       );
+      if (input.costCenterId) {
+        await tx.query(
+          'UPDATE inv_stock_movements SET cost_center_id = $1 WHERE company_id = $2 AND id = $3',
+          [input.costCenterId, companyId, movement.id]
+        );
+      }
 
       // Never trust client unitCost — always consume server FIFO / Moving Average
       const valResult = await this.valuationService.processIssue(

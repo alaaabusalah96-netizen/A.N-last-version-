@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { OrgUnitService } from '../org/orgUnitService.js';
 import { AuthenticatedRequest, requireAuth } from '../auth/authMiddleware.js';
 import { PERMISSIONS } from '../rbac/permissions.js';
 import { defaultWarehouseService } from '../inventory/warehouseService.js';
@@ -6,6 +7,7 @@ import { defaultItemService } from '../inventory/itemService.js';
 import { defaultStockService } from '../inventory/stockService.js';
 import { defaultStockDocumentService } from '../inventory/stockDocumentService.js';
 import { defaultStocktakeService } from '../inventory/stocktakeService.js';
+import { defaultCostCenterIssueReportService } from '../inventory/costCenterIssueReportService.js';
 import { defaultCompanyStore } from '../org/companyStore.js';
 import { defaultRbacService } from '../rbac/rbacService.js';
 import { wrap } from '../http/asyncHandler.js';
@@ -270,10 +272,10 @@ inventoryRoutes.post(
 
     await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
 
-    const { warehouseId, itemId, qty, reason, memo, entryDate, expenseAccountId } = req.body;
+    const { warehouseId, itemId, qty, reason, memo, entryDate, expenseAccountId, costCenterId } = req.body;
     const result = await defaultStockService.issueStock(
       companyId,
-      { warehouseId, itemId, qty: Number(qty), reason, memo, entryDate, expenseAccountId },
+      { warehouseId, itemId, qty: Number(qty), reason, memo, entryDate, expenseAccountId, costCenterId },
       user.id
     );
 
@@ -363,8 +365,10 @@ inventoryRoutes.post(
         costSource: b.costSource,
         entryDate: b.entryDate,
         expenseAccountId: b.expenseAccountId,
+        costCenterId: b.costCenterId,
         adjustmentType: b.adjustmentType,
         lines: b.lines.map((l: any) => ({
+          costCenterId: l?.costCenterId,
           itemId: l?.itemId,
           qty: Number(l?.qty),
           unitCost: num(l?.unitCost),
@@ -490,5 +494,39 @@ inventoryRoutes.post(
     const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
     await assertInventoryPermission(user, PERMISSIONS.INVENTORY_MOVEMENT, companyId);
     return res.status(200).json({ status: 'ok', stocktake: await defaultStocktakeService.cancel(companyId, req.params.id, user.id) });
+  })
+);
+
+// Active cost centers for the issue pickers (read only).
+inventoryRoutes.get(
+  '/cost-centers',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+    const units = (await new OrgUnitService().listUnits(companyId))
+      .filter((u) => u.unitType === 'cost_center' && u.isActive)
+      .map((u) => ({ id: u.id, code: u.code, nameAr: u.nameAr }));
+    return res.status(200).json({ status: 'ok', costCenters: units });
+  })
+);
+
+// Issues charged to cost centers: by item, cost center and period (read only).
+inventoryRoutes.get(
+  '/reports/cost-center-issues',
+  requireAuth,
+  wrap(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const companyId = (req.query.companyId as string) || '';
+    await assertInventoryPermission(user, PERMISSIONS.INVENTORY_READ, companyId);
+    const q = (k: string) => (typeof req.query[k] === 'string' && req.query[k] !== '' ? (req.query[k] as string) : undefined);
+    const report = await defaultCostCenterIssueReportService.report(companyId, {
+      from: q('from'),
+      to: q('to'),
+      costCenterId: q('costCenterId'),
+      itemId: q('itemId'),
+    });
+    return res.status(200).json({ status: 'ok', report });
   })
 );

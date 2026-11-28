@@ -174,6 +174,7 @@ const scripts = [
   'scripts/verifyP2PCycle1.ts',
   'scripts/verifyGrnBatchEquiv1.ts',
   'scripts/verifyStocktake1.ts',
+  'scripts/verifyCostCenterIssue1.ts',
   'scripts/verifyPurchPo1.ts',
   'scripts/verifyPurchGrnPoLink1.ts',
   'scripts/verifyPurchPoCi1.ts',

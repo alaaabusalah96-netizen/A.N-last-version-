@@ -123,6 +123,7 @@
     "test:p2p-cycle-1": "tsx scripts/verifyP2PCycle1.ts",
     "test:grn-batch-equiv-1": "tsx scripts/verifyGrnBatchEquiv1.ts",
     "test:stocktake-1": "tsx scripts/verifyStocktake1.ts",
+    "test:cost-center-issue-1": "tsx scripts/verifyCostCenterIssue1.ts",
     "test:purch-po-1": "tsx scripts/verifyPurchPo1.ts",
     "test:purch-grn-po-link-1": "tsx scripts/verifyPurchGrnPoLink1.ts",
     "test:purch-po-ci-1": "tsx scripts/verifyPurchPoCi1.ts",
