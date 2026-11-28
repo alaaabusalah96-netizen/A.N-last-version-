@@ -74,19 +74,19 @@ export class SalesCollectionService {
         throw new ValidationError('صندوق النقدية غير موجود أو غير نشط');
       }
 
+      const bal = await this.loadInvoiceBalances(companyId, rawLines.map((l) => l.invoiceId), tx);
       for (let i = 0; i < rawLines.length; i++) {
         const l = rawLines[i];
-        const invoice = await this.invoiceRepo.findById(companyId, l.invoiceId, tx);
+        const invoice = bal.get(l.invoiceId);
         if (!invoice || invoice.status !== 'posted') {
           throw new ValidationError(`فاتورة المبيعات في السطر ${i + 1} غير موجودة أو غير مرحلة`);
         }
         if (invoice.customerId !== input.customerId) {
           throw new ValidationError(`العميل في سند التحصيل لا يطابق عميل فاتورة السطر ${i + 1}`);
         }
-        const openAmount = await this.openAmount(companyId, invoice.id, invoice.totalAmount, tx);
-        if (l.amount > openAmount + 0.0001) {
+        if (l.amount > invoice.open + 0.0001) {
           throw new ValidationError(
-            `مبلغ التحصيل (${l.amount.toFixed(2)}) في السطر ${i + 1} يتجاوز الرصيد المتبقي المفتوح للفاتورة (${openAmount.toFixed(2)})`
+            `مبلغ التحصيل (${l.amount.toFixed(2)}) في السطر ${i + 1} يتجاوز الرصيد المتبقي المفتوح للفاتورة (${invoice.open.toFixed(2)})`
           );
         }
       }
@@ -119,14 +119,28 @@ export class SalesCollectionService {
     });
   }
 
-  private async openAmount(companyId: string, invoiceId: string, totalAmount: number, tx: DbExecutor, excludeCollectionId?: string): Promise<number> {
-    const r = await tx.query<any>(
-      `SELECT
-         COALESCE((SELECT SUM(amount) FROM ${POSTED_COLLECTION_ALLOCATIONS_SQL} alloc WHERE invoice_id = $2 AND collection_id <> $3), 0) AS paid,
-         COALESCE((SELECT SUM(total_amount) FROM sales_returns WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'), 0) AS returned`,
-      [companyId, invoiceId, excludeCollectionId || '00000000-0000-0000-0000-000000000000']
+  /** One query for all invoices of a collection: status, customer, total and open balance. */
+  private async loadInvoiceBalances(
+    companyId: string,
+    invoiceIds: string[],
+    tx: DbExecutor,
+    opts: { lock?: boolean; excludeCollectionId?: string } = {}
+  ): Promise<Map<string, { status: string; customerId: string; totalAmount: number; open: number }>> {
+    const sorted = [...invoiceIds].sort();
+    const res = await tx.query<any>(
+      `SELECT i.id, i.status, i.customer_id, i.total_amount::float AS total,
+         COALESCE((SELECT SUM(a.amount) FROM ${POSTED_COLLECTION_ALLOCATIONS_SQL} a WHERE a.invoice_id = i.id AND a.collection_id <> $3), 0)::float AS paid,
+         COALESCE((SELECT SUM(r.total_amount) FROM sales_returns r WHERE r.company_id = $1 AND r.invoice_id = i.id AND r.status = 'posted'), 0)::float AS returned
+       FROM sales_invoices i
+       WHERE i.company_id = $1 AND i.id = ANY($2::uuid[])
+       ${opts.lock ? 'ORDER BY i.id FOR UPDATE OF i' : ''}`,
+      [companyId, sorted, opts.excludeCollectionId || '00000000-0000-0000-0000-000000000000']
     );
-    return Math.max(0, totalAmount - parseFloat(r.rows[0]?.paid || '0') - parseFloat(r.rows[0]?.returned || '0'));
+    const m = new Map<string, { status: string; customerId: string; totalAmount: number; open: number }>();
+    for (const r of res.rows) {
+      m.set(r.id, { status: r.status, customerId: r.customer_id, totalAmount: r.total, open: Math.max(0, r.total - r.paid - r.returned) });
+    }
+    return m;
   }
 
   private async resolveArAccount(companyId: string, executor: DbExecutor): Promise<string> {
@@ -189,17 +203,16 @@ export class SalesCollectionService {
       const colLines = collection.lines && collection.lines.length > 0
         ? collection.lines
         : [{ lineNo: 1, invoiceId: collection.invoiceId, invoiceNo: collection.invoiceNo, amount: collection.amount }];
-      // Lock invoices in a stable order to avoid deadlocks between concurrent collections.
-      const sortedLines = [...colLines].sort((x, y) => (x.invoiceId < y.invoiceId ? -1 : 1));
-      for (const l of sortedLines) {
-        const invoiceLocked = await this.invoiceRepo.findByIdForUpdate(companyId, l.invoiceId, tx);
-        if (!invoiceLocked || invoiceLocked.status !== 'posted') {
+      // Lock all invoices in one statement in id order (stable order avoids deadlocks) and check balances.
+      const balPost = await this.loadInvoiceBalances(companyId, colLines.map((l) => l.invoiceId), tx, { lock: true, excludeCollectionId: id });
+      for (const l of colLines) {
+        const inv = balPost.get(l.invoiceId);
+        if (!inv || inv.status !== 'posted') {
           throw new ValidationError(`الفاتورة ${l.invoiceNo || ''} المرتبطة غير موجودة أو غير مرحلة`);
         }
-        const openAmount = await this.openAmount(companyId, l.invoiceId, invoiceLocked.totalAmount, tx, id);
-        if (l.amount > openAmount + 0.0001) {
+        if (l.amount > inv.open + 0.0001) {
           throw new ValidationError(
-            `مبلغ التحصيل (${l.amount.toFixed(2)}) يتجاوز الرصيد المتبقي المفتوح للفاتورة ${l.invoiceNo || ''} (${openAmount.toFixed(2)})`
+            `مبلغ التحصيل (${l.amount.toFixed(2)}) يتجاوز الرصيد المتبقي المفتوح للفاتورة ${l.invoiceNo || ''} (${inv.open.toFixed(2)})`
           );
         }
       }

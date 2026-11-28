@@ -71,6 +71,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [cashRegisters, setCashRegisters] = useState<CashRegister[]>([]);
+  const [registersDenied, setRegistersDenied] = useState(false);
   const [userPermissions, setUserPermissions] = useState<string[]>([]);
   const [authMeLoaded, setAuthMeLoaded] = useState(false);
 
@@ -196,6 +197,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
       if (agingRes.ok) setAgingReport((await agingRes.json()).agingReport || null);
       if (whRes.ok) setWarehouses((await whRes.json()).warehouses || []);
       if (itemRes.ok) setItems((await itemRes.json()).items || []);
+      setRegistersDenied(!regRes.ok);
       if (regRes.ok) setCashRegisters((await regRes.json()).registers || []);
     } catch (err: any) {
       setError(err.message || 'فشل جلب بيانات المبيعات');
@@ -1489,6 +1491,13 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                     </option>
                   ))}
                 </select>
+                {cashRegisters.length === 0 && (
+                  <p data-testid="collection-no-registers" className="mt-1 text-[11px] text-amber-300">
+                    {registersDenied
+                      ? 'ليست لديك صلاحية على أي صندوق نقدية، لذلك لا يمكن حفظ سند تحصيل. اطلب من مدير الخزينة منحك صلاحية قراءة الصناديق، أو سجّل التحصيل من شاشة الخزينة.'
+                      : 'لا توجد صناديق نقدية نشطة في هذه الشركة. أنشئ صندوقاً من شاشة الخزينة أولاً.'}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 gap-2">
