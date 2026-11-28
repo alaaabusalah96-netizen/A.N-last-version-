@@ -5,6 +5,7 @@ import { FleetTripsPanel } from './FleetTripsPanel.js';
 import { FleetExpensesPanel } from './FleetExpensesPanel.js';
 import { FleetMaintenancePanel } from './FleetMaintenancePanel.js';
 import { FleetDriverPortal } from './FleetDriverPortal.js';
+import { EditRecordModal } from '../ui/EditRecordModal.js';
 
 interface Company { id: string; code: string; nameAr: string }
 interface OrgUnit { id: string; code: string; nameAr: string }
@@ -131,6 +132,8 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
     }
   };
 
+  const [editing, setEditing] = useState<{ kind: 'vehicles' | 'drivers'; row: any } | null>(null);
+
   const changeStatus = async (kind: 'vehicles' | 'drivers', id: string, status: string) => {
     if (!canManage) return;
     setBusy(true); setError(null); setSuccess(null);
@@ -223,11 +226,11 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
             <table className="w-full text-right text-xs">
               <thead><tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
                 <th className="py-3.5 px-4">الكود</th><th className="py-3.5 px-4">اللوحة</th><th className="py-3.5 px-4">النوع</th><th className="py-3.5 px-4">الماركة</th><th className="py-3.5 px-4">الموديل</th><th className="py-3.5 px-4">سنة الصنع</th>
-                <th className="py-3.5 px-4">الوحدة التنظيمية</th><th className="py-3.5 px-4">العداد (كم)</th><th className="py-3.5 px-4">الحالة</th>
+                <th className="py-3.5 px-4">الوحدة التنظيمية</th><th className="py-3.5 px-4">العداد (كم)</th><th className="py-3.5 px-4">الحالة</th><th className="py-3.5 px-4">الإجراءات</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {vehicles.length === 0 ? (
-                  <tr><td colSpan={9} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : vehicles.length === 0 ? 'لا توجد مركبات بعد' : 'لا نتائج مطابقة للبحث'}</td></tr>
+                  <tr><td colSpan={10} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : vehicles.length === 0 ? 'لا توجد مركبات بعد' : 'لا نتائج مطابقة للبحث'}</td></tr>
                 ) : shownVehicles.map((v) => (
                   <tr key={v.id} data-testid="fleet-vehicle-row">
                     <td className="py-3.5 px-4 font-mono text-indigo-300">{v.code}</td>
@@ -246,6 +249,11 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
                         </select>
                       ) : (<span>{VEHICLE_STATUS[v.status] || v.status}</span>)}
                     </td>
+                    <td className="py-3.5 px-4">
+                      {canManage && v.status !== 'retired' && (
+                        <button type="button" onClick={() => setEditing({ kind: 'vehicles', row: v })} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer">تعديل</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -254,11 +262,11 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
             <table className="w-full text-right text-xs">
               <thead><tr className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
                 <th className="py-3.5 px-4">الاسم</th><th className="py-3.5 px-4">الهاتف</th><th className="py-3.5 px-4">رقم الرخصة</th>
-                <th className="py-3.5 px-4">انتهاء الرخصة</th><th className="py-3.5 px-4">الوحدة التنظيمية</th><th className="py-3.5 px-4">الحالة</th>
+                <th className="py-3.5 px-4">انتهاء الرخصة</th><th className="py-3.5 px-4">الوحدة التنظيمية</th><th className="py-3.5 px-4">الحالة</th><th className="py-3.5 px-4">الإجراءات</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {drivers.length === 0 ? (
-                  <tr><td colSpan={6} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : drivers.length === 0 ? 'لا يوجد سائقون بعد' : 'لا نتائج مطابقة للبحث'}</td></tr>
+                  <tr><td colSpan={7} className="py-12 text-center text-slate-500">{loading ? 'جاري التحميل...' : drivers.length === 0 ? 'لا يوجد سائقون بعد' : 'لا نتائج مطابقة للبحث'}</td></tr>
                 ) : shownDrivers.map((d) => {
                   const expired = !!d.licenseExpiry && d.licenseExpiry < today;
                   const left = d.licenseExpiry && !expired ? daysUntil(d.licenseExpiry, today) : null;
@@ -286,6 +294,11 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
                           </select>
                         ) : (<span>{DRIVER_STATUS[d.status] || d.status}</span>)}
                       </td>
+                      <td className="py-3.5 px-4">
+                        {canManage && (
+                          <button type="button" onClick={() => setEditing({ kind: 'drivers', row: d })} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer">تعديل</button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -294,6 +307,34 @@ export function FleetWorkspace({ userRole, permissions = [] }: FleetWorkspacePro
           )}
         </div>
       </div>
+      )}
+
+      {editing && canManage && (
+        <EditRecordModal
+          title={editing.kind === 'vehicles' ? `تعديل المركبة ${editing.row.code}` : `تعديل السائق ${editing.row.fullName}`}
+          initial={editing.row}
+          fields={editing.kind === 'vehicles' ? [
+            { key: 'plateNo', label: 'رقم اللوحة', required: true },
+            { key: 'odometerKm', label: 'قراءة العداد (كم)، لا تقل عن المسجلة', type: 'number' },
+            { key: 'notes', label: 'ملاحظات' },
+          ] : [
+            { key: 'phone', label: 'الهاتف' },
+            { key: 'licenseNo', label: 'رقم الرخصة' },
+            { key: 'licenseExpiry', label: 'انتهاء الرخصة (YYYY-MM-DD)' },
+          ]}
+          onClose={() => setEditing(null)}
+          onSave={async (v) => {
+            const body: Record<string, unknown> = editing.kind === 'vehicles'
+              ? { companyId, plateNo: String(v.plateNo).trim(), odometerKm: Number(v.odometerKm), notes: String(v.notes || '').trim() || null }
+              : { companyId, phone: String(v.phone || '').trim() || null, licenseNo: String(v.licenseNo || '').trim() || null, licenseExpiry: String(v.licenseExpiry || '').trim() || null };
+            const res = await apiFetch(`/api/fleet/${editing.kind}/${editing.row.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'تعذر حفظ التعديل');
+            setEditing(null);
+            setSuccess('تم حفظ التعديل');
+            await load();
+          }}
+        />
       )}
 
       {showForm && canManage && (

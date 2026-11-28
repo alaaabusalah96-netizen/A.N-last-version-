@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, X } from 'lucide-react';
 import { apiFetch } from '../../lib/apiClient.js';
+import { EditRecordModal } from '../ui/EditRecordModal.js';
 import type { TripVehicle } from './FleetTripsPanel.js';
 
 interface Category { id: string; code: string; nameAr: string; expenseAccountId: string; isActive: boolean }
@@ -125,6 +126,8 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
       setShowForm(false); setF({}); setExpLines([{ categoryId: '', amount: '', description: '' }]); await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'حدث خطأ أثناء الحفظ'); } finally { setBusy(false); }
   };
+
+  const [editingCat, setEditingCat] = useState<Category | null>(null);
 
   const createCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -299,6 +302,29 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
         </div>
       )}
 
+      {editingCat && canCreate && (
+        <EditRecordModal
+          title={`تعديل الفئة ${editingCat.code}`}
+          initial={editingCat}
+          fields={[
+            { key: 'nameAr', label: 'اسم الفئة', required: true },
+            { key: 'isActive', label: 'نشطة', type: 'checkbox' },
+          ]}
+          onClose={() => setEditingCat(null)}
+          onSave={async (v) => {
+            const res = await apiFetch(`/api/fleet/expense-categories/${editingCat.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ companyId, nameAr: String(v.nameAr).trim(), isActive: !!v.isActive }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'تعذر حفظ الفئة');
+            setEditingCat(null);
+            setSuccess('تم تعديل فئة المصروف');
+            await load();
+          }}
+        />
+      )}
+
       {showCat && canCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="فئات المصروف">
           <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
@@ -309,7 +335,12 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
             <ul className="text-xs text-slate-300 space-y-1" data-testid="fleet-expense-categories">
               {cats.length === 0 ? <li className="text-slate-500">لا توجد فئات بعد</li> : cats.map((c) => {
                 const a = accounts.find((x) => x.id === c.expenseAccountId);
-                return <li key={c.id}>{c.nameAr} ({c.code}) - حساب المصروف: {a ? `${a.code} ${a.nameAr}` : 'غير معروض'}{c.isActive ? '' : ' - معطّلة'}</li>;
+                return (
+                  <li key={c.id} className="flex items-center justify-between gap-2">
+                    <span>{c.nameAr} ({c.code}) - حساب المصروف: {a ? `${a.code} ${a.nameAr}` : 'غير معروض'}{c.isActive ? '' : ' - معطّلة'}</span>
+                    <button type="button" onClick={() => setEditingCat(c)} className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer">تعديل</button>
+                  </li>
+                );
               })}
             </ul>
             <form onSubmit={createCategory} className="space-y-3 border-t border-slate-800 pt-3">
