@@ -19,6 +19,7 @@ import { apiFetch } from '../../lib/apiClient.js';
 import { ItemCardPanel } from './ItemCardPanel.js';
 import { InventoryValuationPanel } from './InventoryValuationPanel.js';
 import { StockDocumentModal } from './StockDocumentModal.js';
+import { EditRecordModal } from '../ui/EditRecordModal.js';
 import {
   DynamicFieldGroup,
   DynamicFieldDefinition,
@@ -105,6 +106,7 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
   const [cardItemId, setCardItemId] = useState<string | null>(null);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [balances, setBalances] = useState<StockBalance[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -758,12 +760,13 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                   <th className="py-3.5 px-4">الكود</th>
                   <th className="py-3.5 px-4">اسم المستودع</th>
                   <th className="py-3.5 px-4 text-center">الحالة</th>
+                  <th className="py-3.5 px-4 text-left">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {warehouses.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-12 text-center text-slate-500">
+                    <td colSpan={4} className="py-12 text-center text-slate-500">
                       لا توجد مستودعات مسجلة لهذه الشركة.
                     </td>
                   </tr>
@@ -773,9 +776,25 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
                       <td className="py-3.5 px-4 font-mono font-bold text-indigo-300">{w.code}</td>
                       <td className="py-3.5 px-4 font-medium text-slate-200">{w.nameAr}</td>
                       <td className="py-3.5 px-4 text-center">
-                        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/80 text-emerald-400">
-                          نشط
-                        </span>
+                        {w.isActive === false ? (
+                          <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-950/60 border border-rose-800/80 text-rose-300">
+                            معطل
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/60 border border-emerald-800/80 text-emerald-400">
+                            نشط
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-left">
+                        {canWrite && (
+                          <button
+                            onClick={() => setEditingWarehouse(w)}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer"
+                          >
+                            تعديل
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -784,6 +803,35 @@ export function InventoryWorkspace({ userRole, permissions = [] }: InventoryWork
             </table>
           </div>
         </div>
+      )}
+
+      {editingWarehouse && (
+        <EditRecordModal
+          title={`تعديل المستودع ${editingWarehouse.code}`}
+          initial={editingWarehouse}
+          fields={[
+            { key: 'nameAr', label: 'اسم المستودع (عربي)', required: true },
+            { key: 'nameEn', label: 'الاسم بالإنجليزية' },
+            { key: 'isActive', label: 'نشط', type: 'checkbox' },
+          ]}
+          onClose={() => setEditingWarehouse(null)}
+          onSave={async (v) => {
+            const res = await apiFetch(`/api/inventory/warehouses/${editingWarehouse.id}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                companyId: selectedCompanyId,
+                nameAr: String(v.nameAr).trim(),
+                nameEn: String(v.nameEn || '').trim() || undefined,
+                isActive: !!v.isActive,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || 'فشل تعديل المستودع');
+            setEditingWarehouse(null);
+            setSuccess('تم تعديل المستودع');
+            await loadData();
+          }}
+        />
       )}
 
       {activeTab === 'items' && (

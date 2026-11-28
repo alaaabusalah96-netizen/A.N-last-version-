@@ -16,6 +16,7 @@ import {
 import { apiFetch } from '../../lib/apiClient.js';
 import { getLocalTodayDateString } from '../../lib/calendarDate.js';
 import { SalesReturnsPanel } from './SalesReturnsPanel.js';
+import { EditRecordModal } from '../ui/EditRecordModal.js';
 
 interface Company {
   id: string;
@@ -118,6 +119,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<SalesTab>('customers');
+  const [editingCustomer, setEditingCustomer] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -774,12 +776,13 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                   <th className="py-3.5 px-4">الرقم الضريبي</th>
                   <th className="py-3.5 px-4 text-center">الحد الائتماني</th>
                   <th className="py-3.5 px-4 text-center">الحالة</th>
+                  <th className="py-3.5 px-4 text-left">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {customers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                    <td colSpan={8} className="py-12 text-center text-slate-500">
                       لا يوجد عملاء مسجلون حالياً لهذه الشركة.
                     </td>
                   </tr>
@@ -804,6 +807,16 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                         >
                           {c.isActive ? 'نشط' : 'معطل'}
                         </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-left">
+                        {canWrite && (
+                          <button
+                            onClick={() => setEditingCustomer(c)}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer"
+                          >
+                            تعديل
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -1047,6 +1060,44 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
       )}
 
       {/* Tab 5: AR Aging Report */}
+      {editingCustomer && (
+        <EditRecordModal
+          title={`تعديل العميل ${editingCustomer.code}`}
+          initial={editingCustomer}
+          fields={[
+            { key: 'nameAr', label: 'اسم العميل (عربي)', required: true },
+            { key: 'nameEn', label: 'الاسم بالإنجليزية' },
+            { key: 'phone', label: 'الهاتف' },
+            { key: 'email', label: 'البريد الإلكتروني' },
+            { key: 'taxNumber', label: 'الرقم الضريبي' },
+            { key: 'address', label: 'العنوان' },
+            { key: 'creditLimit', label: 'الحد الائتماني', type: 'number' },
+            { key: 'isActive', label: 'نشط', type: 'checkbox' },
+          ]}
+          onClose={() => setEditingCustomer(null)}
+          onSave={async (v) => {
+            const res = await apiFetch(`/api/sales/customers/${editingCustomer.id}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                companyId: selectedCompanyId,
+                nameAr: String(v.nameAr).trim(),
+                nameEn: String(v.nameEn || '').trim() || undefined,
+                phone: String(v.phone || '').trim() || undefined,
+                email: String(v.email || '').trim() || undefined,
+                taxNumber: String(v.taxNumber || '').trim() || undefined,
+                address: String(v.address || '').trim() || undefined,
+                creditLimit: Number(v.creditLimit) || 0,
+                isActive: !!v.isActive,
+              }),
+            });
+            if (!res.ok) throw new Error(await readErrorMessage(res, 'فشل تعديل العميل'));
+            setEditingCustomer(null);
+            setSuccess('تم تعديل بيانات العميل');
+            await loadData();
+          }}
+        />
+      )}
+
       {activeTab === 'returns' && (
         <SalesReturnsPanel
           companyId={selectedCompanyId}
