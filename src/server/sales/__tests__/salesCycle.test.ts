@@ -398,7 +398,7 @@ describe('AN-SALES-CYCLE-1 Domain Services Unit Tests', () => {
       const auditService = { record: vi.fn().mockResolvedValue(undefined) } as any;
 
       mockTx.query
-        .mockResolvedValueOnce({ rows: [{ paid: '600' }] })
+        .mockResolvedValueOnce({ rows: [{ id: INV_ID, status: 'posted', customer_id: CUST_ID, total: 1000, paid: 600, returned: 0 }] })
         .mockResolvedValueOnce({ rows: [{ arAccountId: AR_ACC_ID }] });
 
       const service = new SalesCollectionService(
