@@ -1,4 +1,7 @@
 import { SalesCollectionRepository, defaultSalesCollectionRepository } from './salesCollectionRepository.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
+import { toMoney } from '../lib/numeric.js';
+import { POSTED_COLLECTION_ALLOCATIONS_SQL } from './collectionAllocationSql.js';
 import { CustomerRepository, defaultCustomerRepository } from './customerRepository.js';
 import { SalesInvoiceRepository, defaultSalesInvoiceRepository } from './salesInvoiceRepository.js';
 import { CashRegisterRepository, defaultCashRegisterRepository } from '../cash/cashRegisterRepository.js';
@@ -42,11 +45,22 @@ export class SalesCollectionService {
   async createCollection(companyId: string, input: CreateSalesCollectionInput, actorUserId?: string): Promise<SalesCollection> {
     if (!companyId) throw new ValidationError('companyId is required');
     if (!input.customerId) throw new ValidationError('العميل مطلوب');
-    if (!input.invoiceId) throw new ValidationError('الفاتورة مطلوبة');
     if (!input.registerId) throw new ValidationError('صندوق النقدية مطلوب');
-    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
-      throw new ValidationError('مبلغ التحصيل يجب أن يكون أكبر من الصفر');
-    }
+    assertMaxDocumentLines(input.lines);
+    const rawLines: Array<{ invoiceId: string; amount: number }> =
+      Array.isArray(input.lines) && input.lines.length > 0
+        ? input.lines.map((l) => ({ invoiceId: l?.invoiceId, amount: l?.amount as number }))
+        : [{ invoiceId: input.invoiceId as string, amount: input.amount as number }];
+    const seen = new Set<string>();
+    rawLines.forEach((l, i) => {
+      if (!l.invoiceId) throw new ValidationError(`الفاتورة مطلوبة في السطر ${i + 1}`);
+      if (typeof l.amount !== 'number' || !Number.isFinite(l.amount) || l.amount <= 0) {
+        throw new ValidationError(`مبلغ التحصيل في السطر ${i + 1} يجب أن يكون أكبر من الصفر`);
+      }
+      l.amount = toMoney(l.amount);
+      if (seen.has(l.invoiceId)) throw new ValidationError(`الفاتورة مكررة في السطر ${i + 1}؛ استخدم سطراً واحداً لكل فاتورة`);
+      seen.add(l.invoiceId);
+    });
     const validatedCollectionDate = assertOptionalCalendarDate(input.collectionDate, 'تاريخ التحصيل');
 
     return await withTenantTransaction(companyId, async (tx: DbExecutor) => {
@@ -60,35 +74,21 @@ export class SalesCollectionService {
         throw new ValidationError('صندوق النقدية غير موجود أو غير نشط');
       }
 
-      const invoice = await this.invoiceRepo.findById(companyId, input.invoiceId, tx);
-      if (!invoice || invoice.status !== 'posted') {
-        throw new ValidationError('فاتورة المبيعات المراد تحصيلها غير موجودة أو غير مرحلة');
-      }
-      if (invoice.customerId !== input.customerId) {
-        throw new ValidationError('العميل في سند التحصيل لا يطابق عميل الفاتورة');
-      }
-
-      // Check remaining open amount (net of posted collections and posted sales returns)
-      const balRes = await tx.query<any>(
-        `SELECT
-           COALESCE(SUM(amount), 0) as paid,
-           COALESCE((
-             SELECT SUM(total_amount)
-             FROM sales_returns
-             WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'
-           ), 0) as returned
-         FROM sales_collections
-         WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'`,
-        [companyId, input.invoiceId]
-      );
-      const alreadyPaid = parseFloat(balRes.rows[0]?.paid || '0');
-      const alreadyReturned = parseFloat(balRes.rows[0]?.returned || '0');
-      const openAmount = Math.max(0, invoice.totalAmount - alreadyPaid - alreadyReturned);
-
-      if (input.amount > openAmount + 0.0001) {
-        throw new ValidationError(
-          `مبلغ التحصيل (${input.amount.toFixed(2)}) يتجاوز الرصيد المتبقي المفتوح للفاتورة (${openAmount.toFixed(2)})`
-        );
+      for (let i = 0; i < rawLines.length; i++) {
+        const l = rawLines[i];
+        const invoice = await this.invoiceRepo.findById(companyId, l.invoiceId, tx);
+        if (!invoice || invoice.status !== 'posted') {
+          throw new ValidationError(`فاتورة المبيعات في السطر ${i + 1} غير موجودة أو غير مرحلة`);
+        }
+        if (invoice.customerId !== input.customerId) {
+          throw new ValidationError(`العميل في سند التحصيل لا يطابق عميل فاتورة السطر ${i + 1}`);
+        }
+        const openAmount = await this.openAmount(companyId, invoice.id, invoice.totalAmount, tx);
+        if (l.amount > openAmount + 0.0001) {
+          throw new ValidationError(
+            `مبلغ التحصيل (${l.amount.toFixed(2)}) في السطر ${i + 1} يتجاوز الرصيد المتبقي المفتوح للفاتورة (${openAmount.toFixed(2)})`
+          );
+        }
       }
 
       const effectiveCollectionDate = validatedCollectionDate ?? (await resolveCompanyToday(companyId, tx));
@@ -96,6 +96,7 @@ export class SalesCollectionService {
         companyId,
         {
           ...input,
+          lines: rawLines,
           collectionDate: effectiveCollectionDate,
         },
         actorUserId,
@@ -109,13 +110,23 @@ export class SalesCollectionService {
           action: 'SALES_COLLECTION_CREATE',
           entityType: 'sales_collections',
           entityId: created.id,
-          metadata: { amount: input.amount, invoiceId: input.invoiceId, registerId: input.registerId },
+          metadata: { amount: created.amount, linesCount: rawLines.length, registerId: input.registerId },
         },
         { executor: tx }
       );
 
       return created;
     });
+  }
+
+  private async openAmount(companyId: string, invoiceId: string, totalAmount: number, tx: DbExecutor, excludeCollectionId?: string): Promise<number> {
+    const r = await tx.query<any>(
+      `SELECT
+         COALESCE((SELECT SUM(amount) FROM ${POSTED_COLLECTION_ALLOCATIONS_SQL} alloc WHERE invoice_id = $2 AND collection_id <> $3), 0) AS paid,
+         COALESCE((SELECT SUM(total_amount) FROM sales_returns WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'), 0) AS returned`,
+      [companyId, invoiceId, excludeCollectionId || '00000000-0000-0000-0000-000000000000']
+    );
+    return Math.max(0, totalAmount - parseFloat(r.rows[0]?.paid || '0') - parseFloat(r.rows[0]?.returned || '0'));
   }
 
   private async resolveArAccount(companyId: string, executor: DbExecutor): Promise<string> {
@@ -175,32 +186,22 @@ export class SalesCollectionService {
         throw new ValidationError('صندوق النقدية غير مرتبط بحساب محاسبي (glAccountId)');
       }
 
-      const invoiceLocked = await this.invoiceRepo.findByIdForUpdate(companyId, collection.invoiceId, tx);
-      if (!invoiceLocked || invoiceLocked.status !== 'posted') {
-        throw new ValidationError('الفاتورة المرتبطة غير موجودة أو غير مرحلة');
-      }
-
-      // Check open balance under lock (net of posted collections and posted sales returns)
-      const balRes = await tx.query<any>(
-        `SELECT
-           COALESCE(SUM(amount), 0) as paid,
-           COALESCE((
-             SELECT SUM(total_amount)
-             FROM sales_returns
-             WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted'
-           ), 0) as returned
-         FROM sales_collections
-         WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted' AND id <> $3`,
-        [companyId, collection.invoiceId, id]
-      );
-      const alreadyPaid = parseFloat(balRes.rows[0]?.paid || '0');
-      const alreadyReturned = parseFloat(balRes.rows[0]?.returned || '0');
-      const openAmount = Math.max(0, invoiceLocked.totalAmount - alreadyPaid - alreadyReturned);
-
-      if (collection.amount > openAmount + 0.0001) {
-        throw new ValidationError(
-          `مبلغ التحصيل (${collection.amount.toFixed(2)}) يتجاوز الرصيد المتبقي المفتوح للفاتورة (${openAmount.toFixed(2)})`
-        );
+      const colLines = collection.lines && collection.lines.length > 0
+        ? collection.lines
+        : [{ lineNo: 1, invoiceId: collection.invoiceId, invoiceNo: collection.invoiceNo, amount: collection.amount }];
+      // Lock invoices in a stable order to avoid deadlocks between concurrent collections.
+      const sortedLines = [...colLines].sort((x, y) => (x.invoiceId < y.invoiceId ? -1 : 1));
+      for (const l of sortedLines) {
+        const invoiceLocked = await this.invoiceRepo.findByIdForUpdate(companyId, l.invoiceId, tx);
+        if (!invoiceLocked || invoiceLocked.status !== 'posted') {
+          throw new ValidationError(`الفاتورة ${l.invoiceNo || ''} المرتبطة غير موجودة أو غير مرحلة`);
+        }
+        const openAmount = await this.openAmount(companyId, l.invoiceId, invoiceLocked.totalAmount, tx, id);
+        if (l.amount > openAmount + 0.0001) {
+          throw new ValidationError(
+            `مبلغ التحصيل (${l.amount.toFixed(2)}) يتجاوز الرصيد المتبقي المفتوح للفاتورة ${l.invoiceNo || ''} (${openAmount.toFixed(2)})`
+          );
+        }
       }
 
       const arAccountId = await this.resolveArAccount(companyId, tx);
@@ -217,13 +218,15 @@ export class SalesCollectionService {
           credit: 0,
           lineMemo: `تحصيل نقدي في صندوق ${register.nameAr} سند رقم ${collectionNo}`,
         },
-        {
+      ];
+      for (const l of colLines) {
+        lines.push({
           accountId: arAccountId,
           debit: 0,
-          credit: collection.amount,
-          lineMemo: `سداد عميل ${collection.customerNameAr || ''} فاتورة ${collection.invoiceNo || ''} سند ${collectionNo}`,
-        },
-      ];
+          credit: l.amount,
+          lineMemo: `سداد عميل ${collection.customerNameAr || ''} فاتورة ${l.invoiceNo || ''} سند ${collectionNo}`,
+        });
+      }
 
       const draftJe = await this.journalService.createDraftEntry(
         companyId,
@@ -248,7 +251,7 @@ export class SalesCollectionService {
           action: 'SALES_COLLECTION_POST',
           entityType: 'sales_collections',
           entityId: id,
-          metadata: { collectionNo, amount: collection.amount, registerId: collection.registerId, journalEntryId: postedJe.id },
+          metadata: { collectionNo, amount: collection.amount, linesCount: colLines.length, registerId: collection.registerId, journalEntryId: postedJe.id },
         },
         { executor: tx }
       );

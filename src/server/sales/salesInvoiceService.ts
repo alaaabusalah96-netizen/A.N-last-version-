@@ -3,6 +3,7 @@ import {
   defaultSalesInvoiceRepository,
   multiplyToMinorUnits,
 } from './salesInvoiceRepository.js';
+import { POSTED_COLLECTION_ALLOCATIONS_SQL } from './collectionAllocationSql.js';
 import { CustomerRepository, defaultCustomerRepository } from './customerRepository.js';
 import { computeSalesInvoiceTotals } from './salesInvoiceRepository.js';
 import { JournalRepository, defaultJournalRepository } from '../accounting/journalRepository.js';
@@ -439,8 +440,8 @@ export class SalesInvoiceService {
             ), 0)::text AS open_total
            FROM sales_invoices i
            LEFT JOIN (
-             SELECT invoice_id, SUM(amount) AS total FROM sales_collections
-             WHERE company_id = $1 AND status = 'posted' GROUP BY invoice_id
+             SELECT invoice_id, SUM(amount) AS total FROM ${POSTED_COLLECTION_ALLOCATIONS_SQL} alloc
+             GROUP BY invoice_id
            ) col ON col.invoice_id = i.id
            LEFT JOIN (
              SELECT invoice_id, SUM(total_amount) AS total FROM sales_returns
@@ -774,7 +775,7 @@ export class SalesInvoiceService {
       }
 
       const colRes = await tx.query<any>(
-        `SELECT id FROM sales_collections WHERE company_id = $1 AND invoice_id = $2 AND status = 'posted' LIMIT 1`,
+        `SELECT collection_id AS id FROM ${POSTED_COLLECTION_ALLOCATIONS_SQL} alloc WHERE invoice_id = $2 LIMIT 1`,
         [companyId, id]
       );
       if (colRes.rows.length > 0) {

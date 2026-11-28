@@ -221,6 +221,7 @@ const scripts = [
   'scripts/verifyStockDocUi1.ts',
   'scripts/verifyDocumentLimits1.ts',
   'scripts/verifyCashVoucherLines1.ts',
+  'scripts/verifySalesCollectionLines1.ts',
   'scripts/verifyFleetUi1.ts',
   'scripts/verifyCustodyPeriodLock1.ts',
   'scripts/verifyCustodyOrgUnits1.ts',

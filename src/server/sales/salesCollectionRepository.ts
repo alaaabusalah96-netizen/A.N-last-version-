@@ -1,6 +1,6 @@
 import { DbExecutor } from '../db/index.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
-import { SalesCollection, CreateSalesCollectionInput } from './salesTypes.js';
+import { SalesCollection, SalesCollectionLine, CreateSalesCollectionInput } from './salesTypes.js';
 import { toCalendarDate } from '../lib/calendarDate.js';
 
 function mapRow(row: any): SalesCollection {
@@ -18,6 +18,7 @@ function mapRow(row: any): SalesCollection {
     collectionNo: row.collection_no || null,
     collectionDate: toCalendarDate(row.collection_date),
     amount: parseFloat(row.amount || '0'),
+    linesCount: row.lines_count !== undefined ? Number(row.lines_count) : undefined,
     status: row.status,
     reference: row.reference || null,
     memo: row.memo || null,
@@ -42,7 +43,8 @@ export class SalesCollectionRepository {
           cust.code as customer_code, cust.name_ar as customer_name_ar,
           inv.invoice_no as invoice_no,
           reg.code as register_code, reg.name_ar as register_name_ar,
-          je.entry_no as journal_entry_no
+          je.entry_no as journal_entry_no,
+          GREATEST(1, (SELECT COUNT(*) FROM sales_collection_lines l WHERE l.company_id = c.company_id AND l.collection_id = c.id))::int as lines_count
         FROM sales_collections c
         INNER JOIN sales_customers cust ON cust.id = c.customer_id AND cust.company_id = c.company_id
         INNER JOIN sales_invoices inv ON inv.id = c.invoice_id AND inv.company_id = c.company_id
@@ -79,11 +81,28 @@ export class SalesCollectionRepository {
       `;
       const res = await executor.query<any>(sql, [companyId, id]);
       if (res.rows.length === 0) return null;
-      return mapRow(res.rows[0]);
+      const out = mapRow(res.rows[0]);
+      out.lines = await this.loadLines(companyId, id, executor, out);
+      out.linesCount = out.lines.length;
+      return out;
     };
 
     if (customExecutor) return await run(customExecutor);
     return await withTenantTransaction(companyId, run);
+  }
+
+  async loadLines(companyId: string, id: string, executor: DbExecutor, header: SalesCollection): Promise<SalesCollectionLine[]> {
+    const res = await executor.query<any>(
+      `SELECT l.line_no, l.invoice_id, l.amount, inv.invoice_no
+       FROM sales_collection_lines l
+       INNER JOIN sales_invoices inv ON inv.id = l.invoice_id AND inv.company_id = l.company_id
+       WHERE l.company_id = $1 AND l.collection_id = $2 ORDER BY l.line_no`,
+      [companyId, id]
+    );
+    if (res.rows.length === 0) {
+      return [{ lineNo: 1, invoiceId: header.invoiceId, invoiceNo: header.invoiceNo || null, amount: header.amount }];
+    }
+    return res.rows.map((x: any) => ({ lineNo: x.line_no, invoiceId: x.invoice_id, invoiceNo: x.invoice_no || null, amount: parseFloat(x.amount) }));
   }
 
   async findByIdForUpdate(companyId: string, id: string, executor: DbExecutor): Promise<{ id: string; status: string; amount: number } | null> {
@@ -104,6 +123,8 @@ export class SalesCollectionRepository {
 
   async createDraft(companyId: string, input: CreateSalesCollectionInput, actorUserId?: string, customExecutor?: DbExecutor): Promise<SalesCollection> {
     const run = async (executor: DbExecutor) => {
+      const lines = input.lines && input.lines.length > 0 ? input.lines : [{ invoiceId: input.invoiceId as string, amount: input.amount as number }];
+      const total = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
       const sql = `
         INSERT INTO sales_collections (
           company_id, customer_id, invoice_id, register_id, collection_date, amount, reference, memo, status, created_by
@@ -114,15 +135,25 @@ export class SalesCollectionRepository {
       const res = await executor.query<any>(sql, [
         companyId,
         input.customerId,
-        input.invoiceId,
+        lines[0].invoiceId,
         input.registerId,
         input.collectionDate || null,
-        input.amount,
+        total,
         input.reference?.trim() || null,
         input.memo?.trim() || null,
         actorUserId || null,
       ]);
-      const created = await this.findById(companyId, res.rows[0].id, executor);
+      const id = res.rows[0].id;
+      const ids: string[] = [];
+      const nos: number[] = [];
+      const amts: number[] = [];
+      lines.forEach((l, i) => { ids.push(l.invoiceId); nos.push(i + 1); amts.push(l.amount); });
+      await executor.query(
+        `INSERT INTO sales_collection_lines (company_id, collection_id, line_no, invoice_id, amount)
+         SELECT $1, $2, n, i, a FROM unnest($3::int[], $4::uuid[], $5::numeric[]) AS t(n, i, a)`,
+        [companyId, id, nos, ids, amts]
+      );
+      const created = await this.findById(companyId, id, executor);
       return created!;
     };
 

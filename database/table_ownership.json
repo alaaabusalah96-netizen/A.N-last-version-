@@ -310,6 +310,11 @@
     "reason": "Lines (account + amount) of multi-line cash payment vouchers"
   },
   {
+    "table": "sales_collection_lines",
+    "scope": "tenant",
+    "reason": "Per-invoice allocation lines of multi-invoice sales collections"
+  },
+  {
     "table": "cash_payment_vouchers",
     "scope": "tenant",
     "reason": "Per-company general cash payment vouchers posted directly from cash registers and GL"

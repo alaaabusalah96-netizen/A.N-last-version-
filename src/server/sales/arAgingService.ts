@@ -1,4 +1,5 @@
 import { DbExecutor } from '../db/index.js';
+import { POSTED_COLLECTION_ALLOCATIONS_SQL } from './collectionAllocationSql.js';
 import { withTenantTransaction } from '../db/transactionManager.js';
 import { ArAgingReport, ArAgingItem, ArCustomerAgingSummary } from './salesTypes.js';
 import { ValidationError } from '../http/errors.js';
@@ -28,8 +29,7 @@ export class ArAgingService {
         INNER JOIN sales_customers c ON c.id = i.customer_id AND c.company_id = i.company_id
         LEFT JOIN (
           SELECT invoice_id, SUM(amount) as total
-          FROM sales_collections
-          WHERE company_id = $1 AND status = 'posted'
+          FROM ${POSTED_COLLECTION_ALLOCATIONS_SQL} alloc
           GROUP BY invoice_id
         ) col ON col.invoice_id = i.id
         LEFT JOIN (

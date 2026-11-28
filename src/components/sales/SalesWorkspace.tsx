@@ -52,6 +52,12 @@ interface SalesWorkspaceProps {
 
 type SalesTab = 'customers' | 'deliveries' | 'invoices' | 'collections' | 'aging';
 
+function sumCollectionLines(rows: Array<{ amount: string }>): number {
+  let t = 0;
+  for (const r of rows) t += parseFloat(r.amount) || 0;
+  return Math.round(t * 100) / 100;
+}
+
 export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
@@ -113,9 +119,8 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
 
   // Form states - Collection
   const [colCustomerId, setColCustomerId] = useState('');
-  const [colInvoiceId, setColInvoiceId] = useState('');
+  const [colLines, setColLines] = useState<Array<{ invoiceId: string; amount: string }>>([{ invoiceId: '', amount: '' }]);
   const [colRegisterId, setColRegisterId] = useState('');
-  const [colAmount, setColAmount] = useState('');
   const [colDate, setColDate] = useState(() => getLocalTodayDateString());
   const [colRef, setColRef] = useState('');
   const [colMemo, setColMemo] = useState('');
@@ -437,10 +442,14 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
   const handleCreateCollection = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCompanyId) return;
-    const amountVal = parseFloat(colAmount);
-    if (!amountVal || amountVal <= 0) {
-      setError('يرجى إدخال مبلغ تحصيل صحيح أكبر من الصفر');
-      return;
+    const payloadLines: Array<{ invoiceId: string; amount: number }> = [];
+    for (let i = 0; i < colLines.length; i++) {
+      const v = parseFloat(colLines[i].amount);
+      if (!colLines[i].invoiceId || !v || v <= 0) {
+        setError(`يرجى اختيار الفاتورة وإدخال مبلغ أكبر من الصفر في السطر ${i + 1}`);
+        return;
+      }
+      payloadLines.push({ invoiceId: colLines[i].invoiceId, amount: v });
     }
     setActionLoading(true);
     setError(null);
@@ -451,10 +460,9 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
         body: JSON.stringify({
           companyId: selectedCompanyId,
           customerId: colCustomerId,
-          invoiceId: colInvoiceId,
+          lines: payloadLines,
           registerId: colRegisterId,
           collectionDate: colDate,
-          amount: amountVal,
           reference: colRef || undefined,
           memo: colMemo || undefined,
         }),
@@ -462,7 +470,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
       if (!res.ok) throw new Error(await readErrorMessage(res, 'فشل إنشاء سند التحصيل'));
       setSuccess('تم إنشاء مسودة سند التحصيل النقدي بنجاح');
       setShowCollectionModal(false);
-      setColAmount('');
+      setColLines([{ invoiceId: '', amount: '' }]);
       setColRef('');
       setColMemo('');
       await loadData();
@@ -897,7 +905,11 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                     <tr key={col.id} className="hover:bg-slate-800/30 transition">
                       <td className="py-3.5 px-4 font-mono font-bold text-white">{col.collectionNo || col.id.slice(0, 8)}</td>
                       <td className="py-3.5 px-4 font-semibold">{col.customerNameAr || col.customerCode}</td>
-                      <td className="py-3.5 px-4 font-mono text-indigo-400">{col.invoiceNo || col.invoiceId.slice(0, 8)}</td>
+                      <td className="py-3.5 px-4 font-mono text-indigo-400">{col.invoiceNo || col.invoiceId.slice(0, 8)}
+                        {col.linesCount > 1 && (
+                          <span data-testid="collection-lines-count" className="ms-1 px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-800 text-[10px] text-indigo-300">+{col.linesCount - 1} فاتورة</span>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4 font-medium text-amber-300">{col.registerNameAr || col.registerCode}</td>
                       <td className="py-3.5 px-4 text-center font-mono">{col.collectionDate}</td>
                       <td className="py-3.5 px-4 text-center font-mono font-bold text-emerald-400 text-sm">
@@ -1370,7 +1382,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
       {/* Collection Modal */}
       {showCollectionModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6 flex flex-col gap-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-4" data-testid="collection-modal">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h4 className="font-bold text-white text-sm">إنشاء سند تحصيل نقدي من عميل</h4>
               <button onClick={() => setShowCollectionModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
@@ -1385,7 +1397,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                   value={colCustomerId}
                   onChange={(e) => {
                     setColCustomerId(e.target.value);
-                    setColInvoiceId('');
+                    setColLines([{ invoiceId: '', amount: '' }]);
                   }}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
                 >
@@ -1398,29 +1410,68 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">فاتورة المبيعات المراد تحصيلها *</label>
-                <select
-                  required
-                  value={colInvoiceId}
-                  onChange={(e) => {
-                    const invId = e.target.value;
-                    setColInvoiceId(invId);
-                    const out = outstandingInvoices.find((o) => o.invoiceId === invId);
-                    if (out) setColAmount(String(out.remainingOpenAmount));
-                  }}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
-                >
-                  <option value="">-- اختر الفاتورة --</option>
-                  {(colCustomerId
-                    ? outstandingInvoices.filter((o) => o.customerId === colCustomerId)
-                    : outstandingInvoices
-                  ).map((o) => (
-                    <option key={o.invoiceId} value={o.invoiceId}>
-                      فاتورة: {o.invoiceNo} | المتبقي: {o.remainingOpenAmount.toFixed(2)}
-                    </option>
+              <div data-testid="collection-lines-section" className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-300">فواتير المبيعات المراد تحصيلها * (حتى 100 فاتورة)</label>
+                  <span data-testid="collection-lines-total" className="text-[11px] font-mono text-emerald-400">
+                    {colLines.length} / 100 | الإجمالي: {sumCollectionLines(colLines).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+                  {colLines.map((line, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <select
+                        name={`colInvoiceId-${idx}`}
+                        required
+                        value={line.invoiceId}
+                        onChange={(e) => {
+                          const invId = e.target.value;
+                          const out = outstandingInvoices.find((o) => o.invoiceId === invId);
+                          setColLines(colLines.map((l, k) => (k === idx ? { invoiceId: invId, amount: out ? String(out.remainingOpenAmount) : l.amount } : l)));
+                        }}
+                        className="flex-1 min-w-0 px-2 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none cursor-pointer"
+                      >
+                        <option value="">-- اختر الفاتورة --</option>
+                        {(colCustomerId ? outstandingInvoices.filter((o) => o.customerId === colCustomerId) : outstandingInvoices)
+                          .filter((o) => o.invoiceId === line.invoiceId || !colLines.some((l) => l.invoiceId === o.invoiceId))
+                          .map((o) => (
+                            <option key={o.invoiceId} value={o.invoiceId}>
+                              فاتورة: {o.invoiceNo} | المتبقي: {o.remainingOpenAmount.toFixed(2)}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        name={`colAmount-${idx}`}
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        placeholder="0.00"
+                        value={line.amount}
+                        onChange={(e) => setColLines(colLines.map((l, k) => (k === idx ? { ...l, amount: e.target.value } : l)))}
+                        className="w-24 px-2 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono"
+                      />
+                      <button
+                        type="button"
+                        disabled={colLines.length <= 1}
+                        onClick={() => setColLines(colLines.filter((_, k) => k !== idx))}
+                        className="px-2 py-2 text-slate-400 hover:text-rose-400 disabled:opacity-30 cursor-pointer"
+                        aria-label={`حذف السطر ${idx + 1}`}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   ))}
-                </select>
+                </div>
+                <button
+                  type="button"
+                  data-testid="collection-add-line"
+                  disabled={colLines.length >= 100}
+                  onClick={() => setColLines([...colLines, { invoiceId: '', amount: '' }])}
+                  className="self-start px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-semibold disabled:opacity-40 cursor-pointer"
+                >
+                  + سطر
+                </button>
               </div>
 
               <div>
@@ -1440,20 +1491,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">المبلغ المحصل *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    placeholder="0.00"
-                    value={colAmount}
-                    onChange={(e) => setColAmount(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono"
-                  />
-                </div>
+              <div className="grid grid-cols-1 gap-2">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">رقم الإيصال</label>
                   <input
@@ -1476,7 +1514,7 @@ export function SalesWorkspace({ userRole }: SalesWorkspaceProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading || !colCustomerId || !colInvoiceId || !colRegisterId || !colAmount}
+                  disabled={actionLoading || !colCustomerId || !colRegisterId || colLines.some((l) => !l.invoiceId || !l.amount)}
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {actionLoading ? 'جاري الحفظ...' : 'حفظ كمسودة تحصيل'}

@@ -319,10 +319,10 @@ salesRoutes.post(
     const user = req.user!;
     const companyId = (req.body?.companyId as string) || (req.query.companyId as string) || '';
     await assertSalesPermission(user, PERMISSIONS.SALES_WRITE, companyId);
-    const { customerId, invoiceId, registerId, collectionDate, amount, reference, memo } = req.body || {};
+    const { customerId, invoiceId, lines, registerId, collectionDate, amount, reference, memo } = req.body || {};
     const collection = await defaultSalesCollectionService.createCollection(
       companyId,
-      { customerId, invoiceId, registerId, collectionDate, amount, reference, memo },
+      { customerId, invoiceId, lines, registerId, collectionDate, amount, reference, memo },
       user.id
     );
     return res.status(201).json({ status: 'ok', collection });

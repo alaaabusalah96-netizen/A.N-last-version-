@@ -235,7 +235,16 @@ export interface CreateSalesInvoiceInput {
 
 export type SalesCollectionStatus = 'draft' | 'posted' | 'cancelled';
 
+export interface SalesCollectionLine {
+  lineNo: number;
+  invoiceId: string;
+  invoiceNo?: string | null;
+  amount: number;
+}
+
 export interface SalesCollection {
+  lines?: SalesCollectionLine[];
+  linesCount?: number;
   id: string;
   companyId: string;
   customerId: string;
@@ -263,10 +272,13 @@ export interface SalesCollection {
 
 export interface CreateSalesCollectionInput {
   customerId: string;
-  invoiceId: string;
+  /** Legacy single-invoice form (invoiceId + amount). Ignored when lines is given. */
+  invoiceId?: string;
+  /** Multi-invoice form: one line per invoice, up to 100. */
+  lines?: Array<{ invoiceId: string; amount: number }>;
   registerId: string;
   collectionDate?: string;
-  amount: number;
+  amount?: number;
   reference?: string;
   memo?: string;
 }
