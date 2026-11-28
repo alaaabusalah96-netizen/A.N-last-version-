@@ -166,6 +166,7 @@
     "test:fleet-1": "tsx scripts/verifyFleet1.ts",
     "test:fleet-trips-1": "tsx scripts/verifyFleetTrips1.ts",
     "test:fleet-expenses-1": "tsx scripts/verifyFleetExpenses1.ts",
+    "test:fleet-expense-lines-1": "tsx scripts/verifyFleetExpenseLines1.ts",
     "test:fleet-custody-1": "tsx scripts/verifyFleetCustody1.ts",
     "test:fleet-driver-1": "tsx scripts/verifyFleetDriver1.ts",
     "test:fleet-gps-1": "tsx scripts/verifyFleetGps1.ts",

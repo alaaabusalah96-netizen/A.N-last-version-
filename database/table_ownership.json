@@ -245,6 +245,11 @@
     "reason": "Per-company fleet expenses with approval and journal posting (status-based, no delete)"
   },
   {
+    "table": "fleet_expense_lines",
+    "scope": "tenant",
+    "reason": "Per-category lines of multi-line fleet expenses (immutable, up to 100 per expense)"
+  },
+  {
     "table": "custody_limit_policies",
     "scope": "tenant",
     "reason": "Per-company or per-employee versioned ceiling on custody held at one time (append-only)"

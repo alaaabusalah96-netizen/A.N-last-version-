@@ -7,6 +7,7 @@ import { defaultJournalService, JournalService } from '../accounting/journalServ
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../http/errors.js';
 import { defaultCustodyVoucherService } from '../cash/custodyVoucherService.js';
 import { isUuid } from '../http/validators.js';
+import { assertMaxDocumentLines } from '../http/documentLimits.js';
 
 export const EXPENSE_STATUSES = ['draft', 'approved', 'rejected', 'posted', 'reversed'] as const;
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
@@ -31,7 +32,9 @@ export function parseAmount(v: unknown): number {
 }
 
 export interface ExpenseCategoryView { id: string; companyId: string; code: string; nameAr: string; expenseAccountId: string; isActive: boolean }
+export interface ExpenseLineView { lineNo: number; categoryId: string; categoryNameAr: string | null; amount: number; description: string | null }
 export interface ExpenseView {
+  lines?: ExpenseLineView[]; linesCount?: number;
   id: string; companyId: string; seq: number; expenseNo: string; orgUnitId: string | null; vehicleId: string; tripId: string | null; categoryId: string;
   expenseDate: string; amount: number; description: string; referenceNo: string | null; odometerKm: number | null; status: ExpenseStatus; custodyVoucherId: string | null;
   createdBy: string; approvedBy: string | null; approvedAt: string | null; rejectReason: string | null; postedBy: string | null; postedAt: string | null;
@@ -137,17 +140,38 @@ export class FleetExpenseService {
   private move(e: any, to: ExpenseStatus) {
     if (!canExpenseMove(e.status, to)) throw new ConflictError(`لا يمكن نقل المصروف من حالة «${e.status}» إلى «${to}»`);
   }
+  /** Lines of one expense. Legacy expenses (no lines rows) are shown as one line built from the header. */
+  private async loadLines(companyId: string, e: any, tx: DbExecutor): Promise<ExpenseLineView[]> {
+    const rows = (await tx.query<any>(
+      `SELECT l.line_no AS "lineNo", l.category_id AS "categoryId", c.name_ar AS "categoryNameAr", l.amount, l.description
+         FROM fleet_expense_lines l JOIN fleet_expense_categories c ON c.company_id=l.company_id AND c.id=l.category_id
+        WHERE l.company_id=$1 AND l.expense_id=$2 ORDER BY l.line_no`, [companyId, e.id])).rows;
+    if (rows.length) return rows.map((r: any) => ({ ...r, amount: Number(r.amount) }));
+    const c = (await tx.query<any>(`SELECT name_ar AS "n" FROM fleet_expense_categories WHERE company_id=$1 AND id=$2`, [companyId, e.categoryId])).rows[0];
+    return [{ lineNo: 1, categoryId: e.categoryId, categoryNameAr: c?.n ?? null, amount: Number(e.amount), description: e.description }];
+  }
   private async reload(companyId: string, id: string, tx: DbExecutor): Promise<ExpenseView> {
-    return toExpense((await tx.query<any>(`SELECT ${ECOLS} FROM fleet_expenses WHERE company_id=$1 AND id=$2`, [companyId, id])).rows[0]);
+    const r = (await tx.query<any>(`SELECT ${ECOLS} FROM fleet_expenses WHERE company_id=$1 AND id=$2`, [companyId, id])).rows[0];
+    const v = toExpense(r);
+    v.lines = await this.loadLines(companyId, r, tx);
+    v.linesCount = v.lines.length;
+    return v;
   }
 
   async listExpenses(companyId: string, filter: { status?: string; vehicleId?: string; tripId?: string } = {}): Promise<ExpenseView[]> {
     this.cid(companyId);
     if (filter.status && !(EXPENSE_STATUSES as readonly string[]).includes(filter.status)) throw new ValidationError('حالة غير صالحة');
     for (const k of ['vehicleId', 'tripId'] as const) if (filter[k] && !isUuid(filter[k]!)) throw new ValidationError('معرف غير صالح');
-    return await withTenantTransaction(companyId, async (tx) => (await tx.query<any>(
-      `SELECT ${ECOLS} FROM fleet_expenses WHERE company_id=$1 AND ($2::text IS NULL OR status=$2) AND ($3::uuid IS NULL OR vehicle_id=$3) AND ($4::uuid IS NULL OR trip_id=$4)
-        ORDER BY seq DESC LIMIT 500`, [companyId, filter.status || null, filter.vehicleId || null, filter.tripId || null])).rows.map(toExpense));
+    return await withTenantTransaction(companyId, async (tx) => {
+      const list = (await tx.query<any>(
+        `SELECT ${ECOLS} FROM fleet_expenses WHERE company_id=$1 AND ($2::text IS NULL OR status=$2) AND ($3::uuid IS NULL OR vehicle_id=$3) AND ($4::uuid IS NULL OR trip_id=$4)
+          ORDER BY seq DESC LIMIT 500`, [companyId, filter.status || null, filter.vehicleId || null, filter.tripId || null])).rows.map(toExpense);
+      if (!list.length) return list;
+      const cnt = new Map<string, number>(
+        (await tx.query<any>(`SELECT expense_id AS id, count(*)::int AS n FROM fleet_expense_lines WHERE company_id=$1 AND expense_id = ANY($2::uuid[]) GROUP BY expense_id`,
+          [companyId, list.map((x) => x.id)])).rows.map((r: any) => [r.id, Number(r.n)] as [string, number]));
+      return list.map((x) => ({ ...x, linesCount: cnt.get(x.id) || 1 }));
+    });
   }
   async getExpense(companyId: string, id: string): Promise<ExpenseView> {
     this.cid(companyId);
@@ -155,18 +179,37 @@ export class FleetExpenseService {
     return await withTenantTransaction(companyId, async (tx) => {
       const r = (await tx.query<any>(`SELECT ${ECOLS} FROM fleet_expenses WHERE company_id=$1 AND id=$2`, [companyId, id])).rows[0];
       if (!r) throw new NotFoundError('المصروف غير موجود');
-      return toExpense(r);
+      const v = toExpense(r);
+      v.lines = await this.loadLines(companyId, r, tx);
+      v.linesCount = v.lines.length;
+      return v;
     });
   }
 
   async createExpense(companyId: string, input: Record<string, unknown>, actorId: string): Promise<ExpenseView> {
     this.cid(companyId);
     if (typeof input.vehicleId !== 'string' || !isUuid(input.vehicleId)) throw new ValidationError('المركبة مطلوبة');
-    if (typeof input.categoryId !== 'string' || !isUuid(input.categoryId)) throw new ValidationError('فئة المصروف مطلوبة');
+    // Lines: new form is lines[{categoryId, amount, description?}]; the legacy single categoryId+amount is one line.
+    let rawLines: any[];
+    if (input.lines !== undefined && input.lines !== null) {
+      if (!Array.isArray(input.lines) || input.lines.length === 0) throw new ValidationError('أضف سطر مصروف واحد على الأقل');
+      assertMaxDocumentLines(input.lines);
+      rawLines = input.lines;
+    } else {
+      rawLines = [{ categoryId: input.categoryId, amount: input.amount }];
+    }
+    const expLines = rawLines.map((l, i) => {
+      if (!l || typeof l.categoryId !== 'string' || !isUuid(l.categoryId)) throw new ValidationError(`فئة المصروف مطلوبة (السطر ${i + 1})`);
+      let amt: number;
+      try { amt = parseAmount(l.amount); } catch (err: any) { throw new ValidationError(`${err.message} (السطر ${i + 1})`); }
+      return { categoryId: l.categoryId as string, amount: amt, description: text(l.description, 300, `وصف السطر ${i + 1}`) };
+    });
+    const totalCents = expLines.reduce((a, l) => a + Math.round(l.amount * 100), 0);
+    const total = totalCents / 100;
     if (input.tripId !== undefined && input.tripId !== null && input.tripId !== '' && (typeof input.tripId !== 'string' || !isUuid(input.tripId))) throw new ValidationError('معرف الرحلة غير صالح');
     const tripId = (input.tripId as string) || null;
     const expenseDate = day(input.expenseDate, 'تاريخ المصروف');
-    const amount = parseAmount(input.amount);
+    const amount = total;
     const description = text(input.description, 300, 'وصف المصروف', true)!;
     const referenceNo = text(input.referenceNo, 60, 'رقم المرجع');
     let odometerKm: number | null = null;
@@ -177,9 +220,10 @@ export class FleetExpenseService {
     return await withTenantTransaction(companyId, async (tx) => {
       const v = (await tx.query<any>(`SELECT org_unit_id AS "orgUnitId" FROM fleet_vehicles WHERE company_id=$1 AND id=$2`, [companyId, input.vehicleId])).rows[0];
       if (!v) throw new NotFoundError('المركبة غير موجودة في هذه الشركة');
-      const cat = (await tx.query<any>(`SELECT is_active AS "isActive" FROM fleet_expense_categories WHERE company_id=$1 AND id=$2`, [companyId, input.categoryId])).rows[0];
-      if (!cat) throw new NotFoundError('فئة المصروف غير موجودة');
-      if (!cat.isActive) throw new ValidationError('فئة المصروف معطّلة');
+      const catIds = Array.from(new Set(expLines.map((l) => l.categoryId)));
+      const cats = (await tx.query<any>(`SELECT id, is_active AS "isActive" FROM fleet_expense_categories WHERE company_id=$1 AND id = ANY($2::uuid[])`, [companyId, catIds])).rows;
+      if (cats.length !== catIds.length) throw new NotFoundError('فئة مصروف غير موجودة');
+      if (cats.some((c: any) => !c.isActive)) throw new ValidationError('إحدى فئات المصروف معطّلة');
       if (tripId) {
         const t = (await tx.query<any>(`SELECT vehicle_id AS "vehicleId" FROM fleet_trips WHERE company_id=$1 AND id=$2`, [companyId, tripId])).rows[0];
         if (!t) throw new NotFoundError('الرحلة غير موجودة في هذه الشركة');
@@ -199,8 +243,12 @@ export class FleetExpenseService {
       const row = (await tx.query<any>(
         `INSERT INTO fleet_expenses (company_id, seq, expense_no, org_unit_id, vehicle_id, trip_id, category_id, expense_date, amount, description, reference_no, odometer_km, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-        [companyId, seq, expenseNo, orgUnitId, input.vehicleId, tripId, input.categoryId, expenseDate, amount, description, referenceNo, odometerKm, actorId])).rows[0];
-      await this.audit(companyId, actorId, 'FLEET_EXPENSE_CREATED', 'fleet_expenses', row.id, { expenseNo, vehicleId: input.vehicleId, categoryId: input.categoryId, amount, expenseDate }, tx);
+        [companyId, seq, expenseNo, orgUnitId, input.vehicleId, tripId, expLines[0].categoryId, expenseDate, amount, description, referenceNo, odometerKm, actorId])).rows[0];
+      await tx.query(
+        `INSERT INTO fleet_expense_lines (company_id, expense_id, line_no, category_id, amount, description)
+         SELECT $1, $2, x.n, x.c, x.a, x.d FROM unnest($3::int[], $4::uuid[], $5::numeric[], $6::text[]) AS x(n, c, a, d)`,
+        [companyId, row.id, expLines.map((_, i) => i + 1), expLines.map((l) => l.categoryId), expLines.map((l) => l.amount), expLines.map((l) => l.description)]);
+      await this.audit(companyId, actorId, 'FLEET_EXPENSE_CREATED', 'fleet_expenses', row.id, { expenseNo, vehicleId: input.vehicleId, categoryId: expLines[0].categoryId, linesCount: expLines.length, amount, expenseDate }, tx);
       return await this.reload(companyId, row.id, tx);
     });
   }
@@ -237,17 +285,26 @@ export class FleetExpenseService {
       const e = await this.lock(companyId, id, tx);
       this.move(e, 'posted');
       if (e.custodyVoucherId) throw new ConflictError('المصروف مرتبط بحافظة عهدة؛ يُرحّل باعتماد الحافظة من شاشة العهدة');
-      const cat = (await tx.query<any>(`SELECT ${CCOLS} FROM fleet_expense_categories WHERE company_id=$1 AND id=$2`, [companyId, e.categoryId])).rows[0];
-      const expAcc = await this.assertAccount(companyId, cat.expenseAccountId, 'حساب مصروف الفئة', ['expense'], tx);
+      const lines = await this.loadLines(companyId, e, tx);
+      const cats = new Map<string, any>((await tx.query<any>(`SELECT ${CCOLS} FROM fleet_expense_categories WHERE company_id=$1 AND id = ANY($2::uuid[])`,
+        [companyId, Array.from(new Set(lines.map((l) => l.categoryId)))])).rows.map((c: any) => [c.id, c] as [string, any]));
+      const accCache = new Map<string, any>();
+      for (const ln of lines) {
+        const cat = cats.get(ln.categoryId);
+        if (!accCache.has(cat.expenseAccountId)) accCache.set(cat.expenseAccountId, await this.assertAccount(companyId, cat.expenseAccountId, 'حساب مصروف الفئة', ['expense'], tx));
+      }
       const counter = await this.assertAccount(companyId, counterAccountId, 'حساب الطرف المقابل', ['asset', 'liability'], tx);
-      if (counter.id === expAcc.id) throw new ValidationError('الحساب المقابل يطابق حساب المصروف');
+      if (accCache.has(counter.id)) throw new ValidationError('الحساب المقابل يطابق حساب المصروف');
       const amount = Number(e.amount);
       const draft = await this.journalService.createDraftEntry(companyId, {
         entryDate: e.expenseDate,
         memo: `مصروف أسطول ${e.expenseNo}: ${e.description}`,
         orgUnitId: e.orgUnitId,
         lines: [
-          { accountId: expAcc.id, debit: amount, credit: 0, lineMemo: `${e.expenseNo} - ${cat.nameAr}` },
+          ...lines.map((ln) => {
+            const cat = cats.get(ln.categoryId);
+            return { accountId: cat.expenseAccountId as string, debit: ln.amount, credit: 0, lineMemo: `${e.expenseNo} - ${cat.nameAr}${ln.description ? ': ' + ln.description : ''}`.slice(0, 300) };
+          }),
           { accountId: counter.id, debit: 0, credit: amount, lineMemo: `${e.expenseNo} - ${counter.code}` },
         ],
       }, actorId, isPlatformAdmin, tx);
@@ -255,7 +312,7 @@ export class FleetExpenseService {
       await tx.query(
         `UPDATE fleet_expenses SET status='posted', posted_by=$3, posted_at=now(), counter_account_id=$4, journal_entry_id=$5, updated_at=now() WHERE company_id=$1 AND id=$2`,
         [companyId, id, actorId, counter.id, posted.id]);
-      await this.audit(companyId, actorId, 'FLEET_EXPENSE_POSTED', 'fleet_expenses', id, { expenseNo: e.expenseNo, amount, journalEntryId: posted.id, debit: expAcc.code, credit: counter.code }, tx);
+      await this.audit(companyId, actorId, 'FLEET_EXPENSE_POSTED', 'fleet_expenses', id, { expenseNo: e.expenseNo, amount, journalEntryId: posted.id, linesCount: lines.length, credit: counter.code }, tx);
       return await this.reload(companyId, id, tx);
     });
   }
@@ -273,9 +330,14 @@ export class FleetExpenseService {
       if (!cu) throw new NotFoundError('العهدة غير موجودة');
       if (cu.status !== 'open') throw new ValidationError('العهدة ليست مفتوحة (مصروفة وغير مسوّاة)');
       if (!isAdmin && cu.employeeUserId !== actorId) throw new ForbiddenError('لا يمكن الصرف إلا من عهدتك الشخصية');
-      const cat = (await tx.query<any>(`SELECT ${CCOLS} FROM fleet_expense_categories WHERE company_id=$1 AND id=$2`, [companyId, e.categoryId])).rows[0];
+      const lines = await this.loadLines(companyId, e, tx);
+      const cats = new Map<string, any>((await tx.query<any>(`SELECT ${CCOLS} FROM fleet_expense_categories WHERE company_id=$1 AND id = ANY($2::uuid[])`,
+        [companyId, Array.from(new Set(lines.map((l) => l.categoryId)))])).rows.map((c: any) => [c.id, c] as [string, any]));
       const v = await defaultCustodyVoucherService.submitVoucher(companyId, custodyId, {
-        lines: [{ expenseAccountId: cat.expenseAccountId, amount: Number(e.amount), memo: `${e.expenseNo} - ${cat.nameAr}: ${e.description}`.slice(0, 300) }],
+        lines: lines.map((ln) => {
+          const cat = cats.get(ln.categoryId);
+          return { expenseAccountId: cat.expenseAccountId, amount: ln.amount, memo: `${e.expenseNo} - ${cat.nameAr}: ${ln.description || e.description}`.slice(0, 300) };
+        }),
         memo: `مصروف أسطول ${e.expenseNo}`,
       }, actorId);
       await tx.query(`UPDATE fleet_expenses SET custody_voucher_id=$3, updated_at=now() WHERE company_id=$1 AND id=$2`, [companyId, id, v.id]);

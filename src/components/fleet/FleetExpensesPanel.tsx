@@ -8,7 +8,9 @@ interface Expense {
   id: string; expenseNo: string; vehicleId: string; tripId: string | null; categoryId: string; expenseDate: string; amount: number; description: string;
   referenceNo: string | null; odometerKm: number | null; status: string; rejectReason: string | null; reverseReason: string | null;
   journalEntryId: string | null; reversalEntryId: string | null; counterAccountId: string | null; custodyVoucherId?: string | null;
+  linesCount?: number; lines?: Array<{ lineNo: number; categoryId: string; categoryNameAr: string | null; amount: number; description: string | null }>;
 }
+interface FormLine { categoryId: string; amount: string; description: string }
 interface OpenCustody { id: string; custodyNo: string | null; employeeUsername?: string | null; amount: number; purpose: string }
 interface Account { id: string; code: string; nameAr: string; accountType: string; isPostable: boolean; isActive?: boolean }
 
@@ -20,6 +22,22 @@ const BADGE: Record<string, string> = {
 type Action = 'approve' | 'reject' | 'post' | 'custody' | 'reverse';
 const ACTION_AR: Record<Action, string> = { approve: 'اعتماد', reject: 'رفض', post: 'ترحيل محاسبي', custody: 'دفع من العهدة', reverse: 'عكس القيد' };
 const money = (n: number) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const ExpenseLineRow = React.memo(function ExpenseLineRow({ ln, idx, cats, canRemove, onChange, onRemove, cls }: {
+  ln: FormLine; idx: number; cats: Category[]; canRemove: boolean; cls: string;
+  onChange: (idx: number, patch: Partial<FormLine>) => void; onRemove: (idx: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_96px_1fr_28px] gap-2 items-center">
+      <select required name={`expCategory-${idx}`} className={cls} value={ln.categoryId} onChange={(e) => onChange(idx, { categoryId: e.target.value })}>
+        <option value="">-- الفئة --</option>{cats.map((c) => (<option key={c.id} value={c.id}>{c.nameAr}</option>))}
+      </select>
+      <input required name={`expAmount-${idx}`} type="number" min="0.01" step="0.01" placeholder="0.00" className={cls} value={ln.amount} onChange={(e) => onChange(idx, { amount: e.target.value })} />
+      <input name={`expDesc-${idx}`} maxLength={300} placeholder="وصف البند (اختياري)" className={cls} value={ln.description} onChange={(e) => onChange(idx, { description: e.target.value })} />
+      <button type="button" disabled={!canRemove} onClick={() => onRemove(idx)} aria-label={`حذف البند ${idx + 1}`} className="text-slate-400 hover:text-red-400 disabled:opacity-30 cursor-pointer"><X className="w-4 h-4" /></button>
+    </div>
+  );
+});
 
 interface Props { companyId: string; vehicles: TripVehicle[]; can: (perm: string) => boolean }
 
@@ -38,6 +56,10 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [showCat, setShowCat] = useState(false);
   const [f, setF] = useState<Record<string, string>>({});
+  const [expLines, setExpLines] = useState<FormLine[]>([{ categoryId: '', amount: '', description: '' }]);
+  const [viewExp, setViewExp] = useState<Expense | null>(null);
+  const onLineChange = useCallback((idx: number, patch: Partial<FormLine>) => setExpLines((prev) => prev.map((l, j) => (j === idx ? { ...l, ...patch } : l))), []);
+  const onLineRemove = useCallback((idx: number) => setExpLines((prev) => prev.filter((_, j) => j !== idx)), []);
   const [cf, setCf] = useState<Record<string, string>>({});
   const [act, setAct] = useState<{ exp: Expense; action: Action } | null>(null);
   const [actVal, setActVal] = useState('');
@@ -91,12 +113,16 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
     if (!canCreate) return;
     setBusy(true); setError(null); setSuccess(null);
     try {
-      const amount = Number(f.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر');
-      const data = await post('/api/fleet/expenses', { vehicleId: f.vehicleId, categoryId: f.categoryId, expenseDate: f.expenseDate, amount, description: f.description,
+      const lines = expLines.map((l, i) => {
+        const a = Number(l.amount);
+        if (!l.categoryId) throw new Error(`اختر فئة المصروف (البند ${i + 1})`);
+        if (!Number.isFinite(a) || a <= 0) throw new Error(`المبلغ يجب أن يكون أكبر من صفر (البند ${i + 1})`);
+        return { categoryId: l.categoryId, amount: a, description: l.description.trim() || undefined };
+      });
+      const data = await post('/api/fleet/expenses', { vehicleId: f.vehicleId, expenseDate: f.expenseDate, lines, description: f.description,
         referenceNo: f.referenceNo || undefined, odometerKm: f.odometerKm ? Number(f.odometerKm) : undefined }, 'تعذر حفظ المصروف');
       setSuccess(`تم تسجيل المصروف ${data.expense?.expenseNo || ''} كمسودة بانتظار الاعتماد`);
-      setShowForm(false); setF({}); await load();
+      setShowForm(false); setF({}); setExpLines([{ categoryId: '', amount: '', description: '' }]); await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'حدث خطأ أثناء الحفظ'); } finally { setBusy(false); }
   };
 
@@ -139,6 +165,16 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
     } catch (err) { setError(err instanceof Error ? err.message : 'حدث خطأ أثناء التنفيذ'); setAct(null); } finally { setBusy(false); }
   };
 
+  const openView = async (x: Expense) => {
+    setError(null);
+    try {
+      const r = await apiFetch(`/api/fleet/expenses/${x.id}?companyId=${encodeURIComponent(companyId)}`);
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.message || b.error || 'تعذر تحميل بنود المصروف');
+      setViewExp(b.expense);
+    } catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل بنود المصروف'); }
+  };
+
   const actionsFor = (x: Expense): Action[] => {
     const a: Action[] = [];
     if (x.status === 'draft' && canApprove) a.push('approve', 'reject');
@@ -164,7 +200,7 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
         <div className="flex gap-2">
           {canCreate && (<button type="button" onClick={() => { setCf({}); setShowCat(true); setError(null); }}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-xl cursor-pointer">فئات المصروف ({cats.length})</button>)}
-          {canCreate && (<button type="button" onClick={() => { setF({ expenseDate: new Date().toISOString().slice(0, 10) }); setShowForm(true); setError(null); }}
+          {canCreate && (<button type="button" onClick={() => { setF({ expenseDate: new Date().toISOString().slice(0, 10) }); setExpLines([{ categoryId: '', amount: '', description: '' }]); setShowForm(true); setError(null); }}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer">
             <Plus className="w-3.5 h-3.5" /><span>مصروف جديد</span></button>)}
         </div>
@@ -188,7 +224,9 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
                   <td className="py-3.5 px-4 font-mono text-indigo-300">{x.expenseNo}</td>
                   <td className="py-3.5 px-4"><span dir="ltr" className="font-mono tabular-nums">{x.expenseDate}</span></td>
                   <td className="py-3.5 px-4">{vLabel(x.vehicleId)}</td>
-                  <td className="py-3.5 px-4">{cLabel(x.categoryId)}</td>
+                  <td className="py-3.5 px-4">{cLabel(x.categoryId)}{(x.linesCount || 1) > 1 && (
+                    <button type="button" data-testid="expense-lines-badge" onClick={() => void openView(x)} className="ms-1 px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-800 text-[10px] text-indigo-300 cursor-pointer">+{(x.linesCount || 1) - 1} بند</button>
+                  )}</td>
                   <td className="py-3.5 px-4 text-slate-300">{x.description}{x.rejectReason ? <div className="text-red-300">سبب الرفض: {x.rejectReason}</div> : null}{x.reverseReason ? <div className="text-amber-300">سبب العكس: {x.reverseReason}</div> : null}</td>
                   <td className="py-3.5 px-4 font-mono tabular-nums">{money(x.amount)}</td>
                   <td className="py-3.5 px-4"><span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${BADGE[x.status] || ''}`}>{EXPENSE_STATUS_AR[x.status] || x.status}</span></td>
@@ -217,12 +255,23 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs text-slate-300">المركبة *
                 <select required className={inp} value={f.vehicleId || ''} onChange={set('vehicleId')}><option value="">-- اختر --</option>{vehicles.map((v) => (<option key={v.id} value={v.id}>{v.code} ({v.plateNo})</option>))}</select></label>
-              <label className="text-xs text-slate-300">الفئة *
-                <select required className={inp} value={f.categoryId || ''} onChange={set('categoryId')}><option value="">-- اختر --</option>{activeCats.map((c) => (<option key={c.id} value={c.id}>{c.nameAr}</option>))}</select></label>
               <label className="text-xs text-slate-300">التاريخ *<input required type="date" className={inp} value={f.expenseDate || ''} onChange={set('expenseDate')} /></label>
-              <label className="text-xs text-slate-300">المبلغ *<input required type="number" min="0.01" step="0.01" className={inp} value={f.amount || ''} onChange={set('amount')} /></label>
               <label className="text-xs text-slate-300">رقم المرجع<input maxLength={60} className={inp} value={f.referenceNo || ''} onChange={set('referenceNo')} /></label>
               <label className="text-xs text-slate-300">قراءة العداد (كم)<input type="number" min="0" step="0.1" className={inp} value={f.odometerKm || ''} onChange={set('odometerKm')} /></label>
+            </div>
+            <div data-testid="expense-lines" className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>بنود المصروف * (حتى 100 بند)</span>
+                <span data-testid="expense-lines-total" className="font-mono text-emerald-400">{expLines.length} / 100 | الإجمالي: {expLines.reduce((a, l) => a + (Number(l.amount) || 0), 0).toFixed(2)}</span>
+              </div>
+              <div data-testid="expense-lines-scroll" className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {expLines.map((ln, idx) => (
+                  <ExpenseLineRow key={idx} ln={ln} idx={idx} cats={activeCats} canRemove={expLines.length > 1} cls={inp} onChange={onLineChange} onRemove={onLineRemove} />
+                ))}
+              </div>
+              <button type="button" data-testid="expense-add-line" disabled={expLines.length >= 100}
+                onClick={() => setExpLines((prev) => (prev.length >= 100 ? prev : [...prev, { categoryId: '', amount: '', description: '' }]))}
+                className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-semibold disabled:opacity-40 cursor-pointer">+ بند</button>
             </div>
             <label className="block text-xs text-slate-300">الوصف *<input required maxLength={300} className={inp} value={f.description || ''} onChange={set('description')} /></label>
             {activeCats.length === 0 && <p className="text-[11px] text-amber-300">لا توجد فئات. أنشئ فئة مصروف أولا من زر «فئات المصروف».</p>}
@@ -232,6 +281,21 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-200 text-xs rounded-xl cursor-pointer">إلغاء</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {viewExp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="بنود المصروف" data-testid="expense-view">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-white text-sm">بنود المصروف {viewExp.expenseNo}</h4>
+              <button type="button" aria-label="إغلاق" onClick={() => setViewExp(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <ul className="text-xs text-slate-300 space-y-1 max-h-72 overflow-y-auto">
+              {(viewExp.lines || []).map((l) => (<li key={l.lineNo} className="flex justify-between gap-2"><span>{l.lineNo}. {l.categoryNameAr || cLabel(l.categoryId)}{l.description ? ` - ${l.description}` : ''}</span><span className="font-mono tabular-nums">{money(l.amount)}</span></li>))}
+            </ul>
+            <p className="text-xs text-slate-400">الإجمالي: <span className="font-mono tabular-nums">{money(viewExp.amount)}</span></p>
+          </div>
         </div>
       )}
 

@@ -213,6 +213,7 @@ const scripts = [
   'scripts/verifyFleet1.ts',
   'scripts/verifyFleetTrips1.ts',
   'scripts/verifyFleetExpenses1.ts',
+  'scripts/verifyFleetExpenseLines1.ts',
   'scripts/verifyFleetCustody1.ts',
   'scripts/verifyFleetDriver1.ts',
   'scripts/verifyFleetGps1.ts',
