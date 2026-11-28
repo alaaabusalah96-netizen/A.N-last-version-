@@ -1188,6 +1188,7 @@ export class InventoryValuationService {
               }
             }
 
+            const maBalanceUpdates: Array<{ id: string; remainingQty: string; consumedQty: string; remainingValue: string; consumedValue: string }> = [];
             for (let i = 0; i < parsedBalances.length; i++) {
               const tq = takeQtyArr[i];
               const tv = takeValArr[i];
@@ -1199,15 +1200,13 @@ export class InventoryValuationService {
               const newRemVal = p.remValUnits - tv;
               const newConsumedVal = p.consumedValUnits + tv;
 
-              await this.valuationRepo.updateMaSourceBalanceQuantities(
-                companyId,
-                p.row.id,
-                fromMinorUnits(newRemQty, QTY_SCALE),
-                fromMinorUnits(newConsumedQty, QTY_SCALE),
-                client,
-                fromMinorUnits(newRemVal, COST_SCALE),
-                fromMinorUnits(newConsumedVal, COST_SCALE)
-              );
+              maBalanceUpdates.push({
+                id: p.row.id,
+                remainingQty: fromMinorUnits(newRemQty, QTY_SCALE),
+                consumedQty: fromMinorUnits(newConsumedQty, QTY_SCALE),
+                remainingValue: fromMinorUnits(newRemVal, COST_SCALE),
+                consumedValue: fromMinorUnits(newConsumedVal, COST_SCALE),
+              });
 
               if (tq > 0n) {
                 internalMaSlices.push({
@@ -1222,6 +1221,8 @@ export class InventoryValuationService {
                 });
               }
             }
+            // One round trip for all consumed source balances (was one UPDATE per source).
+            await this.valuationRepo.updateMaSourceBalanceQuantitiesBulk(companyId, maBalanceUpdates, client);
           }
         }
       }
@@ -1331,28 +1332,29 @@ export class InventoryValuationService {
           }
         }
 
-        for (const g of groupedByOrigin.values()) {
-          await this.valuationRepo.createMaSourceEvent(
-            companyId,
-            {
-              warehouseId: input.warehouseId,
-              itemId: input.itemId,
-              sourceType: input.sourceType,
-              sourceId: input.sourceId,
-              sourceLineId: input.sourceLineId ?? null,
-              originSourceType: g.originSourceType,
-              originSourceId: g.originSourceId,
-              originSourceLineId: g.originSourceLineId,
-              grnId: g.grnId,
-              grnLineId: g.grnLineId,
-              eventType: maEventType,
-              quantity: fromMinorUnits(g.qtyUnits, QTY_SCALE),
-              valueDelta: fromMinorUnits(-g.costUnits, COST_SCALE),
-              referenceMovementId: movement.id,
-            },
-            client
-          );
-        }
+        // One round trip for all origin events (was one INSERT per origin).
+        await this.valuationRepo.createMaSourceEventsMulti(
+          companyId,
+          {
+            warehouseId: input.warehouseId,
+            itemId: input.itemId,
+            sourceType: input.sourceType,
+            sourceId: input.sourceId,
+            sourceLineId: input.sourceLineId ?? null,
+            eventType: maEventType,
+            referenceMovementId: movement.id,
+          },
+          [...groupedByOrigin.values()].map((g) => ({
+            originSourceType: g.originSourceType,
+            originSourceId: g.originSourceId,
+            originSourceLineId: g.originSourceLineId,
+            grnId: g.grnId,
+            grnLineId: g.grnLineId,
+            quantity: fromMinorUnits(g.qtyUnits, QTY_SCALE),
+            valueDelta: fromMinorUnits(-g.costUnits, COST_SCALE),
+          })),
+          client
+        );
       }
 
       const allocatedLayers: AllocatedLayerSlice[] = internalAllocations.map((a) => ({

@@ -1855,6 +1855,98 @@ export class InventoryValuationRepository {
     );
   }
 
+  async updateMaSourceBalanceQuantitiesBulk(
+    companyId: string,
+    rows: { id: string; remainingQty: string; consumedQty: string; remainingValue: string; consumedValue: string }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `UPDATE inv_ma_source_balances b
+       SET remaining_qty = v.remaining_qty::numeric,
+           consumed_qty = v.consumed_qty::numeric,
+           remaining_value = v.remaining_value::numeric,
+           consumed_value = v.consumed_value::numeric,
+           updated_at = now()
+       FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[])
+            AS v(id, remaining_qty, consumed_qty, remaining_value, consumed_value)
+       WHERE b.company_id = $1 AND b.id = v.id;`,
+      [
+        companyId,
+        rows.map((r) => r.id),
+        rows.map((r) => String(r.remainingQty)),
+        rows.map((r) => String(r.consumedQty)),
+        rows.map((r) => String(r.remainingValue)),
+        rows.map((r) => String(r.consumedValue)),
+      ]
+    );
+  }
+
+  async createMaSourceEventsMulti(
+    companyId: string,
+    common: {
+      warehouseId: string;
+      itemId: string;
+      sourceType: string;
+      sourceId: string;
+      sourceLineId: string | null;
+      eventType: MaSourceEventType;
+      referenceMovementId: string | null;
+    },
+    rows: {
+      originSourceType: string;
+      originSourceId: string;
+      originSourceLineId: string | null;
+      grnId: string | null;
+      grnLineId: string | null;
+      quantity: string;
+      valueDelta: string;
+    }[],
+    executor: DbExecutor
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    await executor.query(
+      `INSERT INTO inv_ma_source_events (
+         company_id, item_id, warehouse_id,
+         source_type, source_id, source_line_id,
+         origin_source_type, origin_source_id, origin_source_line_id,
+         grn_id, grn_line_id,
+         event_type, quantity, value_delta, reference_movement_id
+       )
+       SELECT $1, $2, $3, $4, $5, $6,
+              v.origin_source_type, v.origin_source_id, v.origin_source_line_id,
+              v.grn_id, v.grn_line_id,
+              $7, v.quantity::numeric, v.value_delta::numeric, $8
+       FROM unnest($9::text[], $10::uuid[], $11::uuid[], $12::uuid[], $13::uuid[], $14::text[], $15::text[])
+            WITH ORDINALITY AS v(origin_source_type, origin_source_id, origin_source_line_id, grn_id, grn_line_id, quantity, value_delta, ord)
+       ORDER BY v.ord
+       ON CONFLICT (
+         company_id, event_type, warehouse_id, item_id, origin_source_type, origin_source_id,
+         COALESCE(origin_source_line_id, '00000000-0000-0000-0000-000000000000'::uuid),
+         source_type, source_id,
+         COALESCE(source_line_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       )
+       DO NOTHING;`,
+      [
+        companyId,
+        common.itemId,
+        common.warehouseId,
+        common.sourceType,
+        common.sourceId,
+        common.sourceLineId,
+        common.eventType,
+        common.referenceMovementId,
+        rows.map((r) => r.originSourceType),
+        rows.map((r) => r.originSourceId),
+        rows.map((r) => r.originSourceLineId),
+        rows.map((r) => r.grnId),
+        rows.map((r) => r.grnLineId),
+        rows.map((r) => String(r.quantity)),
+        rows.map((r) => String(r.valueDelta)),
+      ]
+    );
+  }
+
   async applyPpvToMaSourceBalance(
     companyId: string,
     id: string,

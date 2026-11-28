@@ -429,6 +429,13 @@ function createValuation7bHarness() {
     }),
   };
 
+  valuationRepo.updateMaSourceBalanceQuantitiesBulk = vi.fn(async (companyId: string, rows: any[], ex: any) => {
+    for (const r of rows) await valuationRepo.updateMaSourceBalanceQuantities(companyId, r.id, r.remainingQty, r.consumedQty, ex, r.remainingValue, r.consumedValue);
+  });
+  valuationRepo.createMaSourceEventsMulti = vi.fn(async (companyId: string, common: any, rows: any[], ex: any) => {
+    for (const r of rows) await valuationRepo.createMaSourceEvent(companyId, { ...common, ...r }, ex);
+  });
+
   const stockRepo: any = {
     ensureBalanceRow: vi.fn(async (companyId: string, warehouseId: string, itemId: string) => {
       const k = key(companyId, warehouseId, itemId);
