@@ -4,11 +4,11 @@
 
 ## Summary
 
-- **Total Mounted Endpoints**: 294
-- **Mounted Route Modules Parsed**: 18
+- **Total Mounted Endpoints**: 303
+- **Mounted Route Modules Parsed**: 19
 - **RBAC Permission-Guarded (`PERMISSIONS.*`)**: 286
-- **Platform Admin-Only (`requirePlatformAdmin`)**: 3
-- **Authenticated Self-Service (`requireAuth` only)**: 2
+- **Platform Admin-Only (`requirePlatformAdmin`)**: 6
+- **Authenticated Self-Service (`requireAuth` only)**: 8
 - **Public Endpoints (`requireAuth: false`)**: 3 (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`)
 - **Conditional Env-Gated Endpoints**: 2 (`ENABLE_TENANT_DEMO=1`, non-production only)
 
@@ -194,6 +194,15 @@
 | `/api/fleet` | `PATCH` | `/api/fleet/vehicles/:id` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `GET` | `/api/fleet/vehicles/:id/maintenance` | `true` | `PERMISSIONS.FLEET_READ` | `src/server/routes/fleetRoutes.ts` |
 | `/api/fleet` | `POST` | `/api/fleet/vehicles/:id/maintenance` | `true` | `PERMISSIONS.FLEET_MANAGE` | `src/server/routes/fleetRoutes.ts` |
+| `/api/groups` | `GET` | `/api/groups` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `POST` | `/api/groups` | `true` | `requirePlatformAdmin` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `GET` | `/api/groups/:groupId` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `PUT` | `/api/groups/:groupId` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `POST` | `/api/groups/:groupId/companies` | `true` | `requirePlatformAdmin` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `DELETE` | `/api/groups/:groupId/companies/:companyId` | `true` | `requirePlatformAdmin` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `POST` | `/api/groups/:groupId/users` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `DELETE` | `/api/groups/:groupId/users/:userId` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
+| `/api/groups` | `PUT` | `/api/groups/:groupId/users/:userId` | `true` | `AUTH_SELF_SERVICE (requireAuth only)` | `src/server/routes/groupRoutes.ts` |
 | `/api/inventory` | `POST` | `/api/inventory/adjustments` | `true` | `PERMISSIONS.INVENTORY_VALUATION_ADJUST` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/balances` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/routes/inventoryRoutes.ts` |
 | `/api/inventory` | `GET` | `/api/inventory/cost-adjustments` | `true` | `PERMISSIONS.INVENTORY_READ` | `src/server/inventory/inventoryValuationRoutes.ts` |

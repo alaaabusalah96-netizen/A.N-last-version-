@@ -39,6 +39,13 @@ const ALLOWED_PUBLIC_ENDPOINTS = new Set([
 const ALLOWED_SELF_SERVICE_ENDPOINTS = new Set([
   'GET /api/auth/me',
   'POST /api/auth/logout-all',
+  // Company groups: group membership is enforced in CompanyGroupService (not a company permission)
+  'GET /api/groups',
+  'GET /api/groups/:groupId',
+  'PUT /api/groups/:groupId',
+  'POST /api/groups/:groupId/users',
+  'PUT /api/groups/:groupId/users/:userId',
+  'DELETE /api/groups/:groupId/users/:userId',
 ]);
 
 const MATRIX_DOC_REL = 'docs/security/endpoint-permission-matrix.md';

@@ -483,6 +483,20 @@
     "table": "inv_stocktake_lines",
     "scope": "tenant",
     "reason": "Stocktake lines: system quantity snapshot and counted quantity per item"
+  },
+  {
+    "table": "company_groups",
+    "scope": "global",
+    "reason": "Platform-level company group catalog (groups, member companies, group users); tenant data stays under per-company RLS"
+  },
+  {
+    "table": "company_group_members",
+    "scope": "shared",
+    "reason": "Platform-level company group catalog (groups, member companies, group users); tenant data stays under per-company RLS"
+  },
+  {
+    "table": "company_group_users",
+    "scope": "global",
+    "reason": "Platform-level company group catalog (groups, member companies, group users); tenant data stays under per-company RLS"
   }
 ]
-

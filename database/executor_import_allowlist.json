@@ -50,5 +50,9 @@
   {
     "file": "src/server/config-platform/configRepository.ts",
     "reason": "Configuration platform repository data access (Wave A) — same pattern as existing repository allowlist entries"
+  },
+  {
+    "file": "src/server/org/companyGroupService.ts",
+    "reason": "Platform-level company group catalog; uses the default executor like the other org services"
   }
 ]

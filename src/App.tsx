@@ -48,6 +48,9 @@ const CompanySettingsPanel = lazy(() =>
     default: m.CompanySettingsPanel,
   }))
 );
+const CompanyGroupsPanel = lazy(() =>
+  import('./components/org/CompanyGroupsPanel.js').then((m) => ({ default: m.CompanyGroupsPanel }))
+);
 const OrgUnitsPanel = lazy(() =>
   import('./components/org/OrgUnitsPanel.js').then((m) => ({ default: m.OrgUnitsPanel }))
 );
@@ -82,7 +85,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'sales' | 'cash' | 'fleet' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'config_platform' | 'config_definitions'>('companies');
+  const [activeNav, setActiveNav] = useState<'companies' | 'accounting' | 'inventory' | 'purchasing' | 'sales' | 'cash' | 'fleet' | 'users' | 'roles' | 'company_settings' | 'custom_fields' | 'org_units' | 'groups' | 'config_platform' | 'config_definitions'>('companies');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     return window.matchMedia('(min-width: 1024px)').matches;
@@ -133,14 +136,14 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     if (canAccessNav(activeNav, currentUser.role, currentUser.permissions)) return;
-    const order: Array<typeof activeNav> = ['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'];
+    const order: Array<typeof activeNav> = ['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'groups', 'company_settings', 'custom_fields'];
     const first = order.find((k) => canAccessNav(k, currentUser.role, currentUser.permissions));
     if (first) setActiveNav(first);
   }, [currentUser, activeNav]);
 
   const noSectionAllowed =
     !!currentUser &&
-    !(['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'company_settings', 'custom_fields'] as const).some((k) =>
+    !(['companies', 'accounting', 'inventory', 'purchasing', 'sales', 'cash', 'fleet', 'users', 'roles', 'org_units', 'groups', 'company_settings', 'custom_fields'] as const).some((k) =>
       canAccessNav(k, currentUser.role, currentUser.permissions)
     );
 
@@ -238,6 +241,8 @@ export default function App() {
                 ? 'المستخدمون'
                 : activeNav === 'roles'
                 ? 'الأدوار والصلاحيات'
+                : activeNav === 'groups'
+                ? 'مجموعة الشركات'
                 : activeNav === 'org_units'
                 ? 'الوحدات التنظيمية'
                 : activeNav === 'config_platform'
@@ -267,6 +272,8 @@ export default function App() {
                 ? 'إدارة الحسابات وصلاحيات الوصول'
                 : activeNav === 'roles'
                 ? 'إدارة أدوار الشركة ومصفوفة الصلاحيات'
+                : activeNav === 'groups'
+                ? 'ربط عدة شركات في مجموعة وصلاحيات مستوى المجموعة'
                 : activeNav === 'org_units'
                 ? 'الفروع والإدارات ومراكز التكلفة'
                 : activeNav === 'config_platform'
@@ -316,6 +323,8 @@ export default function App() {
               <UsersAdminWorkspace userRole={currentUser.role} />
             ) : activeNav === 'roles' ? (
               <RolesPanel userRole={currentUser.role} />
+            ) : activeNav === 'groups' ? (
+              <CompanyGroupsPanel userRole={currentUser.role} />
             ) : activeNav === 'org_units' ? (
               <OrgUnitsPanel userRole={currentUser.role} />
             ) : activeNav === 'config_platform' ? (
