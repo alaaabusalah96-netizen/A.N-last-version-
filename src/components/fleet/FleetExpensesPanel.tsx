@@ -338,7 +338,7 @@ export function FleetExpensesPanel({ companyId, vehicles, can }: Props) {
                 return (
                   <li key={c.id} className="flex items-center justify-between gap-2">
                     <span>{c.nameAr} ({c.code}) - حساب المصروف: {a ? `${a.code} ${a.nameAr}` : 'غير معروض'}{c.isActive ? '' : ' - معطّلة'}</span>
-                    <button type="button" onClick={() => setEditingCat(c)} className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer">تعديل</button>
+                    <button type="button" onClick={() => { setShowCat(false); setEditingCat(c); }} className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer">تعديل</button>
                   </li>
                 );
               })}
