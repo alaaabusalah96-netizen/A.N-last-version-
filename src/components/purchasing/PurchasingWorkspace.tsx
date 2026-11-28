@@ -2659,7 +2659,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
       {/* Supplier Cash Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl p-6 flex flex-col gap-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl p-6 flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-emerald-400" />
@@ -2694,6 +2694,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
 
               <div data-testid="supplier-payment-lines" className="flex flex-col gap-2">
                 <label className="block text-xs font-semibold text-slate-300">فواتير المورد المراد سدادها * (حتى 100 فاتورة)</label>
+                <div data-testid="payment-lines-scroll" className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
                 {payLines.map((ln, idx) => {
                   const usedElsewhere = new Set(payLines.filter((_, j) => j !== idx).map((l) => l.invoiceId));
                   const opts = (paySupplierId
@@ -2743,6 +2744,7 @@ export function PurchasingWorkspace({ userRole }: PurchasingWorkspaceProps) {
                     </div>
                   );
                 })}
+                </div>
                 <div className="flex items-center justify-between text-xs">
                   <button
                     type="button"
